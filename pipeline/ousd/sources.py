@@ -1,0 +1,110 @@
+"""Clients for the upstream data sources: JSON-RPC, Blockscout and Bridge."""
+
+from collections.abc import Iterator
+from decimal import Decimal
+from typing import Any
+
+from ousd.chains import DECIMALS
+from ousd.decode import TRANSFER_TOPIC, Transfer, decode_blockscout_log, decode_rpc_log
+from ousd.http import PoliteClient
+
+TOTAL_SUPPLY_SELECTOR = "0x18160ddd"
+BLOCKSCOUT_PAGE_SIZE = 1000
+
+
+class RpcError(RuntimeError):
+    """The node answered with a JSON-RPC error."""
+
+
+class RpcClient:
+    def __init__(self, http: PoliteClient, url: str) -> None:
+        self._http = http
+        self._url = url
+
+    def _call(self, method: str, params: list[Any]) -> Any:
+        payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        body = self._http.request_json("POST", self._url, json=payload)
+        if "error" in body:
+            raise RpcError(f"{method} {params}: {body['error']}")
+        return body["result"]
+
+    def tip(self) -> int:
+        return int(self._call("eth_blockNumber", []), 16)
+
+    def finalized(self) -> int:
+        return int(self._call("eth_getBlockByNumber", ["finalized", False])["number"], 16)
+
+    def block_hash(self, number: int) -> str | None:
+        block = self._call("eth_getBlockByNumber", [hex(number), False])
+        return block["hash"].lower() if block else None
+
+    def transfers(self, token: str, from_block: int, to_block: int) -> list[Transfer]:
+        logs = self._call(
+            "eth_getLogs",
+            [
+                {
+                    "address": token,
+                    "topics": [TRANSFER_TOPIC],
+                    "fromBlock": hex(from_block),
+                    "toBlock": hex(to_block),
+                }
+            ],
+        )
+        return [decode_rpc_log(entry) for entry in logs if not entry.get("removed")]
+
+    def total_supply(self, token: str, block: int | str) -> int:
+        """Read totalSupply() at a block number, or at a block hash (EIP-1898).
+
+        A hash pins the read to one fork, so it cannot land on a competing block.
+        """
+        at = hex(block) if isinstance(block, int) else {"blockHash": block}
+        return int(self._call("eth_call", [{"to": token, "data": TOTAL_SUPPLY_SELECTOR}, at]), 16)
+
+
+class BlockscoutClient:
+    def __init__(self, http: PoliteClient, url: str) -> None:
+        self._http = http
+        self._url = url
+
+    def _page(self, token: str, from_block: int, to_block: int) -> list[Transfer]:
+        params = {
+            "module": "logs",
+            "action": "getLogs",
+            "fromBlock": from_block,
+            "toBlock": to_block,
+            "address": token,
+            "topic0": TRANSFER_TOPIC,
+        }
+        body = self._http.request_json("GET", self._url, params=params)
+        if body["status"] != "1":
+            if body["message"].startswith("No logs found"):
+                return []
+            raise RuntimeError(f"Blockscout error for {params}: {body}")
+        return [decode_blockscout_log(entry) for entry in body["result"]]
+
+    def pages(
+        self, token: str, from_block: int, to_block: int
+    ) -> Iterator[tuple[list[Transfer], int]]:
+        """Yield (transfers, complete_through_block) until to_block is covered.
+
+        A full page may stop part way through its last block, so that block is dropped and
+        requested again as the start of the next page. No row is lost or returned twice.
+        """
+        start = from_block
+        while True:
+            rows = self._page(token, start, to_block)
+            if len(rows) < BLOCKSCOUT_PAGE_SIZE:
+                yield rows, to_block
+                return
+            last_block = max(row.block_number for row in rows)
+            if last_block == start:
+                # Paging by block cannot get past this, and truncating would lose rows.
+                raise RuntimeError(f"block {start} alone fills a Blockscout page")
+            yield [row for row in rows if row.block_number < last_block], last_block - 1
+            start = last_block
+
+
+def bridge_total_base_units(http: PoliteClient, url: str) -> int:
+    """Bridge's reported on-chain total, converted from a decimal string without floats."""
+    amount = Decimal(http.request_json("GET", url)["total_onchain_amount"])
+    return int(amount.scaleb(DECIMALS))
