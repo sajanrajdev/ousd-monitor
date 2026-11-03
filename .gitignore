@@ -13,3 +13,6 @@ dbt_packages/
 logs/
 .dagster/
 data/
+dist/
+.pytest_cache/
+.ruff_cache/

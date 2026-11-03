@@ -1,0 +1,31 @@
+[project]
+name = "ousd-monitor"
+version = "0.1.0"
+description = "Ingests and reconciles Open USD (OUSD) transfers from raw chain data."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = ["duckdb>=1.1", "httpx>=0.27"]
+
+[project.scripts]
+ousd = "ousd.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pipeline/ousd"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
