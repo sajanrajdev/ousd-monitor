@@ -16,15 +16,16 @@ Row contract, so the store and everything after it work on Solana unchanged:
 import logging
 import os
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, NamedTuple
 
 from ousd.chains import DECIMALS
 from ousd.decode import ZERO_ADDRESS, Transfer
-from ousd.http import PoliteClient
+from ousd.http import HttpError, PoliteClient
 from ousd.ingest import SyncResult
+from ousd.reconcile import ChainReconciliation
 from ousd.sources import _parse
 from ousd.store import Store, StoreConflict
 
@@ -46,10 +47,17 @@ REREAD_SLOTS = 2_000
 RPC_INTERVAL = 0.125
 # A raised constant is a deliberate change: a newer version errors loudly (-32015).
 MAX_TRANSACTION_VERSION = 1
-# Retries of a node that is behind the head (-32016) or doesn't have a signature yet.
+# Retries of a node that is behind the head (-32016), doesn't have a signature yet, or pins
+# supply below the cursor.
 RETRIES = 5
 RETRY_PAUSE = 2.0
 MIN_CONTEXT_SLOT_NOT_REACHED = -32016
+# Longest tail a check syncs, about 11 hours. More is a backfill, which would hold the DuckDB lock
+# for hours without warning, so it is left to `ousd sync`.
+MAX_TAIL_SLOTS = 100_000
+# Furthest a balance read may sit below the cursor, about a minute. A comparison stops at the read's
+# slot, so anything older would leave movements after it unchecked and still report a match.
+MAX_READ_LAG_SLOTS = 150
 # Longest provider text kept in an error, after scrubbing.
 _DETAIL_LIMIT = 200
 # Offset of the account type byte in a Token-2022 account. 2 is a mint, 3 a token account.
@@ -75,6 +83,16 @@ class SolanaRpcError(RuntimeError):
     def __init__(self, code: int, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+def _base_units(amount: Any) -> int:
+    """An amount from a raw `amount` field, which the RPC sends as a string of digits.
+
+    `int` alone would cut a JSON 100.9 to 100, and take a sign, spaces or underscores.
+    """
+    if not isinstance(amount, str) or not amount.isascii() or not amount.isdigit():
+        raise ValueError("an amount is not a string of digits")
+    return int(amount)
 
 
 def _flatten(transaction: dict[str, Any]) -> list[dict[str, Any]]:
@@ -104,7 +122,7 @@ def _balances(
             raise SolanaDataError(f"{signature}: token account {account} has no owner in {key}")
         if account in found:
             raise SolanaDataError(f"{signature}: token account {account} twice in {key}")
-        found[account] = (str(owner), int(entry["uiTokenAmount"]["amount"]))
+        found[account] = (str(owner), _base_units(entry["uiTokenAmount"]["amount"]))
     return found
 
 
@@ -218,7 +236,7 @@ def _decode(transaction: dict[str, Any], mint: str) -> list[Transfer]:
             continue
         kind = parsed["type"]
         info = parsed["info"]
-        value = int(info["tokenAmount"]["amount"])
+        value = _base_units(info["tokenAmount"]["amount"])
         if kind == "mintToChecked":
             source, destination = None, str(info["account"])
         elif kind == "burnChecked":
@@ -300,10 +318,14 @@ class SolanaRpc:
         if self._parse(f"{method} response", lambda: "error" in body):
             error = self._parse(f"{method} response", lambda: body["error"])
             code = self._parse(f"{method} error code", lambda: int(error["code"]))
-            # Control characters go first, so none can split a key the scrub would then miss.
-            text = "".join(c for c in f"{method}: {code} {error}" if c.isprintable())
-            raise SolanaRpcError(code, self._http.scrub(text, self._url)[:_DETAIL_LIMIT])
+            raise SolanaRpcError(code, self.scrub(f"{method}: {code} {error}"))
         return self._parse(f"{method} response", lambda: body["result"])
+
+    def scrub(self, text: str) -> str:
+        """Text that may hold provider data, without the URL or its key, and cut to length."""
+        # Control characters go first, so none can split a key the scrub would then miss.
+        printable = "".join(c for c in text if c.isprintable())
+        return self._http.scrub(printable, self._url)[:_DETAIL_LIMIT]
 
     def _parse[T](self, what: str, read: Callable[[], T]) -> T:
         try:
@@ -374,7 +396,9 @@ class SolanaRpc:
         def read() -> SlotReading:
             if int(result["value"]["decimals"]) != DECIMALS:
                 raise ValueError("unexpected decimals")
-            return SlotReading(int(result["context"]["slot"]), int(result["value"]["amount"]))
+            return SlotReading(
+                int(result["context"]["slot"]), _base_units(result["value"]["amount"])
+            )
 
         return self._parse("getTokenSupply result", read)
 
@@ -399,7 +423,9 @@ class SolanaRpc:
                 if parsed["type"] != "account" or info["mint"] != mint:
                     raise ValueError("a row is not a token account of this mint")
                 owner = str(info["owner"])
-                balances[owner] = balances.get(owner, 0) + int(info["tokenAmount"]["amount"])
+                balances[owner] = balances.get(owner, 0) + _base_units(
+                    info["tokenAmount"]["amount"]
+                )
             return BalanceSnapshot(int(result["context"]["slot"]), balances)
 
         return self._parse("getProgramAccounts result", read)
@@ -535,3 +561,183 @@ def _refuse_rekey(
                 f"{chain.name}: {tx_hash} is stored at {sorted(positions)} but now decodes to "
                 f"{sorted(new[tx_hash])}. The transaction index moved"
             )
+
+
+@dataclass(frozen=True)
+class Unchecked:
+    """Solana couldn't be checked. Nothing is proven wrong, and nothing is proven right.
+
+    Never a pass, and never written to `reconciliations`. Unit 1.4 moves it to `reconcile.py`.
+    """
+
+    chain: str
+    reason: str
+
+
+class BalanceReading(NamedTuple):
+    owner: str
+    slot: int
+    amount: int  # Base units.
+
+
+class BalanceDifference(NamedTuple):
+    owner: str
+    onchain: int  # Base units, from the read.
+    stored: int  # Base units, received minus sent in `transfers`.
+
+
+@dataclass(frozen=True)
+class BalanceCheck:
+    chain: str
+    slot: int
+    wallets_checked: int
+    differences: tuple[BalanceDifference, ...]
+
+    @property
+    def matched(self) -> bool:
+        return not self.differences
+
+
+class _NotReady(Exception):
+    """The store isn't in a state a check should sync from. Its text is the Unchecked reason."""
+
+
+# Only what says "couldn't check". A StoreConflict is proven disagreement and a bug is a bug, so
+# both propagate rather than read as unchecked.
+_CANT_CHECK = (HttpError, SolanaRpcError, SolanaDataError, _NotReady)
+
+
+def _unchecked(chain: SolanaChain, rpc: SolanaRpc, error: Exception) -> Unchecked:
+    # Errors built here can quote provider fields, such as a signature, that no scrub has seen.
+    return Unchecked(chain.name, rpc.scrub(str(error)))
+
+
+def _require_cursor(chain: SolanaChain, store: Store) -> int:
+    cursor = store.synced_through(chain.name)
+    if cursor is None:
+        raise _NotReady(f"{chain.name}: nothing synced yet, run sync first")
+    return cursor
+
+
+def _require_short_tail(chain: SolanaChain, cursor: int, slot: int) -> None:
+    if slot - cursor > MAX_TAIL_SLOTS:
+        raise _NotReady(
+            f"{chain.name}: slot {slot} is {slot - cursor} past the cursor, more than a check "
+            f"syncs ({MAX_TAIL_SLOTS}), run sync first"
+        )
+
+
+def _require_recent_read(chain: SolanaChain, cursor: int, slot: int) -> None:
+    if cursor - slot > MAX_READ_LAG_SLOTS:
+        raise _NotReady(
+            f"{chain.name}: the balance read at slot {slot} is {cursor - slot} below the cursor, "
+            f"more than a check compares ({MAX_READ_LAG_SLOTS}), read again"
+        )
+
+
+def _pin_supply_and_sync(chain: SolanaChain, rpc: SolanaRpc, store: Store) -> SlotReading:
+    """Read supply, then sync through the slot that reading reports, which is what makes the
+    comparison exact: `getTokenSupply` can't be read at a past slot."""
+    cursor = _require_cursor(chain, store)
+    # Measured before the read, so a long tail costs one request. The pin is held to it as well.
+    _require_short_tail(chain, cursor, rpc.finalized_slot())
+
+    def read() -> SlotReading | None:
+        reading = rpc.token_supply(chain.mint)
+        return reading if reading.slot >= cursor else None
+
+    pin = _retry(rpc, read, False)
+    if pin is None:
+        # Recording it would fail the gate, which needs the row's block to equal the cursor.
+        raise _NotReady(f"{chain.name}: the supply pin stayed below the cursor, slot {cursor}")
+    _require_short_tail(chain, cursor, pin.slot)
+    sync_solana(chain, rpc, store, through_slot=pin.slot)
+    return pin
+
+
+def _read_balances_and_sync(chain: SolanaChain, rpc: SolanaRpc, store: Store) -> BalanceSnapshot:
+    """Read every wallet, then sync through the slot the read reports.
+
+    A read just below the cursor needs no retry, unlike supply: its rows are stored, and a
+    comparison only looks at or below the read's slot. It can't see movements after that slot, so a
+    miss among them waits for the next run. A read further below than `MAX_READ_LAG_SLOTS` is not
+    compared at all.
+    """
+    cursor = _require_cursor(chain, store)
+    _require_short_tail(chain, cursor, rpc.finalized_slot())
+    snapshot = rpc.token_accounts(chain.mint)
+    _require_recent_read(chain, cursor, snapshot.slot)
+    # Nobody holding anything can't be told from a refused or truncated answer, and would compare
+    # nothing, so it can't be a match.
+    if not any(snapshot.balances.values()):
+        raise SolanaDataError(f"{chain.name}: no token account holds a balance at {snapshot.slot}")
+    _require_short_tail(chain, cursor, snapshot.slot)
+    sync_solana(chain, rpc, store, through_slot=snapshot.slot)
+    return snapshot
+
+
+def reconcile_solana(
+    chain: SolanaChain, rpc: SolanaRpc, store: Store
+) -> ChainReconciliation | Unchecked:
+    """Compare events with the supply at a pinned slot, to the base unit, and record it.
+
+    A difference after a complete sync is a real mismatch. Anything that stops the steps before it
+    is Unchecked, which records nothing. A supply match says nothing about transfers, which is what
+    `check_all_balances` is for.
+    """
+    try:
+        pin = _pin_supply_and_sync(chain, rpc, store)
+    except _CANT_CHECK as error:
+        return _unchecked(chain, rpc, error)
+    minted, burned = store.minted_and_burned(chain.name, pin.slot)
+    result = ChainReconciliation(chain.name, pin.slot, minted, burned, pin.amount)
+    store.record_reconciliation(chain.name, pin.slot, minted, burned, pin.amount, result.matched)
+    return result
+
+
+def read_sampled_balances(
+    chain: SolanaChain, rpc: SolanaRpc, store: Store, owners: Sequence[str] | None
+) -> list[BalanceReading] | Unchecked:
+    """On-chain balances of the given owners, or of every owner in the read for None, all at one
+    slot, with the store synced through it. An owner with no token account reads 0.
+
+    None can't show a wallet whose accounts are closed, or one a short answer left out. Only
+    `check_all_balances` also looks at the wallets in the rows.
+    """
+    try:
+        # Before the shortcut, so an unsynced chain is never an empty success.
+        _require_cursor(chain, store)
+        if owners is not None and not owners:
+            return []
+        snapshot = _read_balances_and_sync(chain, rpc, store)
+    except _CANT_CHECK as error:
+        return _unchecked(chain, rpc, error)
+    wanted = sorted(snapshot.balances) if owners is None else owners
+    return [
+        BalanceReading(owner, snapshot.slot, snapshot.balances.get(owner, 0)) for owner in wanted
+    ]
+
+
+def check_all_balances(
+    chain: SolanaChain, rpc: SolanaRpc, store: Store
+) -> BalanceCheck | Unchecked:
+    """Compare every wallet's balance with received minus sent at the read's slot.
+
+    This catches a missed transfer between two wallets, which supply can't see, unless a later
+    movement exactly reverses it. Rows keep a token account's owner at the time of the movement,
+    so an owner change also fails here, and stays a fail until someone looks (S14). A wallet in
+    the rows but not in the read must net to 0, since a closed account has no entry. Nothing is
+    recorded, because unit 1.4 adds the table.
+    """
+    try:
+        snapshot = _read_balances_and_sync(chain, rpc, store)
+    except _CANT_CHECK as error:
+        return _unchecked(chain, rpc, error)
+    wallets = sorted(snapshot.balances.keys() | set(store.wallets(chain.name, snapshot.slot)))
+    stored = store.balances_at(chain.name, wallets, snapshot.slot)
+    differences = tuple(
+        BalanceDifference(wallet, snapshot.balances.get(wallet, 0), stored[wallet])
+        for wallet in wallets
+        if snapshot.balances.get(wallet, 0) != stored[wallet]
+    )
+    return BalanceCheck(chain.name, snapshot.slot, len(wallets), differences)
