@@ -1,4 +1,5 @@
 import { render } from "@testing-library/react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { KpiRow } from "@/components/kpi-row";
 import { loadDataset } from "@/lib/dataset/load";
@@ -33,11 +34,49 @@ describe("the KPI row", () => {
       "Everyday velocity",
     ]);
     for (const item of items) {
-      expect(item.querySelector(".status-chip")).not.toBeNull();
-      expect(item.querySelector("a")!.getAttribute("href")).toContain("/methodology/#");
+      expect(item.querySelector(".status-chip")!.closest("details")).toBeNull();
+      expect(item.querySelector("[data-kpi-value]")!.closest("details")).toBeNull();
+      const panel = item.querySelector(".info-popover__panel")!;
+      expect(panel.querySelector("a")!.getAttribute("href")).toContain("/methodology/#");
+      expect(panel.textContent).toContain("As of ");
     }
     expect(values(container)["Total supply"]).toBe("$13.1B");
     expect(container.textContent).not.toMatch(/active wallets/i);
+  });
+
+  it("keeps each note in its popover, with the words and the name to reach it", () => {
+    const dataset = load();
+    const { container } = render(<KpiRow kpis={dataset.summary.kpis} state={dataset.state} />);
+    const placed = [...container.querySelectorAll("dl > div")][1];
+    expect(placed.querySelector("summary")!.getAttribute("aria-label")).toBe("About: Placed share");
+    expect(placed.querySelector(".info-popover__panel")!.textContent).toContain(
+      "Share of supply that has stayed in large unlabeled wallets for the placed window.",
+    );
+    expect(placed.querySelector("details")!.getAttribute("name")).toBe("info");
+    // Parsed as verify-output parses a built page, so the noscript's children are elements.
+    const html = renderToStaticMarkup(<KpiRow kpis={dataset.summary.kpis} state={dataset.state} />);
+    const link = new DOMParser()
+      .parseFromString(html, "text/html")
+      .querySelectorAll("dl > div")[1]
+      .querySelector("noscript a")!;
+    expect(link.getAttribute("href")).toBe("/methodology/#placed-supply");
+  });
+
+  it("repeats no date in its visible line when the as-of line above covers it", () => {
+    const dataset = load();
+    const { container } = render(<KpiRow kpis={dataset.summary.kpis} state={dataset.state} />);
+    const line = container.querySelector(".chart-card__meta")!.textContent!;
+    expect(line).toContain("Across Tempo, Ethereum, Base, Solana.");
+    expect(line).not.toContain("As of");
+  });
+
+  it("shows its own date if it ever differs from the line above, as the line wouldn't cover it", () => {
+    const dataset = load();
+    const days = dataset.summary.kpis.map((row) => ({ ...row, day: "2026-10-01" }));
+    const { container } = render(<KpiRow kpis={days} state={dataset.state} />);
+    expect(container.querySelector(".chart-card__meta")!.textContent).toContain(
+      "As of 1 Oct 2026 UTC",
+    );
   });
 
   it("floors the placed share to the verdict's whole percent, with chains at different days", () => {

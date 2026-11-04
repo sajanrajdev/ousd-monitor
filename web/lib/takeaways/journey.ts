@@ -15,6 +15,14 @@ export function scopeText(chains: ChainName[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
+// A short heading can be cropped from its card, so below all four chains it names the ones it covers.
+export function scopedHeading(chains: ChainName[], text: string): string {
+  if (REQUIRED_CHAINS.every((chain) => chains.includes(chain))) return text;
+  const opensWithName = Object.values(CHAIN_NAMES).some((name) => text.startsWith(name));
+  const rest = opensWithName ? text : `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
+  return `On ${scopeText(chains)}, ${rest}`;
+}
+
 function sentence(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -32,6 +40,18 @@ export function journeyTakeaway(rows: JourneyRow[], definitions: Definitions): s
   const minimum = formatCompact(definitions.placed_min_base_units);
   return sentence(
     `${lead} of supply on ${scopeText(all.chains)} (${share}) has stayed in wallets of ${minimum} or more for at least ${definitions.placed_days} days.`,
+  );
+}
+
+// The same finding as the takeaway, short enough to head a card and a finding link.
+export function journeyHeading(rows: JourneyRow[], definitions: Definitions): string {
+  const all = allChainJourney(rows);
+  const share = all && floorBps(BigInt(all.placed_supply), BigInt(all.total_supply));
+  if (!all || share === null) return UNKNOWN_TEXT;
+  const minimum = formatCompact(definitions.placed_min_base_units);
+  return scopedHeading(
+    all.chains,
+    `${formatBps(share)} of supply stayed ${definitions.placed_days}+ days in ${minimum}-plus wallets.`,
   );
 }
 

@@ -5,17 +5,21 @@ import { locateDataset } from "@/lib/dataset/load";
 import { TOKEN_CONTRACTS } from "@/lib/definitions";
 import { expectedFromDataset, verifyOutput } from "@/scripts/verify-output.mjs";
 import { at, copySample, editJson, plantFile, releaseGrade, tempDir } from "./dataset-helpers";
+import {
+  PLANTED_KPI_SCOPE,
+  PLANTED_LEGEND,
+  PLANTED_TRUST_DETAIL,
+  PLANTED_VERDICT,
+  plantedCard,
+  plantedFindings,
+  plantedHeadline,
+  plantedKpis,
+  plantedNotes,
+} from "./planted-first-screen";
 
 const LINE = "Independent. Not affiliated with Open Standard or Bridge.";
 const BLOCKED = JSON.parse(readFileSync("scripts/blocked-names.json", "utf8")) as string[];
-const CARD = `<section class="chart-card" data-frame="Sample"><div class="chart-card__head"><h2>T</h2>
-  <span class="status-chip" data-kind="fact">F</span>
-  <details class="info-popover" name="info"><summary aria-label="About: T"></summary>
-  <div class="info-popover__panel"><p>Source: S</p><a href="/methodology/#velocity">Definition</a></div></details></div>
-  <table></table>
-  <p class="chart-card__meta">As of <time datetime="2026-11-03">3 Nov</time>
-  · <strong>Sample</strong></p>
-  <noscript><p class="chart-card__source-note">Source: S · <a href="/methodology/#velocity">Definition</a></p></noscript></section>`;
+const CARD = plantedCard("Sample");
 
 const STALE_NOTE = "Data from 4 Nov. Nothing newer has reached this page.";
 const STALE_TRUST = "Last reconciled 4 Nov. Nothing newer has reached this page.";
@@ -34,6 +38,9 @@ const sampleExpected = {
   freshness: "stale",
   asOfLine: { fresh: null, stale: STALE_NOTE },
   trustLine: { fresh: "Not reconciled", stale: "Not reconciled" },
+  verdict: PLANTED_VERDICT,
+  kpiScope: PLANTED_KPI_SCOPE,
+  essentialNotes: [] as { kind: string; chain?: string }[],
 };
 
 const realExpected = {
@@ -41,6 +48,7 @@ const realExpected = {
   kind: "real",
   frameWord: null,
   trustLine: { fresh: null, stale: STALE_TRUST },
+  verdict: { ...PLANTED_VERDICT, textVisible: false },
 };
 
 const freshRealExpected = {
@@ -65,10 +73,11 @@ function page(
     <a href="https://example.com/r" rel="noopener noreferrer">Reports</a></footer></body></html>`;
 }
 
-const MAIN = `<main><section data-section="verdict">
+const MAIN = `<main><section data-section="verdict">${plantedHeadline()}
   <span class="status-chip" data-kind="opinion">Sample, not a finding</span><p>${STALE_NOTE}</p></section>
-  <section data-section="kpi-row"><strong>Sample</strong></section>
-  <section data-section="trust-strip">Not reconciled</section>${CARD}</main>`;
+  <section data-section="kpi-row"><strong>Sample</strong>${plantedKpis()}</section>
+  <section data-section="trust-strip">Not reconciled${PLANTED_TRUST_DETAIL}</section>
+  ${plantedFindings("Sample")}${PLANTED_LEGEND}${CARD}</main>`;
 
 function site(overrides: { main?: string; methodology?: string; extra?: [string, string][] } = {}) {
   const dir = tempDir();
@@ -88,10 +97,13 @@ function mainWith(body: string) {
 
 const realAttrs =
   'data-dataset-kind="real" data-dataset-version="20261104T060000Z" data-freshness="stale"';
-const REAL_MAIN = `<main><section data-section="verdict"><p>${STALE_NOTE}</p></section>
-  <section data-section="trust-strip">${STALE_TRUST}</section></main>`;
-const FRESH_MAIN = `<main><section data-section="verdict"><p>Data as of 3 Nov 2026 UTC.</p><p>${STALE_NOTE}</p></section>
-  <section data-section="trust-strip">${FRESH_TRUST} ${STALE_TRUST}</section></main>`;
+const REAL_HEADLINE = plantedHeadline(realExpected.verdict);
+const REAL_REST = `<section data-section="kpi-row">${plantedKpis()}</section>
+  ${plantedFindings(null)}${PLANTED_LEGEND}${plantedCard(null)}`;
+const REAL_MAIN = `<main><section data-section="verdict">${REAL_HEADLINE}<p>${STALE_NOTE}</p></section>
+  <section data-section="trust-strip">${STALE_TRUST}${PLANTED_TRUST_DETAIL}</section>${REAL_REST}</main>`;
+const FRESH_MAIN = `<main><section data-section="verdict">${REAL_HEADLINE}<p>Data as of 3 Nov 2026 UTC.</p><p>${STALE_NOTE}</p></section>
+  <section data-section="trust-strip">${FRESH_TRUST} ${STALE_TRUST}${PLANTED_TRUST_DETAIL}</section>${REAL_REST}</main>`;
 
 function realPage(body: string) {
   return page(body, realAttrs, "Open USD Monitor", "").replace(
@@ -758,11 +770,10 @@ describe("verifyOutput", () => {
 
 describe('"Our reading" outside the verdict chip', () => {
   it("is fine in the verdict's accordion heading, on a framed page", () => {
-    const heading = `<main><section data-section="verdict">
-      <span class="status-chip" data-kind="opinion">Sample, not a finding</span>
-      <p>${STALE_NOTE}</p><h3>Our reading</h3></section>
-      <section data-section="kpi-row"><strong>Sample</strong></section>
-      <section data-section="trust-strip">Not reconciled</section></main>`;
+    const heading = MAIN.replace(
+      `<p>${STALE_NOTE}</p></section>`,
+      `<p>${STALE_NOTE}</p><h3>Our reading</h3></section>`,
+    );
     expect(verifyOutput(site({ main: page(heading) }), sampleExpected)).toEqual([]);
   });
 
@@ -781,6 +792,237 @@ describe('"Our reading" outside the verdict chip', () => {
     expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
       'index.html: the verdict chip doesn\'t say "Sample, not a finding"',
     );
+  });
+});
+
+describe("the first screen", () => {
+  const change = (from: string, to: string) => (html: string) => {
+    expect(html).toContain(from);
+    return html.replaceAll(from, to);
+  };
+  const inDetails = (inner: string) => `<details><summary>More</summary>${inner}</details>`;
+  const finding = /<li><a href="#card"[\s\S]*?<\/a><\/li>/;
+
+  it.each([
+    [
+      "a headline that isn't the verdict's sentence",
+      change("<h1>A headline.</h1>", "<h1>Another headline.</h1>"),
+      "the headline isn't the verdict's sentence",
+    ],
+    [
+      "the headline in a details",
+      change("<h1>A headline.</h1>", inDetails("<h1>A headline.</h1>")),
+      "the headline isn't the verdict's sentence",
+    ],
+    [
+      "no question line",
+      change('<p data-section="question">A question?</p>', ""),
+      "no question line in view",
+    ],
+    [
+      "verdict.text in a details on a dataset that keeps it in view",
+      change(
+        "<p data-verdict-text>The verdict's text, 12% &amp; more.</p>",
+        inDetails("<p data-verdict-text>The verdict's text, 12% &amp; more.</p>"),
+      ),
+      "verdict.text isn't in view on this dataset",
+    ],
+    [
+      "verdict.text visually hidden",
+      change("<p data-verdict-text>", '<p class="sr-only" data-verdict-text>'),
+      "verdict.text isn't in view on this dataset",
+    ],
+    [
+      "verdict.text reworded",
+      change("The verdict's text, 12%", "The verdict's text, about 12%"),
+      "verdict.text isn't in view on this dataset",
+    ],
+    [
+      "a verdict item lost from the popover",
+      change("<li>An estimate.</li>", ""),
+      "the headline's popover has lost a verdict item",
+    ],
+    [
+      "no definition link in the headline's popover",
+      change('<a href="/methodology/#verdict">How we read this</a>', ""),
+      "the headline's popover has no definition link",
+    ],
+    [
+      "a KPI cell gone",
+      (html: string) => html.replace(/<dl><div>[\s\S]*?<\/div>/, "<dl>"),
+      "the KPI row has 3 cells",
+    ],
+    [
+      "a KPI value in its popover",
+      change("<span data-kpi-value>$1</span>", ""),
+      "a KPI has no value in view",
+    ],
+    [
+      "a KPI marker that's only a word for assistive tech",
+      change(
+        '<span aria-hidden="true">F</span><span class="sr-only">Fact</span>',
+        '<span class="sr-only">Fact</span>',
+      ),
+      "a KPI has no marker in view",
+    ],
+    [
+      "a KPI with no note",
+      change("<p data-kpi-note>A note.</p>", "<p>As of 3 Nov.</p>"),
+      "a KPI's popover has no note",
+    ],
+    [
+      "a KPI with no definition link",
+      change(
+        '<p data-kpi-note>A note.</p><a href="/methodology/#velocity">Definition</a>',
+        "<p data-kpi-note>A note.</p>",
+      ),
+      "a KPI's popover has no definition link",
+    ],
+    [
+      "a KPI with no plain note",
+      change(
+        '<noscript><p>A note. <a href="/methodology/#velocity">Definition</a></p></noscript>',
+        "",
+      ),
+      "a KPI's noscript note has no definition link",
+    ],
+    [
+      "the KPI row's chains in a details",
+      change("<p>Across Tempo.</p>", inDetails("<p>Across Tempo.</p>")),
+      "the KPI row doesn't say which chains it covers",
+    ],
+    ["a finding gone", (html: string) => html.replace(finding, ""), "there are 3 findings"],
+    [
+      "a finding's text in a details",
+      change(
+        '<span class="finding__text">T</span>',
+        inDetails('<span class="finding__text">T</span>'),
+      ),
+      "a finding has no text in view",
+    ],
+    [
+      "a finding's marker gone",
+      change(
+        '<span class="finding__marks"><span class="status-chip" data-kind="fact">F</span>',
+        '<span class="finding__marks">',
+      ),
+      "a finding has no marker in view",
+    ],
+    [
+      "a finding with a different marker",
+      change(
+        '<span class="finding__marks"><span class="status-chip" data-kind="fact">',
+        '<span class="finding__marks"><span class="status-chip" data-kind="estimate">',
+      ),
+      "a finding's marker differs from #card",
+    ],
+    [
+      "a finding with no frame word",
+      change("</span><strong>Sample</strong></span></a>", "</span></span></a>"),
+      'a finding has no "Sample"',
+    ],
+    [
+      "a finding's target gone",
+      change('id="card"', 'id="elsewhere"'),
+      "a finding links to #card, which isn't on the page",
+    ],
+    [
+      "a finding that differs from its chart's heading",
+      change(
+        '<span class="finding__text">T</span>',
+        '<span class="finding__text">Another finding</span>',
+      ),
+      "a finding differs from the heading of #card",
+    ],
+    [
+      "the legend gone",
+      change("<p>F Fact, I Inferred, E Estimate</p>", ""),
+      "the marker legend isn't in view",
+    ],
+    [
+      "the legend in a details",
+      change(
+        "<p>F Fact, I Inferred, E Estimate</p>",
+        inDetails("<p>F Fact, I Inferred, E Estimate</p>"),
+      ),
+      "the marker legend isn't in view",
+    ],
+    [
+      "no definition link in the legend's popover",
+      change('<a href="/methodology/#fact-estimate-opinion">Fact, estimate and opinion</a>', ""),
+      "the marker legend's popover has no definition link",
+    ],
+    [
+      "a second disclosure on the trust row",
+      change(
+        "Reconciliation detail</summary>",
+        "Reconciliation detail</summary><details><summary>x</summary></details>",
+      ),
+      "the trust row has 2 disclosures, not one",
+    ],
+    [
+      "the trust row's caveat lost",
+      change("<p>It doesn't verify placed share or velocity.</p>", ""),
+      "the trust row's disclosure has lost what it says it doesn't verify",
+    ],
+    [
+      "the trust row's definition link lost",
+      change('<a href="/methodology/#reconciliation">What this covers</a>', ""),
+      "the trust row's disclosure has no definition link",
+    ],
+  ])("fails on %s", (_name, mutate, problem) => {
+    const problems = verifyOutput(site({ main: mutate(page(MAIN)) }), sampleExpected);
+    expect(problems).toContain(`index.html: ${problem}`);
+  });
+
+  it("a real, four-chain page keeps verdict.text in its popover, verbatim", () => {
+    const moved = realPage(
+      REAL_MAIN.replace("The verdict's text, 12%", "The verdict's text, about 12%"),
+    );
+    const dir = site({ main: moved, methodology: realPage("<main>M</main>") });
+    expect(verifyOutput(dir, realExpected)).toContain(
+      "index.html: verdict.text is neither in view nor in its popover",
+    );
+  });
+
+  it("doesn't count text out of its popover as in view on a page that needs it there", () => {
+    const stays = { ...realExpected, verdict: { ...PLANTED_VERDICT, textVisible: true } };
+    const dir = site({ main: realPage(REAL_MAIN), methodology: realPage("<main>M</main>") });
+    expect(verifyOutput(dir, stays)).toContain(
+      "index.html: verdict.text isn't in view on this dataset",
+    );
+  });
+
+  describe("the essential caveats", () => {
+    const notes = [{ kind: "placed" }, { kind: "velocity-warning", chain: "ethereum" }];
+    const expected = { ...sampleExpected, essentialNotes: notes };
+
+    it("passes with each in view", () => {
+      expect(verifyOutput(mainWith(plantedNotes(notes)), expected)).toEqual([]);
+    });
+
+    it.each([
+      ["gone", () => ""],
+      ["in a popover", (note: string) => inDetails(note)],
+      ["in a noscript", (note: string) => `<noscript>${note}</noscript>`],
+      ["hidden", (note: string) => note.replace("<p ", "<p hidden ")],
+      ["visually hidden", (note: string) => note.replace("<p ", '<p class="sr-only" ')],
+      ["empty", (note: string) => note.replace("A caveat.", "")],
+    ])("fails on a note %s", (_name, hide) => {
+      const body = plantedNotes([notes[0]]) + hide(plantedNotes([notes[1]]));
+      expect(verifyOutput(mainWith(body), expected)).toEqual([
+        "index.html: the velocity-warning note for ethereum isn't in view",
+      ]);
+    });
+
+    it("a warning on another chain moves the note it asks for", () => {
+      const moved = [notes[0], { kind: "velocity-warning", chain: "base" }];
+      const problems = verifyOutput(mainWith(plantedNotes(notes)), {
+        ...sampleExpected,
+        essentialNotes: moved,
+      });
+      expect(problems).toEqual(["index.html: the velocity-warning note for base isn't in view"]);
+    });
   });
 });
 
@@ -857,7 +1099,10 @@ describe("freshness in the output", () => {
 
   it("reads a details' summary as in view", () => {
     const html = realPage(
-      REAL_MAIN.replace(STALE_TRUST, `<details><summary>${STALE_TRUST}</summary>More</details>`),
+      REAL_MAIN.replace(
+        `${STALE_TRUST}${PLANTED_TRUST_DETAIL}`,
+        PLANTED_TRUST_DETAIL.replace("Reconciliation detail", STALE_TRUST),
+      ),
     );
     const dir = site({ main: html, methodology: realPage("<main>M</main>") });
     expect(verifyOutput(dir, realExpected)).toEqual([]);
@@ -962,6 +1207,76 @@ describe("what to expect comes from the dataset", () => {
 
   it("the partial sample expects its sample frame, not preview", () => {
     expect(expectedFromDataset(at(copySample("partial"))).frameWord).toBe("Sample");
+  });
+
+  it("takes the headline from the dataset, and keeps verdict.text in view unless it may move", () => {
+    const sample = expectedFromDataset(at(copySample("complete")));
+    expect(sample.verdict.sentence).toBe(
+      "At least half of Open USD (OUSD) supply is sitting still.",
+    );
+    expect(sample.verdict.textVisible).toBe(true);
+    expect(expectedFromDataset(at(copySample("partial"))).verdict.textVisible).toBe(true);
+    const real = expectedFromDataset(at(releaseGrade()));
+    expect(real.verdict.textVisible).toBe(false);
+    expect(real.verdict.items.length).toBeGreaterThan(0);
+  });
+
+  it("asks for every caveat the dataset's conditions call for", () => {
+    const kinds = (dir: string) =>
+      expectedFromDataset(at(dir)).essentialNotes.map((note: { kind: string }) => note.kind);
+    expect(kinds(releaseGrade())).toEqual(
+      expect.arrayContaining([
+        "placed",
+        "series-start",
+        "small-ticket",
+        "velocity-denominators",
+        "no-swaps",
+        "wallets-not-people",
+        "hops",
+        "everyday-meaning",
+        "history",
+      ]),
+    );
+    expect(kinds(releaseGrade())).not.toContain("velocity-warning");
+    const warned = releaseGrade();
+    editJson(warned, "manifest.json", (manifest) => {
+      manifest.warnings = [
+        {
+          chain: "base",
+          metric: "circulating_supply",
+          day: "2026-11-02",
+          previous: "2",
+          current: "1",
+        },
+        { chain: "tempo", metric: "total_supply", day: "2026-11-02", previous: "1", current: "2" },
+      ];
+    });
+    expect(expectedFromDataset(at(warned)).essentialNotes).toContainEqual({
+      kind: "velocity-warning",
+      chain: "base",
+    });
+    expect(expectedFromDataset(at(warned)).essentialNotes).not.toContainEqual({
+      kind: "velocity-warning",
+      chain: "tempo",
+    });
+  });
+
+  it("asks for the unlabelled issuer's note on the chain that has one", () => {
+    const dir = releaseGrade();
+    editJson(dir, "journey.json", (payload) => {
+      for (const row of payload.data) {
+        row.issuer_labeled = row.chain !== "base";
+        if (row.chain === "base") {
+          row.free_floating = (BigInt(row.free_floating) + BigInt(row.issuer_inventory)).toString();
+          row.issuer_inventory = "0";
+        }
+      }
+    });
+    const notes = expectedFromDataset(at(dir)).essentialNotes;
+    expect(notes).toContainEqual({ kind: "issuer-unlabeled", chain: "base" });
+    expect(notes.filter((note: { kind: string }) => note.kind === "issuer-unlabeled")).toHaveLength(
+      1,
+    );
   });
 
   it("reads the same dataset the build does", () => {

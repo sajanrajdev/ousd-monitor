@@ -6,7 +6,15 @@ import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 import { loadDatasetFiles, locateDataset } from "../lib/dataset/load.ts";
 import { deriveState } from "../lib/dataset/state.ts";
-import { TOKEN_CONTRACTS } from "../lib/definitions.ts";
+import { newestByChain } from "../lib/aggregate.ts";
+import { CHAIN_NAMES, TOKEN_CONTRACTS } from "../lib/definitions.ts";
+import {
+  day0Scope,
+  velocityWarnings,
+  waterfall,
+  weeklyEveryday,
+} from "../lib/takeaways/activity.ts";
+import { verdictSentence, verdictTextVisible } from "../lib/verdict.ts";
 
 const INDEPENDENCE_LINE = "Independent. Not affiliated with Open Standard or Bridge.";
 const FRESH_SENTENCE = "Supply reconciled on all 4 chains";
@@ -184,6 +192,131 @@ function checkMainFrame(page, document, expected, problems) {
     !viewText(document.querySelector('[data-section="trust-strip"]')).includes("Not reconciled")
   ) {
     problems.push(`${page}: the trust strip doesn't say "Not reconciled"`);
+  }
+}
+
+const FINDINGS = 4;
+const KPIS = 4;
+const LEGEND_WORDS = ["Fact", "Inferred", "Estimate"];
+const TRUST_CAVEAT = "It doesn't verify placed share or velocity.";
+
+const definitionLink = (block) =>
+  [...(block?.querySelectorAll("a[href]") ?? [])].some((link) =>
+    DEFINITION_LINK.test(link.getAttribute("href")),
+  );
+
+// The headline is the verdict's own sentence. verdict.text is verbatim, in view unless the dataset
+// allows the popover, and everything else moved there keeps its words.
+function checkHeadline(page, document, { verdict }, problems) {
+  const block = document.querySelector('[data-section="verdict"]');
+  if (viewText(block?.querySelector("h1")).trim() !== verdict.sentence) {
+    problems.push(`${page}: the headline isn't the verdict's sentence`);
+  }
+  if (!viewText(block?.querySelector('[data-section="question"]')).trim()) {
+    problems.push(`${page}: no question line in view`);
+  }
+  const panel = block?.querySelector(".info-popover__panel");
+  if (verdict.textVisible) {
+    if (!viewText(block).includes(verdict.text)) {
+      problems.push(`${page}: verdict.text isn't in view on this dataset`);
+    }
+  } else if (!panel?.textContent.includes(verdict.text)) {
+    problems.push(`${page}: verdict.text is neither in view nor in its popover`);
+  }
+  if (verdict.items.some((item) => !panel?.textContent.includes(item))) {
+    problems.push(`${page}: the headline's popover has lost a verdict item`);
+  }
+  if (!definitionLink(panel))
+    problems.push(`${page}: the headline's popover has no definition link`);
+}
+
+function checkKpiRow(page, document, expected, problems) {
+  const row = document.querySelector('[data-section="kpi-row"]');
+  const cells = [...(row?.querySelectorAll("dl > div") ?? [])];
+  if (cells.length !== KPIS) problems.push(`${page}: the KPI row has ${cells.length} cells`);
+  for (const cell of cells) {
+    if (!viewText(cell.querySelector("dt")).trim()) problems.push(`${page}: a KPI has no label`);
+    if (!viewText(cell.querySelector("[data-kpi-value]")).trim()) {
+      problems.push(`${page}: a KPI has no value in view`);
+    }
+    if (!viewText(cell.querySelector(".status-chip")).trim()) {
+      problems.push(`${page}: a KPI has no marker in view`);
+    }
+    const panel = cell.querySelector(".info-popover__panel");
+    if (!panel?.querySelector("[data-kpi-note]")?.textContent.trim()) {
+      problems.push(`${page}: a KPI's popover has no note`);
+    }
+    if (!definitionLink(panel)) problems.push(`${page}: a KPI's popover has no definition link`);
+    if (!definitionLink(cell.querySelector("noscript"))) {
+      problems.push(`${page}: a KPI's noscript note has no definition link`);
+    }
+  }
+  if (!viewText(row).includes(expected.kpiScope)) {
+    problems.push(`${page}: the KPI row doesn't say which chains it covers`);
+  }
+}
+
+// A finding is its chart's heading with its marker, on a link that lands on that chart.
+function checkFindings(page, document, expected, problems) {
+  const word = expected.frameWord;
+  const links = [...document.querySelectorAll('[data-section="findings"] a[data-finding-link]')];
+  if (links.length !== FINDINGS) problems.push(`${page}: there are ${links.length} findings`);
+  for (const link of links) {
+    const href = link.getAttribute("href") ?? "";
+    const text = viewText(link.querySelector(".finding__text")).trim();
+    const chip = link.querySelector(".status-chip");
+    if (!text) problems.push(`${page}: a finding has no text in view`);
+    if (!viewText(chip).trim()) problems.push(`${page}: a finding has no marker in view`);
+    if (word && !viewText(link).includes(word)) {
+      problems.push(`${page}: a finding has no "${word}"`);
+    }
+    const target = href.startsWith("#") ? document.getElementById(href.slice(1)) : null;
+    if (!target) {
+      problems.push(`${page}: a finding links to ${href}, which isn't on the page`);
+      continue;
+    }
+    const head = target.querySelector(".chart-card__head");
+    if (head?.querySelector("h2, h3")?.textContent.trim() !== text) {
+      problems.push(`${page}: a finding differs from the heading of ${href}`);
+    }
+    if (head?.querySelector(".status-chip")?.dataset.kind !== chip?.dataset.kind) {
+      problems.push(`${page}: a finding's marker differs from ${href}`);
+    }
+  }
+}
+
+function checkLegend(page, document, problems) {
+  const legend = document.querySelector('[data-section="marker-legend"]');
+  if (LEGEND_WORDS.some((word) => !viewText(legend).includes(word))) {
+    problems.push(`${page}: the marker legend isn't in view`);
+  }
+  if (!definitionLink(legend?.querySelector(".info-popover__panel"))) {
+    problems.push(`${page}: the marker legend's popover has no definition link`);
+  }
+}
+
+function checkTrustDetail(page, document, problems) {
+  const details = document.querySelectorAll('[data-section="trust-strip"] details');
+  if (details.length !== 1) {
+    problems.push(`${page}: the trust row has ${details.length} disclosures, not one`);
+    return;
+  }
+  if (!details[0].textContent.includes(TRUST_CAVEAT)) {
+    problems.push(`${page}: the trust row's disclosure has lost what it says it doesn't verify`);
+  }
+  if (!definitionLink(details[0])) {
+    problems.push(`${page}: the trust row's disclosure has no definition link`);
+  }
+}
+
+// The caveats needed to read a number, wherever a unit pins them. Each is in view with nothing opened.
+function checkEssentialNotes(page, document, expected, problems) {
+  for (const { kind, chain } of expected.essentialNotes) {
+    const selector = `[data-note="${kind}"]${chain ? `[data-chain="${chain}"]` : ""}`;
+    const notes = [...document.querySelectorAll(selector)];
+    if (!notes.some((note) => viewText(note).trim())) {
+      problems.push(`${page}: the ${kind} note${chain ? ` for ${chain}` : ""} isn't in view`);
+    }
   }
 }
 
@@ -368,6 +501,12 @@ export function verifyOutput(outDir, expected) {
     if (page === "index.html") {
       checkMainFrame(page, document, expected, problems);
       checkMainFreshness(page, document, expected, problems);
+      checkHeadline(page, document, expected, problems);
+      checkKpiRow(page, document, expected, problems);
+      checkFindings(page, document, expected, problems);
+      checkLegend(page, document, problems);
+      checkTrustDetail(page, document, problems);
+      checkEssentialNotes(page, document, expected, problems);
     }
   }
   for (const path of files) {
@@ -384,14 +523,41 @@ export function verifyOutput(outDir, expected) {
   return problems;
 }
 
+// What the page must keep in view, from the same conditions the views use to show it.
+function essentialNotes({ manifest, summary, journey, activity }) {
+  const always = [
+    "placed",
+    "series-start",
+    "small-ticket",
+    "velocity-denominators",
+    "no-swaps",
+    "wallets-not-people",
+  ];
+  const volume = waterfall(activity.data) ? ["hops", "everyday-meaning"] : [];
+  const day0 = day0Scope(activity.data, summary.kpis) ? ["day-0-scope"] : [];
+  const history = weeklyEveryday(activity.data).length > 0 ? ["history"] : [];
+  return [
+    ...[...always, ...volume, ...day0, ...history].map((kind) => ({ kind })),
+    ...velocityWarnings(manifest.warnings).map(({ chain }) => ({
+      kind: "velocity-warning",
+      chain,
+    })),
+    ...newestByChain(journey.data)
+      .filter((row) => !row.issuer_labeled && BigInt(row.issuer_inventory) === 0n)
+      .map(({ chain }) => ({ kind: "issuer-unlabeled", chain })),
+  ];
+}
+
 export function expectedFromDataset(location, webRoot = process.cwd(), now = Date.now()) {
   const { files, placement } = loadDatasetFiles(location, webRoot);
   return expectedFromFiles(files, placement, webRoot, now);
 }
 
 export function expectedFromFiles(files, placement, webRoot = process.cwd(), now = Date.now()) {
-  const { kind, frameWord, freshness, asOfLine, trustLine } = deriveState(files, placement, now);
-  const { manifest } = files;
+  const state = deriveState(files, placement, now);
+  const { kind, frameWord, freshness, asOfLine, trustLine } = state;
+  const { manifest, summary } = files;
+  const { verdict } = summary;
   return {
     kind,
     frameWord,
@@ -405,6 +571,14 @@ export function expectedFromFiles(files, placement, webRoot = process.cwd(), now
     ],
     blockedNames: JSON.parse(readFileSync(join(webRoot, "scripts/blocked-names.json"), "utf8")),
     tokenContracts: TOKEN_CONTRACTS,
+    verdict: {
+      sentence: verdictSentence(verdict),
+      text: verdict.text,
+      textVisible: verdictTextVisible(verdict, state),
+      items: [...verdict.facts, ...verdict.estimates, ...verdict.opinions],
+    },
+    kpiScope: `Across ${summary.kpis.map((row) => CHAIN_NAMES[row.chain]).join(", ")}.`,
+    essentialNotes: essentialNotes(files),
   };
 }
 

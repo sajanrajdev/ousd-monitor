@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { ChainRoleRow } from "@/lib/dataset";
 import { UNKNOWN_TEXT } from "@/lib/format";
 import {
+  chainRolesHeading,
   chainRolesTakeaway,
   chainSentences,
   differingDays,
@@ -110,5 +111,138 @@ describe("the chain roles takeaway", () => {
     for (const text of [...all, chainRolesTakeaway(sample)]) {
       expect(text).not.toMatch(/trading|settlement|used for|is for/i);
     }
+  });
+});
+
+describe("the chain roles heading", () => {
+  const led = (leads: Partial<Record<ChainRoleRow["chain"], ChainRoleRow["leading_for"]>>) =>
+    (["tempo", "ethereum", "base", "solana"] as const).map((chain) =>
+      row({ chain, leading_for: leads[chain] ?? [] }),
+    );
+  const words = (text: string) => text.split(/\s+/).length;
+
+  it("reads the sample's leader from its rows", () => {
+    const leader = sample.filter((r) => r.leading_for.length === 5);
+    expect(leader).toHaveLength(1);
+    const name = leader[0].chain.charAt(0).toUpperCase() + leader[0].chain.slice(1);
+    expect(chainRolesHeading(sample)).toBe(`${name} leads on all five measures.`);
+  });
+
+  it("two chains: the one with more first, by count, and the other by name", () => {
+    expect(
+      chainRolesHeading(
+        led({
+          tempo: ["supply", "issuance", "dex_flow", "lending_flow"],
+          solana: ["everyday"],
+        }),
+      ),
+    ).toBe("Tempo leads on four measures; Solana on everyday volume.");
+    expect(
+      chainRolesHeading(
+        led({
+          tempo: ["everyday"],
+          solana: ["supply", "issuance", "dex_flow", "lending_flow"],
+        }),
+      ),
+    ).toBe("Solana leads on four measures; Tempo on everyday volume.");
+    expect(chainRolesHeading(led({ tempo: ["supply"], base: ["dex_flow"] }))).toBe(
+      "Tempo leads on supply; Base on DEX flow.",
+    );
+    expect(
+      chainRolesHeading(
+        led({ tempo: ["supply", "issuance", "everyday"], base: ["dex_flow", "lending_flow"] }),
+      ),
+    ).toBe("Tempo leads on three measures; Base on two measures.");
+  });
+
+  it("no leader says so, and no rows is the unknown text", () => {
+    expect(chainRolesHeading(led({}))).toBe("No chain leads on any measure in this data.");
+    expect(chainRolesHeading([])).toBe(UNKNOWN_TEXT);
+  });
+
+  it("one chain on all five, and on some", () => {
+    expect(
+      chainRolesHeading(
+        led({ base: ["supply", "issuance", "everyday", "dex_flow", "lending_flow"] }),
+      ),
+    ).toBe("Base leads on all five measures.");
+    expect(chainRolesHeading(led({ base: ["supply"] }))).toBe("Base leads on supply.");
+    expect(chainRolesHeading(led({ base: ["supply", "dex_flow"] }))).toBe(
+      "Base leads on two measures.",
+    );
+  });
+
+  it("a tie names both, beside any measure one leads alone", () => {
+    expect(chainRolesHeading(led({ base: ["dex_flow"], solana: ["dex_flow"] }))).toBe(
+      "Base and Solana tie on DEX flow.",
+    );
+    expect(chainRolesHeading(led({ base: ["dex_flow", "supply"], ethereum: ["dex_flow"] }))).toBe(
+      "Base leads on supply; Ethereum and Base tie on DEX flow.",
+    );
+    const everything = ["supply", "issuance", "everyday", "dex_flow", "lending_flow"] as const;
+    expect(chainRolesHeading(led({ base: [...everything], solana: [...everything] }))).toBe(
+      "Base and Solana tie on all five measures.",
+    );
+  });
+
+  it("past two named chains it counts them, and a tie with a measure each does too", () => {
+    expect(
+      chainRolesHeading(led({ tempo: ["supply"], base: ["dex_flow"], solana: ["everyday"] })),
+    ).toBe("Leadership is split across 3 chains.");
+    expect(
+      chainRolesHeading(
+        led({
+          tempo: ["supply"],
+          ethereum: ["issuance"],
+          base: ["dex_flow"],
+          solana: ["everyday"],
+        }),
+      ),
+    ).toBe("Leadership is split across 4 chains.");
+    expect(
+      chainRolesHeading(led({ tempo: ["supply", "dex_flow"], base: ["everyday", "dex_flow"] })),
+    ).toBe("Leadership is split across 2 chains.");
+    expect(
+      chainRolesHeading(led({ tempo: ["dex_flow"], base: ["dex_flow"], solana: ["dex_flow"] })),
+    ).toBe("Leadership is split across 3 chains.");
+  });
+
+  it("names its chains at partial scope, a chain keeps its capital, and it never says all chains", () => {
+    const two = [
+      row({ chain: "tempo", leading_for: [] }),
+      row({ chain: "ethereum", leading_for: ["supply"] }),
+    ];
+    expect(chainRolesHeading(two)).toBe("On Tempo and Ethereum, Ethereum leads on supply.");
+    const none = [row({ chain: "tempo" }), row({ chain: "ethereum" })];
+    expect(chainRolesHeading(none)).toBe(
+      "On Tempo and Ethereum, no chain leads on any measure in this data.",
+    );
+    const one = [row({ chain: "base", leading_for: ["supply"] })];
+    expect(chainRolesHeading(one)).toBe("On Base, Base leads on supply.");
+    expect(chainRolesHeading(two)).not.toMatch(/all chains/i);
+  });
+
+  it("is at most 12 words past any prefix, in its longest forms", () => {
+    const longest = [
+      led({ ethereum: ["everyday", "lending_flow"], solana: ["lending_flow"] }),
+      led({
+        ethereum: ["everyday", "supply", "issuance", "lending_flow"],
+        solana: ["lending_flow"],
+      }),
+      led({ ethereum: ["everyday"], solana: ["lending_flow"] }),
+      led({}),
+      sample,
+    ];
+    for (const rows of longest) expect(words(chainRolesHeading(rows))).toBeLessThanOrEqual(12);
+  });
+
+  it("a change in who leads changes the sentence with no other edit", () => {
+    const before = chainRolesHeading(led({ tempo: ["supply"] }));
+    expect(chainRolesHeading(led({ base: ["supply"] }))).not.toBe(before);
+  });
+
+  it("never says what a chain is for", () => {
+    const text = chainRolesHeading(led({ tempo: ["supply"], base: ["dex_flow"] }));
+    expect(text).not.toMatch(/trading|settlement|used for|is for/i);
   });
 });

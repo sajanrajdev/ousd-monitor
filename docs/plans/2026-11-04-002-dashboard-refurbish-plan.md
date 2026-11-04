@@ -76,7 +76,7 @@ Main page, in order. There are still no tabs, and every card is on the page.
 | Trust status | One slim row directly under the header, with its detail disclosure | `trust-strip` |
 | Headline block | Question line, one-line headline with its "Our reading" marker, as-of line | `verdict`, `question` |
 | KPI row | Four cells: label, value, marker, info | `kpi-row` |
-| Findings row | About four short cards, each a link to its chart | `findings` |
+| Findings row | Four short cards, each a link to its chart | `findings` |
 | Marker legend | One line, on the page's first screen | `marker-legend` |
 | Chain filter | All, then each chain in the dataset. Sticky from 768 | `chain-filter` |
 | Supply | Where supply sits, placed vs circulating | `view-a` |
@@ -130,7 +130,7 @@ None covers data. All are native HTML, with a small client enhancement for hover
 | We don't ingest swaps, so this can't show trading | Pinned on the chain grid | Always |
 | Wallets, not people | Beside every wallet count, or in the caption of a table under a toggle | Wherever a wallet count shows |
 
-**Until a later unit pins them,** these stay visible through the card's `note` prop, so no state of the page hides one. U1 did this for "Everyday means under $1M" and hops on the waterfall, as `data-note="everyday-meaning"` and `data-note="hops"`, and for "Wallets, not people" as `data-note="wallets-not-people"`. U4 and U5 keep those kinds when they pin them.
+**Until a later unit pins them,** these stay visible through the card's `note` prop, so no state of the page hides one. U1 did this for "Everyday means under $1M" and hops on the waterfall, as `data-note="everyday-meaning"` and `data-note="hops"`, and for "Wallets, not people" as `data-note="wallets-not-people"`. U2 gave the rest a kind: `placed`, `issuer-unlabeled`, `series-start`, `day-0-scope`, `small-ticket`, `history`, `velocity-denominators`, `velocity-warning` and `no-swaps`. From U2, `verify-output` fails the build if the dataset calls for one of these and it isn't in view, so U3 to U5 keep the kinds when they pin them.
 
 **The popover pushes and doesn't float.** The panel opens in flow under the card's or cell's head, so it moves the plot down and covers nothing. A floating panel would cover a chart, a KPI or a neighbouring card at some width, and the review ruled that out. The markup would be the same either way, so changing this is one CSS block. The maintainer sees it at the U2 review.
 
@@ -413,8 +413,8 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 **Approach**
 - **Trust status:** the same sentences and marker, one slim row at the top of the first screen. "What this covers" and "Reconciliation detail" become one disclosure with the same text and table. `data-section="trust-strip"` stays.
 - **Headline block:** the question line, then the headline at `--text-headline`, the "Our reading" marker, an info popover, and the as-of line. Follow [the interim text rule](#headline-wording-open). The popover holds "How we read this", `verdict.text` where allowed, and `verdictGroups`. Add `verdictTextVisible(verdict, state)` to `web/lib/verdict.ts`. `VERDICT_SENTENCES` doesn't change.
-- **KPI row:** label, value and marker in each cell, with the note and definition link in its popover. "Across {chains}." and the frame word stay visible. The as-of line above covers the KPI's date, and the build's check of it stays.
-- **Findings row:** four cards, each a whole-card link carrying `data-finding-link`, which is how `explain-enhance` knows to set the filter to All, with a heading's text and its marker. Add `journeyHeading`, `waterfallHeading`, `weeklyHeading` and `chainRolesHeading` beside the long takeaways, which stay for popovers. Worded for the real dataset:
+- **KPI row:** label, value and marker in each cell, with the note and definition link in its popover. "Across {chains}." and the frame word stay visible. The as-of line above covers the KPI's date, and the build's check of it stays. The date moves into each popover as the as-of repeat, so its words stay in reach, and comes back to the visible line if the KPI rows' days ever differ from the line above. With JavaScript off the note and link also show as a plain note.
+- **Findings row:** four cards, each a whole-card link carrying `data-finding-link`, which is how `explain-enhance` knows to set the filter to All, with a heading's text and its marker. Each card carries the frame word and hatched edge on sample and preview, so one cropped alone reads as not real. Add `journeyHeading`, `waterfallHeading`, `weeklyHeading` and `chainRolesHeading` beside the long takeaways, which stay for popovers. The four cards take these as their own headings now, with the long takeaway in the popover, so a finding and the card it lands on can't disagree. Worded for the real dataset:
 
   | Function | Text on dataset 20261104T163224Z | Words |
   |---|---|---|
@@ -423,10 +423,10 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
   | `weeklyHeading` | Everyday clean volume: $32.1M last full week, $24.5M before. | 9 |
   | `chainRolesHeading` | Tempo leads on four measures; Solana on everyday volume. | 9 |
 
-  These state only what's on the page now, and each function reads its figures from the dataset. Thresholds and days come from `definitions`. Past two named chains, `chainRolesHeading` reads "Leadership is split across {n} chains." Partial scope prefixes "On {chains},". Null gives the unknown text.
-- **Anchors:** put the new card anchors on the current cards now, so the links work before U3 to U5.
+  These state only what's on the page now, and each function reads its figures from the dataset. Thresholds and days come from `definitions`. Past two named chains, `chainRolesHeading` reads "Leadership is split across {n} chains." It reads the same for two chains that each lead on a measure of their own and also tie on another, as no shorter sentence holds all three. A tie names both chains. Partial scope prefixes "On {chains},". Null gives the unknown text.
+- **Anchors:** put the new card anchors on the current cards now, so the links work before U3 to U5. They live in `CARD_ANCHORS`, so a finding's link and its card share one name.
 - **Marker legend:** mounted at the end of the first screen.
-- **`verify-output`:** add `findings` to what must carry the frame word on sample and preview, and require every finding link's target to exist on the page.
+- **`verify-output`:** add `findings` to what must carry the frame word on sample and preview, and require every finding link's target to exist on the page. It also requires that a finding match its target card's heading and marker, that the headline be the verdict's sentence, that `verdict.text` be verbatim, in view unless `verdictTextVisible` allows the popover, that every verdict item and the trust row's "doesn't verify" caveat stay in their panels, and that the KPI cells, legend and essential caveats below are in view. The caveats' check moves here from U5, as this is the unit that first moves words off the page.
 
 **Test scenarios**
 - Happy path: each of the four verdict states gives today's sentence, unchanged, compared with a copy of the four in the test, so a change to `VERDICT_SENTENCES` has to edit the test too.
@@ -542,7 +542,7 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 - **Table:** the current chain roles table, with burned, placed share and "Leads on", under the toggle.
 - **Heading:** `chainRolesHeading` from U2. The no-swaps note is pinned.
 - **Cleanup:** remove `note` from `ChartCard`. `TableCard` stays for the methodology page's two cards, so remove only what the main page no longer uses.
-- **`verify-output`:** for each `circulating_supply` warning in the manifest, the main page must have a `data-note="velocity-warning"` for that chain outside any `details` and `noscript`. This makes the essential rule fail the build. The same check covers `data-note="no-swaps"`, the placed note, `data-note="hops"`, `data-note="everyday-meaning"` and `data-note="wallets-not-people"`, so a missed pin fails the build.
+- **`verify-output`:** U2 already requires, for each `circulating_supply` warning in the manifest, a `data-note="velocity-warning"` for that chain outside any `details` and `noscript`, and the same for the rest of the [essential list](#explanation-layers). So here the notes keep their kinds when they become pins, and this unit adds any that U5's own pins introduce.
 
 **Test scenarios**
 - Happy path: a warning on one chain gives one pin and one note, naming that chain. A warning on another chain moves them, with no code change.
@@ -631,7 +631,7 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 
 | Risk | Response |
 |---|---|
-| A caveat slips into a popover during a later edit | `verify-output` fails the build for the listed caveats, from U5 on |
+| A caveat slips into a popover during a later edit | `verify-output` fails the build for the listed caveats, from U2 on |
 | A pin goes false as data changes | Pins come from the manifest or a config condition. No chain name is hard-coded, and U5 tests a moved warning |
 | Five panels make the page heavy | U3 measures it, against a pass line of 150,000 gzipped bytes. If it's over, U3 says so and proposes what to trim before U4 starts |
 | Filtered panels make the number check miss states | `compare-numbers.mjs` walks each filter option and has a floor per option |

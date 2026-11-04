@@ -1,7 +1,7 @@
 // The verdict's display sentence and how its supporting lists are grouped. Each sentence states only
 // what its state's conditions establish, so a change in the data can't make one false.
 import type { Verdict } from "./dataset/rows.ts";
-import type { FrameWord } from "./dataset/state.ts";
+import type { DatasetState, FrameWord } from "./dataset/state.ts";
 import { CHAIN_NAMES, REQUIRED_CHAINS } from "./definitions.ts";
 
 type VerdictState = Verdict["state"];
@@ -40,6 +40,15 @@ export function verdictSentence({ state, scope }: Pick<Verdict, "state" | "scope
 // of OUSD on the chains covered, so it carries the weaker chip.
 export function supportingChip({ scope }: Pick<Verdict, "scope">): "inferred" | "estimate" {
   return isFullScope(scope) ? "inferred" : "estimate";
+}
+
+// On a preview, a sample or a partial scope, verdict.text carries "Local preview, not a finding." or
+// the estimated share, so it stays on screen. It moves to the popover only on real, four-chain data.
+export function verdictTextVisible(
+  { scope }: Pick<Verdict, "scope">,
+  { kind }: Pick<DatasetState, "kind">,
+): boolean {
+  return !(kind === "real" && isFullScope(scope));
 }
 
 export type VerdictGroup = {

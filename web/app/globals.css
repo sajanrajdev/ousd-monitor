@@ -626,11 +626,213 @@ h2 {
   padding: 2rem var(--page-margin) 0;
 }
 
-/* The verdict, KPI row and trust strip read as one block, above the fold on a desktop. */
+/* The main page keeps its first screen tight: the trust row sits directly under the header. */
+.page-main:has(> .first-screen) {
+  gap: var(--dashboard-space);
+  padding-top: 0;
+}
+
 .first-screen {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 2rem;
+  gap: 1rem;
+}
+
+.trust-strip {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-small);
+}
+
+.trust-strip__status {
+  display: flex;
+  flex: 1 1 100%;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.trust-strip__detail.accordion {
+  flex: 0 0 100%;
+  border: 0;
+}
+
+.trust-strip__detail > summary {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.5rem;
+  padding: 0;
+}
+
+/* From 768 the trigger shares the row, in a corner this reserves, and stays there when it opens. */
+@media (min-width: 768px) {
+  .trust-strip {
+    padding-right: 11rem;
+  }
+
+  .trust-strip__detail.accordion {
+    flex-basis: calc(100% + 11rem);
+    margin-right: -11rem;
+  }
+
+  .trust-strip__detail > summary {
+    position: absolute;
+    top: 0.5rem;
+    right: 0;
+  }
+}
+
+.trust-strip__detail[open] > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+}
+
+.verdict-block {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.verdict-block__head {
+  align-items: baseline;
+  row-gap: 0.25rem;
+}
+
+.verdict-block__head h1 {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--text-headline);
+}
+
+.verdict-block__as-of {
+  font-size: var(--text-small);
+}
+
+.kpi-row__cells {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--color-border);
+  border-left: 1px solid var(--color-border);
+}
+
+@media (min-width: 1056px) {
+  .kpi-row__cells {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.kpi-cell {
+  align-content: flex-start;
+  padding: 0.75rem 2.75rem 0.75rem 0.75rem;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  row-gap: 0.25rem;
+  font-size: var(--text-small);
+}
+
+.kpi-cell > dt {
+  flex: 0 0 100%;
+}
+
+/* Only the label needs the trigger's corner, so the figure and panel take the cell's whole width. */
+.kpi-cell__figure {
+  display: flex;
+  flex: 0 0 calc(100% + 2rem);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  margin: 0 -2rem 0 0;
+}
+
+.kpi-cell__figure [data-kpi-value] {
+  font-family: var(--font-display);
+  font-size: var(--text-kpi);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.kpi-cell__more {
+  flex: 0 0 calc(100% + 2rem);
+  margin: 0 -2rem 0 0;
+  min-width: 0;
+}
+
+.kpi-cell .info-popover > summary {
+  top: 0.75rem;
+  right: 0.75rem;
+}
+
+.kpi-cell__note {
+  font-size: var(--text-meta);
+  color: var(--color-meta-text);
+}
+
+/* Two to a row is too narrow to read a panel in, so the open cell takes the row and pushes the rest. */
+@media (max-width: 1055.98px) {
+  .kpi-cell:has(.info-popover[open]) {
+    grid-column: 1 / -1;
+  }
+}
+
+.findings-row ul {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--grid-gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 768px) {
+  .findings-row ul {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1056px) {
+  .findings-row ul {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.finding {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.5rem;
+  height: 100%;
+  padding: 0.75rem;
+  background: var(--surface-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+}
+
+.finding:hover {
+  border-color: var(--color-maroon);
+}
+
+.finding__text {
+  font-size: var(--text-card-title);
+  font-weight: 550;
+  line-height: 1.25;
+}
+
+.finding__marks {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--text-meta);
+}
+
+.marker-legend {
+  max-width: 26rem;
+  font-size: var(--text-small);
 }
 
 .page-main > *,
@@ -663,7 +865,8 @@ html[data-frame] body {
 
 html[data-frame] body::before,
 html[data-frame] body::after,
-.chart-card[data-frame]::before {
+.chart-card[data-frame]::before,
+.finding[data-frame]::before {
   content: "";
   position: absolute;
   top: 0;
@@ -683,12 +886,14 @@ html[data-frame] body::after {
   z-index: 20;
 }
 
-.chart-card[data-frame] {
+.chart-card[data-frame],
+.finding[data-frame] {
   position: relative;
   overflow: hidden;
 }
 
-.chart-card[data-frame]::before {
+.chart-card[data-frame]::before,
+.finding[data-frame]::before {
   left: 0;
 }
 

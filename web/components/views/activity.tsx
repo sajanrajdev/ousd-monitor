@@ -10,17 +10,20 @@ import type {
   KpiRow,
   ManifestWarning,
 } from "@/lib/dataset";
-import { CHAIN_NAMES, DAY_ZERO, definitionHref } from "@/lib/definitions";
+import { CARD_ANCHORS, CHAIN_NAMES, DAY_ZERO, definitionHref } from "@/lib/definitions";
 import { formatBps, formatCompact, formatUtcDate, UNKNOWN_TEXT } from "@/lib/format";
 import {
+  activityChains,
   day0Scope,
   historyLabel,
   perChain,
   velocityTakeaway,
   velocityWarnings,
   waterfall,
+  waterfallHeading,
   waterfallTakeaway,
   weeklyEveryday,
+  weeklyHeading,
   weeklyTakeaway,
 } from "@/lib/takeaways/activity";
 
@@ -96,6 +99,7 @@ export function ActivityView({ activity, kpis, definitions, warnings, state }: A
   const newest = newestByChain(activity);
   const asOf = dayRange(newest.map((row) => row.day)) ?? DAY_ZERO;
   const all = waterfall(activity);
+  const chains = activityChains(activity);
   const scope = day0Scope(activity, kpis);
   const velocityNotes = velocityWarnings(warnings);
   const weeks = weeklyEveryday(activity);
@@ -112,7 +116,9 @@ export function ActivityView({ activity, kpis, definitions, warnings, state }: A
   return (
     <section id="real-activity" data-section="view-b" className="grid gap-6">
       <ChartCard
-        takeaway={waterfallTakeaway(all)}
+        id={CARD_ANCHORS.waterfall}
+        takeaway={waterfallHeading(all, chains)}
+        detail={<p>{waterfallTakeaway(all)}</p>}
         chip="inferred"
         source={SOURCE}
         asOf={asOf}
@@ -159,7 +165,9 @@ export function ActivityView({ activity, kpis, definitions, warnings, state }: A
       </ChartCard>
 
       <ChartCard
-        takeaway={weeklyTakeaway(weeks)}
+        id={CARD_ANCHORS.weekly}
+        takeaway={weeklyHeading(weeks, chains)}
+        detail={<p>{weeklyTakeaway(weeks)}</p>}
         chip="inferred"
         source={SOURCE}
         asOf={asOf}
@@ -182,6 +190,7 @@ export function ActivityView({ activity, kpis, definitions, warnings, state }: A
       </ChartCard>
 
       <TableCard
+        id={CARD_ANCHORS.velocity}
         takeaway={velocityTakeaway(kpis)}
         chip="inferred"
         source={SOURCE}

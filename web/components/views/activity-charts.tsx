@@ -97,7 +97,7 @@ export function WeeklyBars({ weeks, history }: { weeks: Week[]; history: string 
             </span>
           ))}
         </div>
-        <figcaption className="mt-2" style={{ fontSize: "var(--text-meta)" }}>
+        <figcaption className="mt-2" style={{ fontSize: "var(--text-meta)" }} data-note="history">
           Weeks end on the date shown, in UTC. {history}.
         </figcaption>
       </figure>

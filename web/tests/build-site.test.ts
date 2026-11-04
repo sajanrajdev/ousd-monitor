@@ -11,7 +11,9 @@ import {
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildRelease, buildSite, Refused } from "@/scripts/build-site.mjs";
+import { expectedFromDataset } from "@/scripts/verify-output.mjs";
 import { at, copySample, editJson, plantFile, releaseGrade, tempDir } from "./dataset-helpers";
+import { plantedRealMain } from "./planted-first-screen";
 
 const LINE = "Independent. Not affiliated with Open Standard or Bridge.";
 const VERSION = "20261104T060000Z";
@@ -29,17 +31,17 @@ function realPage(body: string) {
     <footer><p>${LINE}</p><p>Not financial advice.</p></footer></body></html>`;
 }
 
-const REAL_MAIN = `<main><section data-section="verdict"><p>${STALE_NOTE}</p></section>
-  <section data-section="trust-strip">${STALE_TRUST}</section></main>`;
+const realMain = () =>
+  plantedRealMain(expectedFromDataset(at(releaseGrade())), STALE_NOTE, STALE_TRUST);
 
 function goodRealBuild(_webRoot: string, target: string) {
-  plantFile(target, "index.html", realPage(REAL_MAIN));
+  plantFile(target, "index.html", realPage(realMain()));
   plantFile(target, "methodology/index.html", realPage("<main>Fine</main>"));
 }
 
 function badRealBuild(_webRoot: string, target: string) {
   goodRealBuild(_webRoot, target);
-  plantFile(target, "index.html", realPage(`${REAL_MAIN}<p>Held at Coinbase</p>`));
+  plantFile(target, "index.html", realPage(`${realMain()}<p>Held at Coinbase</p>`));
 }
 
 // A release root that already has a last good version, to see whether it moves.

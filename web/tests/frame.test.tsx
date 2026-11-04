@@ -9,10 +9,19 @@ import Methodology from "@/app/methodology/page";
 import Home from "@/app/page";
 import { TableCard } from "@/components/chart-card";
 import { StatusChip } from "@/components/status-chip";
-import { DEFINITION_ANCHORS } from "@/lib/definitions";
+import { CARD_ANCHORS, DEFINITION_ANCHORS } from "@/lib/definitions";
 import { copySample, editJson, releaseGrade } from "./dataset-helpers";
 
-const SECTIONS = ["verdict", "kpi-row", "trust-strip", "view-a", "view-b", "view-e"];
+const SECTIONS = [
+  "trust-strip",
+  "verdict",
+  "kpi-row",
+  "findings",
+  "marker-legend",
+  "view-a",
+  "view-b",
+  "view-e",
+];
 
 function useSample(name: "complete" | "partial") {
   vi.stubEnv("OUSD_DATASET_DIR", `fixtures/dataset/${name}`);
@@ -51,6 +60,44 @@ describe("the main page", () => {
     }
   });
 
+  it("has every card's anchor on a card, once", () => {
+    useSample("complete");
+    const { container } = render(<Home />);
+    for (const id of Object.values(CARD_ANCHORS)) {
+      const target = container.querySelectorAll(`[id="${id}"]`);
+      expect(target).toHaveLength(1);
+      expect(target[0].matches(".chart-card")).toBe(true);
+    }
+  });
+
+  it.each(["complete", "partial"] as const)(
+    "on the %s sample, each finding lands on a card with the same words and marker",
+    (name) => {
+      useSample(name);
+      const { container } = render(<Home />);
+      const links = [...container.querySelectorAll("[data-finding-link]")];
+      expect(links).toHaveLength(4);
+      for (const link of links) {
+        const card = container.querySelector(link.getAttribute("href")!)!;
+        expect(card.querySelector("h2")!.textContent).toBe(
+          link.querySelector(".finding__text")!.textContent,
+        );
+        expect(card.querySelector(".status-chip")!.getAttribute("data-kind")).toBe(
+          link.querySelector(".status-chip")!.getAttribute("data-kind"),
+        );
+      }
+    },
+  );
+
+  it("puts the trust status first and the legend last, ahead of every card", () => {
+    useSample("complete");
+    const { container } = render(<Home />);
+    const screen = container.querySelector(".first-screen")!;
+    expect(screen.firstElementChild!.getAttribute("data-section")).toBe("trust-strip");
+    expect(screen.lastElementChild!.getAttribute("data-section")).toBe("marker-legend");
+    expect(screen.querySelector(".chart-card")).toBeNull();
+  });
+
   it("has a word on every card and in the KPI row, and hatching on every card", () => {
     useSample("complete");
     const { container } = render(<Home />);
@@ -64,13 +111,19 @@ describe("the main page", () => {
     }
     const kpis = container.querySelector('[data-section="kpi-row"]')!;
     expect(within(kpis as HTMLElement).getByText("Sample")).toBeTruthy();
+    for (const finding of container.querySelectorAll("[data-finding-link]")) {
+      expect(finding.getAttribute("data-frame")).toBe("Sample");
+      expect(finding.textContent).toContain("Sample");
+    }
   });
 
   it('says "Sample, not a finding" and "Not reconciled"', () => {
     useSample("complete");
     const { container } = render(<Home />);
     expect(screen.getByText("Sample, not a finding")).toBeTruthy();
-    expect(container.textContent).not.toContain("Our reading");
+    expect(container.querySelector('[data-section="verdict"]')!.textContent).not.toContain(
+      "Our reading",
+    );
     expect(container.querySelector('[data-section="trust-strip"]')!.textContent).toContain(
       "Not reconciled",
     );
@@ -146,6 +199,10 @@ describe("a real dataset", () => {
       expect(card.getAttribute("data-frame")).toBeNull();
       expect(card.querySelector(".chart-card__meta")!.textContent).not.toContain("Sample");
     }
+    for (const finding of container.querySelectorAll("[data-finding-link]")) {
+      expect(finding.getAttribute("data-frame")).toBeNull();
+      expect(finding.textContent).not.toContain("Sample");
+    }
     expect(screen.getAllByText("Our reading").length).toBeGreaterThan(0);
     expect(container.textContent).not.toContain("Not reconciled");
   });
@@ -213,6 +270,10 @@ describe("a preview dataset", () => {
       expect(card.getAttribute("data-frame")).toBe("Preview");
       expect(card.querySelector(".chart-card__meta")!.textContent).toContain("Preview");
     }
+    for (const finding of container.querySelectorAll("[data-finding-link]")) {
+      expect(finding.getAttribute("data-frame")).toBe("Preview");
+      expect(finding.textContent).toContain("Preview");
+    }
     expect(screen.getByText("Preview, not a finding")).toBeTruthy();
     expect(container.querySelector('[data-section="trust-strip"]')!.textContent).toContain(
       "Not reconciled",
@@ -232,6 +293,7 @@ describe("shared parts", () => {
     const css = readFileSync("app/globals.css", "utf8");
     expect(css).toContain("html[data-frame] body::before");
     expect(css).toContain(".chart-card[data-frame]::before");
+    expect(css).toContain(".finding[data-frame]::before");
     expect(css).not.toMatch(/\[data-frame\][^{]*\{[^}]*display:\s*none/);
   });
 

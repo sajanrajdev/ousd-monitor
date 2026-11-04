@@ -1,9 +1,10 @@
 import { ChartCard, TableCard } from "@/components/chart-card";
 import { allChainJourney, allChainSeries, dayRange, newestByChain } from "@/lib/aggregate";
 import type { ActivityRow, Definitions, DatasetState, JourneyRow, KpiRow } from "@/lib/dataset";
-import { CHAIN_NAMES, definitionHref, REQUIRED_CHAINS } from "@/lib/definitions";
+import { CARD_ANCHORS, CHAIN_NAMES, definitionHref, REQUIRED_CHAINS } from "@/lib/definitions";
 import { formatBps, formatCompact, formatExact, formatUtcDate, UNKNOWN_TEXT } from "@/lib/format";
 import {
+  journeyHeading,
   journeyTakeaway,
   scopeText,
   seriesTakeaway,
@@ -22,10 +23,10 @@ export type JourneyViewProps = {
 
 const SOURCE = "Chain data and public labels";
 
-function VenueNote({ unlabeled }: { unlabeled: string[] }) {
+function VenueNote({ unlabeled }: { unlabeled: JourneyRow["chain"][] }) {
   return (
     <>
-      <p>
+      <p data-note="placed">
         Placed measures dollars that stayed, not why. It can&apos;t show who holds them or what they
         are for, and a venue with no published label can count as placed, exchange custody included.{" "}
         <a href={definitionHref("venue-supply")} className="underline underline-offset-4">
@@ -33,9 +34,15 @@ function VenueNote({ unlabeled }: { unlabeled: string[] }) {
         </a>
         .
       </p>
-      {unlabeled.map((name) => (
-        <p key={name} className="mt-2" data-testid="issuer-unlabeled">
-          {name}: issuer inventory reads as zero because no wallet there is labelled.
+      {unlabeled.map((chain) => (
+        <p
+          key={chain}
+          className="mt-2"
+          data-testid="issuer-unlabeled"
+          data-note="issuer-unlabeled"
+          data-chain={chain}
+        >
+          {CHAIN_NAMES[chain]}: issuer inventory reads as zero because no wallet there is labelled.
         </p>
       ))}
     </>
@@ -111,15 +118,16 @@ export function JourneyView({ journey, activity, kpis, definitions, state }: Jou
   const seriesAsOf = series.length > 0 ? dayRange(series.map((p) => p.day))! : asOf;
   const unlabeled = newest
     .filter((row) => !row.issuer_labeled && BigInt(row.issuer_inventory) === 0n)
-    .map((row) => CHAIN_NAMES[row.chain]);
-  const takeaway = journeyTakeaway(journey, definitions);
+    .map((row) => row.chain);
 
   const circulatingOf = circulatingByChain(newest, activity);
 
   return (
     <section id="supply-journey" data-section="view-a" className="grid gap-6">
       <ChartCard
-        takeaway={takeaway}
+        id={CARD_ANCHORS.supply}
+        takeaway={journeyHeading(journey, definitions)}
+        detail={<p>{journeyTakeaway(journey, definitions)}</p>}
         chip="inferred"
         source={SOURCE}
         asOf={asOf}
@@ -170,6 +178,7 @@ export function JourneyView({ journey, activity, kpis, definitions, state }: Jou
       </ChartCard>
 
       <ChartCard
+        id={CARD_ANCHORS.series}
         takeaway={seriesTakeaway(series, chains)}
         chip="inferred"
         source={SOURCE}
@@ -183,7 +192,7 @@ export function JourneyView({ journey, activity, kpis, definitions, state }: Jou
             : `Total, placed and circulating supply over time on ${scopeText(chains)}, from ${formatUtcDate(series[0].day)}.`
         }
         note={
-          <p>
+          <p data-note="series-start">
             The series starts on {formatUtcDate(definitions.journey_first_day)}. Placed supply needs{" "}
             {definitions.placed_days} days of history, so earlier days are left out. Days where a
             chain has no value are skipped. Per-chain values are in the first card&apos;s table.

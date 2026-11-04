@@ -2,9 +2,16 @@ import { TableCard } from "@/components/chart-card";
 import { SERIES_COLORS } from "@/components/chart-theme";
 import { dayRange } from "@/lib/aggregate";
 import type { ChainRoleRow, DatasetState } from "@/lib/dataset";
-import { CHAIN_NAMES, DAY_ZERO, definitionHref, REQUIRED_CHAINS } from "@/lib/definitions";
+import {
+  CARD_ANCHORS,
+  CHAIN_NAMES,
+  DAY_ZERO,
+  definitionHref,
+  REQUIRED_CHAINS,
+} from "@/lib/definitions";
 import { formatBps, formatCompact, formatUtcDate } from "@/lib/format";
 import {
+  chainRolesHeading,
   chainRolesSummary,
   chainRolesTakeaway,
   chainSentences,
@@ -58,7 +65,9 @@ export function ChainRolesView({ chain_roles, state }: ChainRolesViewProps) {
   return (
     <section id="chain-roles-view" data-section="view-e">
       <TableCard
-        takeaway={chainRolesTakeaway(chain_roles)}
+        id={CARD_ANCHORS.chainRoles}
+        takeaway={chainRolesHeading(chain_roles)}
+        detail={<p>{chainRolesTakeaway(chain_roles)}</p>}
         chip="inferred"
         source="Chain data and public labels"
         asOf={dayRange(chain_roles.map((row) => row.as_of_day)) ?? DAY_ZERO}

@@ -1,6 +1,7 @@
 import type { ChainName, ChainRoleRow } from "../dataset/rows.ts";
 import { CHAIN_NAMES, REQUIRED_CHAINS } from "../definitions.ts";
 import { UNKNOWN_TEXT } from "../format.ts";
+import { scopedHeading } from "./journey.ts";
 
 export type Measure = ChainRoleRow["leading_for"][number];
 
@@ -88,6 +89,52 @@ export function chainRolesTakeaway(rows: ChainRoleRow[]): string {
   );
   const text = `${[...parts, ...ties].join("; ")}.`;
   return differingDays(rows) ? `${text} Chains end on different days.` : text;
+}
+
+const COUNT_WORDS = ["", "one", "two", "three", "four", "five"];
+
+// One measure by name, and more by count, so a heading stays short however many a chain leads on.
+function measureCount(measures: Measure[]): string {
+  if (measures.length === 1) return MEASURES[measures[0]].short;
+  const count = `${COUNT_WORDS[measures.length]} measures`;
+  return measures.length === MEASURE_ORDER.length ? `all ${count}` : count;
+}
+
+// The takeaway's finding in about 12 words. It names two chains at most: past that it says how many.
+// A chain with no measure of its own, in a tie, is named by the tie alone.
+export function chainRolesHeading(rows: ChainRoleRow[]): string {
+  if (rows.length === 0) return UNKNOWN_TEXT;
+  const chains = orderedChains(rows).map((row) => row.chain);
+  const led = MEASURE_ORDER.map((measure) => ({ measure, leaders: leadersOf(rows, measure) }));
+  const leading = chains.filter((chain) => led.some(({ leaders }) => leaders.includes(chain)));
+  const split = `Leadership is split across ${leading.length} chains.`;
+  if (leading.length === 0) {
+    return scopedHeading(chains, "No chain leads on any measure in this data.");
+  }
+  if (leading.length > 2) return scopedHeading(chains, split);
+  const soleMeasures = (chain: ChainName) =>
+    led
+      .filter(({ leaders }) => leaders.length === 1 && leaders[0] === chain)
+      .map(({ measure }) => measure);
+  const [first, second] = [...leading].sort(
+    (a, b) => soleMeasures(b).length - soleMeasures(a).length,
+  );
+  const tied = led.filter(({ leaders }) => leaders.length > 1).map(({ measure }) => measure);
+  if (tied.length === 0) {
+    const also = second ? `; ${CHAIN_NAMES[second]} on ${measureCount(soleMeasures(second))}` : "";
+    return scopedHeading(
+      chains,
+      `${CHAIN_NAMES[first]} leads on ${measureCount(soleMeasures(first))}${also}.`,
+    );
+  }
+  if (soleMeasures(second).length > 0) return scopedHeading(chains, split);
+  const tie = `${names(leading)} tie on ${measureCount(tied)}`;
+  return scopedHeading(
+    chains,
+    soleMeasures(first).length > 0
+      ? `${CHAIN_NAMES[first]} leads on ${measureCount(soleMeasures(first))}; ${tie}.`
+      : `${tie}.`,
+  );
 }
 
 // The text summary: each chain's own sentences, so a reader sees what it leads on in full.
