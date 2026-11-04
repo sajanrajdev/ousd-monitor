@@ -53,7 +53,9 @@ describe("the main page", () => {
     useSample("complete");
     const { container } = render(<Home />);
     const cards = [...container.querySelectorAll(".chart-card")];
-    expect(cards.length).toBe(3);
+    for (const view of ["view-a", "view-b", "view-e"]) {
+      expect(container.querySelector(`[data-section="${view}"] .chart-card`)).not.toBeNull();
+    }
     for (const card of cards) {
       expect(card.getAttribute("data-frame")).toBe("Sample");
       expect(card.querySelector(".chart-card__meta")!.textContent).toContain("Sample");
