@@ -69,9 +69,9 @@ class RpcError(RuntimeError):
 
 
 # What reading a provider's data raises when a field is missing, mistyped or not a number.
-_MALFORMED = (ValueError, KeyError, TypeError, AttributeError, IndexError)
+_MALFORMED = (ValueError, KeyError, TypeError, AttributeError, IndexError, ArithmeticError)
 # Longest stretch of a provider's reply kept in an error, after scrubbing.
-_DETAIL_LIMIT = 200
+_DETAIL_LIMIT = 400
 
 
 def _parse[T](http: PoliteClient, url: str, what: str, read: Callable[[], T]) -> T:
@@ -248,7 +248,9 @@ class BlockscoutClient:
             if self._parse("response", lambda: message.startswith("No logs found")):
                 return []
             raise RuntimeError(
-                self._http.scrub(f"Blockscout error for {params}: {body}", self._url)
+                self._http.scrub(f"Blockscout error for {params}: {body}", self._url)[
+                    :_DETAIL_LIMIT
+                ]
             )
         return self._parse(
             "logs result", lambda: [decode_blockscout_log(entry, token) for entry in body["result"]]
@@ -256,6 +258,17 @@ class BlockscoutClient:
 
     def _parse[T](self, what: str, read: Callable[[], T]) -> T:
         return _parse(self._http, self._url, what, read)
+
+    def _logs_url(self, tx_hash: str) -> httpx.URL:
+        invalid = False
+        try:
+            base = httpx.URL(self._url)
+            return base.copy_with(path=f"{base.path.rstrip('/')}/v2/transactions/{tx_hash}/logs")
+        except httpx.InvalidURL:
+            # Its text can quote part of the URL. Raised below, outside the handler.
+            invalid = True
+        assert invalid
+        raise ValueError("invalid Blockscout URL")
 
     def pages(
         self, token: str, from_block: int, to_block: int
@@ -289,8 +302,7 @@ class BlockscoutClient:
         That endpoint reports no status, so the success flag is None.
         """
         _check_tx_hash(tx_hash)
-        base = httpx.URL(self._url)
-        first = base.copy_with(path=f"{base.path.rstrip('/')}/v2/transactions/{tx_hash}/logs")
+        first = self._logs_url(tx_hash)
         url = first
         transfers: list[ProofTransfer] = []
         block_numbers: set[int] = set()

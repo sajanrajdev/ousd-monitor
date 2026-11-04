@@ -391,6 +391,25 @@ def test_a_parse_failure_on_provider_data_never_shows_the_key(read, url, caplog)
     assert_clean(raised.value, caplog)
 
 
+@pytest.mark.parametrize("url", PARAMS)
+def test_an_overflowing_number_in_a_reply_is_a_clean_value_error(url, caplog):
+    body = {"items": [v2_item(block_number=float("inf"))], "next_page_params": None}
+
+    with pytest.raises(ValueError) as raised:
+        blockscout(url, body).transaction_logs(TX, TOKEN)
+
+    assert_clean(raised.value, caplog)
+
+
+def test_a_bad_port_in_a_blockscout_url_is_clean_for_transaction_logs(caplog):
+    url = f"http://rpc.provider.invalid:{KEY}/v2/{KEY}"
+
+    with pytest.raises(ValueError) as raised:
+        blockscout(url, {}).transaction_logs(TX, TOKEN)
+
+    assert_clean(raised.value, caplog)
+
+
 def test_a_parse_failure_leaves_the_failing_reads_other_details_visible():
     with pytest.raises(ValueError) as raised:
         rpc(URLS[0], {"timestamp": f"zz {KEY}"}).block_timestamp(7)
