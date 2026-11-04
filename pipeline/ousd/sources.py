@@ -15,7 +15,7 @@ from ousd.decode import (
     decode_blockscout_log,
     decode_rpc_log,
 )
-from ousd.http import PoliteClient
+from ousd.http import HttpError, PoliteClient
 
 TOTAL_SUPPLY_SELECTOR = "0x18160ddd"
 BALANCE_OF_SELECTOR = "0x70a08231"
@@ -24,6 +24,8 @@ BLOCKSCOUT_PAGE_SIZE = 1000
 TOO_MANY_RESULTS = "exceeds max results"
 # Pages of one transaction's logs. Even a very large batch fits in far fewer.
 MAX_LOG_PAGES = 20
+# How PoliteClient reports a 404. Anchored at its label, so a body quoting these words can't match.
+NOT_FOUND = re.compile(r"[^:]*: HTTP 404:")
 TX_HASH = re.compile(r"0x[0-9a-f]{64}")
 ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
 # Plain decimal digits only, so NaN, Infinity, exponents, signs and padding are all refused.
@@ -295,8 +297,9 @@ class BlockscoutClient:
             yield [row for row in rows if row.block_number < last_block], last_block - 1
             start = last_block
 
-    def transaction_logs(self, tx_hash: str, token: str) -> TransactionProof:
-        """The token's Transfer logs in one transaction, from Blockscout's v2 API.
+    def transaction_logs(self, tx_hash: str, token: str) -> TransactionProof | None:
+        """The token's Transfer logs in one transaction, from Blockscout's v2 API, or None if it
+        doesn't know the transaction: a 404, or no logs at all. Any other failure raises.
 
         That endpoint reports no status, so the success flag is None.
         """
@@ -307,7 +310,13 @@ class BlockscoutClient:
         block_numbers: set[int] = set()
         seen: set[tuple[tuple[str, str], ...]] = set()
         for _ in range(MAX_LOG_PAGES):
-            body = self._http.request_json("GET", str(url))
+            try:
+                body = self._http.request_json("GET", str(url))
+            except HttpError as exc:
+                # A later page going missing is a broken read, not an unknown transaction.
+                if url == first and NOT_FOUND.match(str(exc)):
+                    return None
+                raise
 
             def read_page(body: Any = body) -> tuple[tuple[str, str], ...] | None:
                 for item in body["items"]:
@@ -338,7 +347,7 @@ class BlockscoutClient:
         else:
             raise ValueError(f"Blockscout logs for {tx_hash} run past {MAX_LOG_PAGES} pages")
         if not block_numbers:
-            raise ValueError(f"Blockscout returned no logs for {tx_hash}")
+            return None
         if len(block_numbers) != 1:
             raise ValueError(f"Blockscout logs for {tx_hash} name blocks {sorted(block_numbers)}")
         return TransactionProof(tx_hash, block_numbers.pop(), None, transfers)

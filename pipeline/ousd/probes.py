@@ -3,7 +3,9 @@
 Clients are built here, each through PoliteClient, and a label only ever holds the chain's name.
 """
 
+import logging
 from collections.abc import Sequence
+from typing import NoReturn
 
 from ousd.chains import Chain
 from ousd.http import HttpError, PoliteClient
@@ -13,7 +15,6 @@ from ousd.reconcile import (
     ChainProbe,
     ChainReconciliation,
     ChainUnavailable,
-    Unchecked,
     reconcile_chain,
 )
 from ousd.solana import (
@@ -22,13 +23,16 @@ from ousd.solana import (
     SolanaDataError,
     SolanaRpc,
     SolanaRpcError,
+    SolanaUnchecked,
     TailReread,
     decode_transaction,
     read_sampled_balances,
     reconcile_solana,
 )
-from ousd.sources import BlockscoutClient, ProofTransfer, RpcClient, TransactionProof
+from ousd.sources import BlockscoutClient, ProofTransfer, RpcClient, RpcError, TransactionProof
 from ousd.store import Store, StoreConflict
+
+log = logging.getLogger(__name__)
 
 BLOCKSCOUT_INTERVAL = 0.25
 
@@ -107,12 +111,19 @@ class EvmProbe:
         except _EVM_SOURCE_ERRORS as exc:
             raise ChainUnavailable("state_unavailable") from exc
 
-    def read_transaction_proof(self, tx_hash: str) -> TransactionProof | None:
-        token = self._chain.token
+    def _receipt(self, tx_hash: str) -> TransactionProof | None:
         try:
-            proof = self._rpc.transaction_receipt(tx_hash, token)
+            return self._rpc.transaction_receipt(tx_hash, self._chain.token)
+        except RpcError:
+            # The node is up and declined to say, so it's no answer, like a null. An outage is an
+            # HttpError or a malformed reply, and those raise out of here.
+            return None
+
+    def read_transaction_proof(self, tx_hash: str) -> TransactionProof | None:
+        try:
+            proof = self._receipt(tx_hash)
             if proof is None and self._history is not None:
-                return self._history.transaction_logs(tx_hash, token)
+                return self._history.transaction_logs(tx_hash, self._chain.token)
         except _EVM_SOURCE_ERRORS as exc:
             raise ChainUnavailable("group_proof_unavailable") from exc
         return proof
@@ -130,14 +141,17 @@ class SolanaProbe:
         self._store = store
         self._reread = TailReread()
 
-    def _require_cursor(self) -> None:
-        # solana.py's own check gives free text, which the recorder can only call source_error.
-        if self._store.synced_through(self.name) is None:
-            raise ChainUnavailable("not_synced")
+    def _raise_unchecked(self, unchecked: SolanaUnchecked) -> NoReturn:
+        # A run stores only the code and the cause's class, as provider text is never stored. So
+        # the words that say what to do, such as "run sync first", go to the operator here.
+        log.warning("%s: unchecked: %s", self.name, unchecked.reason)
+        raise ChainUnavailable(unchecked.code) from unchecked.cause
 
-    def supply_check(self) -> ChainReconciliation | Unchecked:
-        self._require_cursor()
-        return reconcile_solana(self._chain, self._rpc, self._store, self._reread)
+    def supply_check(self) -> ChainReconciliation:
+        result = reconcile_solana(self._chain, self._rpc, self._store, self._reread)
+        if isinstance(result, SolanaUnchecked):
+            self._raise_unchecked(result)
+        return result
 
     def pin_timestamp(self, height: int) -> int:
         try:
@@ -145,15 +159,14 @@ class SolanaProbe:
         except _SOLANA_SOURCE_ERRORS as exc:
             raise ChainUnavailable("coverage_gap") from exc
 
-    def read_balances(self, addresses: Sequence[str], height: int) -> list[BalanceRead] | Unchecked:
+    def read_balances(self, addresses: Sequence[str], height: int) -> list[BalanceRead]:
         # `height` goes unused: there is no past-slot read, so each reading reports its own slot,
         # which is the height it must be compared at.
-        self._require_cursor()
         readings = read_sampled_balances(
             self._chain, self._rpc, self._store, addresses, self._reread
         )
-        if isinstance(readings, Unchecked):
-            return readings
+        if isinstance(readings, SolanaUnchecked):
+            self._raise_unchecked(readings)
         return [BalanceRead(reading.owner, reading.slot, reading.amount) for reading in readings]
 
     def read_transaction_proof(self, tx_hash: str) -> TransactionProof | None:

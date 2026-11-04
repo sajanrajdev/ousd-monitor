@@ -156,6 +156,14 @@ def _check_confidential(
         raise SolanaDataError(f"{signature}: confidential instruction {kind} at {position}")
 
 
+def _signature_for_error(transaction: Any) -> str:
+    """The transaction's signature, for an error about a reply that may have no such field."""
+    try:
+        return str(transaction["transaction"]["signatures"][0])
+    except (KeyError, IndexError, TypeError):
+        return "?"
+
+
 def decode_transaction(transaction: dict[str, Any], mint: str) -> list[Transfer]:
     """The OUSD movements in one `getTransaction` result (`jsonParsed`), in execution order.
 
@@ -165,10 +173,9 @@ def decode_transaction(transaction: dict[str, Any], mint: str) -> list[Transfer]
     """
     try:
         return _decode(transaction, mint)
-    except (KeyError, IndexError, TypeError, ValueError) as error:
-        signature = transaction.get("transaction", {}).get("signatures", ["?"])[0]
+    except (AttributeError, KeyError, IndexError, TypeError, ValueError) as error:
         raise SolanaDataError(
-            f"{signature}: malformed transaction ({type(error).__name__})"
+            f"{_signature_for_error(transaction)}: malformed transaction ({type(error).__name__})"
         ) from error
 
 
@@ -589,6 +596,15 @@ def _refuse_rekey(
             )
 
 
+@dataclass(frozen=True)
+class SolanaUnchecked(Unchecked):
+    """`reason` is scrubbed text for a person to read, and is never stored. A run records `code`,
+    which is from reconcile's REASONS, and only the class of `cause`, the source error if any."""
+
+    code: str = "source_error"
+    cause: Exception | None = field(default=None, repr=False, compare=False)
+
+
 class BalanceReading(NamedTuple):
     owner: str
     slot: int
@@ -614,7 +630,12 @@ class BalanceCheck:
 
 
 class _NotReady(Exception):
-    """The store isn't in a state a check should sync from. Its text is the Unchecked reason."""
+    """The store isn't in a state a check should sync from. Its text is the Unchecked reason, and
+    `code` is what a run records for it."""
+
+    def __init__(self, code: str, text: str) -> None:
+        super().__init__(text)
+        self.code = code
 
 
 # Only what says "couldn't check". A StoreConflict is proven disagreement and a bug is a bug, so
@@ -622,31 +643,36 @@ class _NotReady(Exception):
 _CANT_CHECK = (HttpError, SolanaRpcError, SolanaDataError, _NotReady)
 
 
-def _unchecked(chain: SolanaChain, rpc: SolanaRpc, error: Exception) -> Unchecked:
+def _unchecked(chain: SolanaChain, rpc: SolanaRpc, error: Exception) -> SolanaUnchecked:
     # Errors built here can quote provider fields, such as a signature, that no scrub has seen.
-    return Unchecked(chain.name, rpc.scrub(str(error)))
+    reason = rpc.scrub(str(error))
+    if isinstance(error, _NotReady):
+        return SolanaUnchecked(chain.name, reason, error.code)
+    return SolanaUnchecked(chain.name, reason, cause=error)
 
 
 def _require_cursor(chain: SolanaChain, store: Store) -> int:
     cursor = store.synced_through(chain.name)
     if cursor is None:
-        raise _NotReady(f"{chain.name}: nothing synced yet, run sync first")
+        raise _NotReady("not_synced", f"{chain.name}: nothing synced yet, run sync first")
     return cursor
 
 
 def _require_short_tail(chain: SolanaChain, cursor: int, slot: int) -> None:
     if slot - cursor > MAX_TAIL_SLOTS:
         raise _NotReady(
+            "not_synced",
             f"{chain.name}: slot {slot} is {slot - cursor} past the cursor, more than a check "
-            f"syncs ({MAX_TAIL_SLOTS}), run sync first"
+            f"syncs ({MAX_TAIL_SLOTS}), run sync first",
         )
 
 
 def _require_recent_read(chain: SolanaChain, cursor: int, slot: int) -> None:
     if cursor - slot > MAX_READ_LAG_SLOTS:
         raise _NotReady(
+            "pin_behind_cursor",
             f"{chain.name}: the balance read at slot {slot} is {cursor - slot} below the cursor, "
-            f"more than a check compares ({MAX_READ_LAG_SLOTS}), read again"
+            f"more than a check compares ({MAX_READ_LAG_SLOTS}), read again",
         )
 
 
@@ -666,7 +692,10 @@ def _pin_supply_and_sync(
     pin = _retry(rpc, read, False)
     if pin is None:
         # Recording it would fail the gate, which needs the row's block to equal the cursor.
-        raise _NotReady(f"{chain.name}: the supply pin stayed below the cursor, slot {cursor}")
+        raise _NotReady(
+            "pin_behind_cursor",
+            f"{chain.name}: the supply pin stayed below the cursor, slot {cursor}",
+        )
     _require_short_tail(chain, cursor, pin.slot)
     sync_solana(chain, rpc, store, through_slot=pin.slot, reread=reread)
     return pin
@@ -697,7 +726,7 @@ def _read_balances_and_sync(
 
 def reconcile_solana(
     chain: SolanaChain, rpc: SolanaRpc, store: Store, reread: TailReread | None = None
-) -> ChainReconciliation | Unchecked:
+) -> ChainReconciliation | SolanaUnchecked:
     """Compare events with the supply at a pinned slot, to the base unit, and record it.
 
     A difference after a complete sync is a real mismatch. Anything that stops the steps before it
@@ -720,7 +749,7 @@ def read_sampled_balances(
     store: Store,
     owners: Sequence[str] | None,
     reread: TailReread | None = None,
-) -> list[BalanceReading] | Unchecked:
+) -> list[BalanceReading] | SolanaUnchecked:
     """On-chain balances of the given owners, or of every owner in the read for None, all at one
     slot, with the store synced through it. An owner with no token account reads 0.
 

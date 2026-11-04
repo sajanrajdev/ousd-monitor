@@ -6,7 +6,7 @@ import dataclasses
 import json
 import logging
 import traceback
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +19,6 @@ from ousd.decode import TRANSFER_TOPIC, ZERO_ADDRESS, Transfer
 from ousd.http import HttpError, PoliteClient
 from ousd.ingest import ReorgError, sync_chain
 from ousd.probes import (
-    BLOCKSCOUT_INTERVAL,
     EvmProbe,
     SolanaProbe,
     build_probes,
@@ -30,10 +29,11 @@ from ousd.reconcile import (
     ChainReconciliation,
     ChainUnavailable,
     RunResult,
-    Unchecked,
     run_reconciliation,
 )
 from ousd.solana import (
+    MAX_READ_LAG_SLOTS,
+    MAX_TAIL_SLOTS,
     OUSD_MINT,
     RPC_INTERVAL,
     BalanceReading,
@@ -41,13 +41,14 @@ from ousd.solana import (
     SlotReading,
     SolanaChain,
     SolanaDataError,
+    SolanaRpc,
     SolanaRpcError,
     TailReread,
     decode_transaction,
     load_solana,
     sync_solana,
 )
-from ousd.sources import BlockscoutClient, ProofTransfer, RpcError, TransactionProof
+from ousd.sources import BlockscoutClient, ProofTransfer, RpcClient, RpcError, TransactionProof
 from ousd.store import Store, StoreConflict
 from solana_fakes import FakeSolanaRpc, load, movement
 
@@ -108,7 +109,7 @@ class SpyRpc(FakeRpc):
 
 
 class FakeBlockscout(BlockscoutClient):
-    def __init__(self, proof: TransactionProof | Exception) -> None:
+    def __init__(self, proof: TransactionProof | Exception | None) -> None:
         self.proof = proof
         self.calls: list[tuple[str, str]] = []
         self.page_calls: list[tuple[str, int, int]] = []
@@ -119,7 +120,7 @@ class FakeBlockscout(BlockscoutClient):
         self.page_calls.append((token, from_block, to_block))
         yield [], to_block
 
-    def transaction_logs(self, tx_hash: str, token: str) -> TransactionProof:
+    def transaction_logs(self, tx_hash: str, token: str) -> TransactionProof | None:
         self.calls.append((tx_hash, token))
         if isinstance(self.proof, Exception):
             raise self.proof
@@ -153,6 +154,13 @@ def reasons(result: RunResult, chain: str) -> dict[str, str | None]:
         for outcome in result.outcomes
         if outcome.subject == chain
     }
+
+
+SOLANA_FAILURES = [
+    HttpError("rpc: HTTP 503"),
+    SolanaRpcError(-32004, "getBlockTime: not available"),
+    SolanaDataError("malformed reply"),
+]
 
 
 # EvmProbe: supply.
@@ -330,7 +338,34 @@ def test_a_null_receipt_with_no_blockscout_is_none(store):
     assert EvmProbe(CHAIN, SpyRpc(), store).read_transaction_proof(PROOF.tx_hash) is None
 
 
-@pytest.mark.parametrize("failure", SOURCE_FAILURES, ids=lambda e: type(e).__name__)
+def test_an_answer_of_none_from_blockscout_is_none(store):
+    history = FakeBlockscout(None)
+
+    assert EvmProbe(CHAIN, SpyRpc(), store, history).read_transaction_proof(PROOF.tx_hash) is None
+    assert history.calls == [(PROOF.tx_hash, CHAIN.token)]
+
+
+def test_a_json_rpc_error_on_a_receipt_falls_to_blockscout(store):
+    rpc = SpyRpc()
+    rpc.faults["receipt"] = RpcError("eth_getTransactionReceipt: pruned")
+    history = FakeBlockscout(PROOF)
+
+    assert EvmProbe(CHAIN, rpc, store, history).read_transaction_proof(PROOF.tx_hash) == PROOF
+    assert history.calls == [(PROOF.tx_hash, CHAIN.token)]
+
+
+def test_a_json_rpc_error_on_a_receipt_with_no_blockscout_is_none(store):
+    rpc = SpyRpc()
+    rpc.faults["receipt"] = RpcError("eth_getTransactionReceipt: pruned")
+
+    assert EvmProbe(CHAIN, rpc, store).read_transaction_proof(PROOF.tx_hash) is None
+
+
+# An RpcError is a node declining to answer, which isn't an outage. These are.
+RECEIPT_OUTAGES = [failure for failure in SOURCE_FAILURES if not isinstance(failure, RpcError)]
+
+
+@pytest.mark.parametrize("failure", RECEIPT_OUTAGES, ids=lambda e: type(e).__name__)
 def test_a_receipt_outage_raises_and_doesnt_ask_blockscout(store, failure):
     rpc = SpyRpc()
     rpc.faults["receipt"] = failure
@@ -437,6 +472,173 @@ def test_a_blockscout_outage_on_a_group_in_a_run_is_unchecked(store):
     assert reasons(result, "tempo")["same_looking"] == "group_proof_unavailable"
 
 
+def scout_page(
+    tx_hash: str,
+    block: int,
+    positions: Iterable[int],
+    next_page: dict[str, int] | None = None,
+    address: str = CHAIN.token,
+) -> dict[str, Any]:
+    """One page of Blockscout's logs for a transaction, each a Transfer of 1 from ALICE to BOB."""
+    return {
+        "items": [
+            {
+                "transaction_hash": tx_hash,
+                "block_number": block,
+                "address": {"hash": address},
+                "topics": [
+                    TRANSFER_TOPIC,
+                    "0x" + "0" * 24 + ALICE[2:],
+                    "0x" + "0" * 24 + BOB[2:],
+                    None,
+                ],
+                "data": hex(1),
+                "index": position,
+            }
+            for position in positions
+        ],
+        "next_page_params": next_page,
+    }
+
+
+def scout_serving(handler: Any) -> tuple[BlockscoutClient, list[str]]:
+    """A real client over `handler`, which answers one transaction's logs by its hash, and the
+    hashes asked about. A sync's history read finds nothing, as the rows are already stored."""
+    asked: list[str] = []
+
+    def serve(request: httpx.Request) -> httpx.Response:
+        if "module" in request.url.params:
+            return httpx.Response(200, json={"status": "0", "message": "No logs found"})
+        tx_hash = request.url.path.split("/")[-2]
+        asked.append(tx_hash)
+        return handler(tx_hash, request)
+
+    http = PoliteClient(
+        label="testnet-blockscout",
+        min_interval=0,
+        transport=httpx.MockTransport(serve),
+        sleep=lambda _: None,
+    )
+    return BlockscoutClient(http, "http://scout.invalid/api"), asked
+
+
+UNKNOWN = "0x" + "1" * 64
+NOT_REAL = "0x" + "2" * 64
+
+
+def two_groups_on_a_pruned_node(store: Store, history: BlockscoutClient) -> EvmProbe:
+    rpc = NoReceipts()
+    rpc.add_transfer(101, 100)
+    for tx_hash, block in ((UNKNOWN, 105), (NOT_REAL, 106)):
+        for index in (0, 1):
+            rpc.logs.setdefault(block, []).append(
+                Transfer(block, rpc.hashes[block], 1_000 + block, tx_hash, index, ALICE, BOB, 1)
+            )
+    sync_chain(CHAIN, rpc, store)
+    return EvmProbe(CHAIN, rpc, store, history)
+
+
+UNKNOWN_REPLIES = {
+    "404": httpx.Response(404, json={"message": "Not found"}),
+    "empty": httpx.Response(200, json={"items": [], "next_page_params": None}),
+}
+
+
+@pytest.mark.parametrize("reply", UNKNOWN_REPLIES.values(), ids=UNKNOWN_REPLIES.keys())
+def test_an_unknown_transaction_doesnt_hide_a_not_real_one_behind_it(store, reply):
+    def answer(tx_hash: str, request: httpx.Request) -> httpx.Response:
+        if tx_hash == UNKNOWN:
+            return reply
+        # One row where two are stored, so this group isn't real.
+        return httpx.Response(200, json=scout_page(NOT_REAL, 106, [0]))
+
+    history, asked = scout_serving(answer)
+
+    result = run(store, two_groups_on_a_pruned_node(store, history))
+
+    assert asked == [UNKNOWN, NOT_REAL]
+    assert result.chains["tempo"] == "fail"
+    assert result.exit_code == 1
+    assert reasons(result, "tempo")["same_looking"] == "group_not_real"
+
+
+def test_only_an_unknown_transaction_leaves_the_chain_unchecked_not_failed(store):
+    def answer(tx_hash: str, request: httpx.Request) -> httpx.Response:
+        if tx_hash == UNKNOWN:
+            return httpx.Response(404, json={"message": "Not found"})
+        return httpx.Response(200, json=scout_page(NOT_REAL, 106, [0, 1]))
+
+    result = run(store, two_groups_on_a_pruned_node(store, scout_serving(answer)[0]))
+
+    assert result.chains["tempo"] == "unchecked"
+    assert result.exit_code == 3
+    assert reasons(result, "tempo")["same_looking"] == "group_proof_unavailable"
+
+
+def test_a_real_blockscout_outage_stops_asking_and_is_unchecked(store):
+    history, asked = scout_serving(lambda tx_hash, request: httpx.Response(503))
+
+    result = run(store, two_groups_on_a_pruned_node(store, history))
+
+    assert NOT_REAL not in asked
+    assert result.chains["tempo"] == "unchecked"
+    assert result.exit_code == 3
+    assert reasons(result, "tempo")["same_looking"] == "group_proof_unavailable"
+
+
+@pytest.mark.parametrize(
+    "receipt_reply",
+    [
+        {"jsonrpc": "2.0", "id": 1, "result": None},
+        {"jsonrpc": "2.0", "id": 1, "error": {"code": -32000, "message": "pruned"}},
+    ],
+    ids=["null", "json-rpc-error"],
+)
+def test_a_node_with_no_receipt_is_proven_across_blockscouts_pages(store, receipt_reply):
+    pages: list[httpx.URL] = []
+
+    def answer(tx_hash: str, request: httpx.Request) -> httpx.Response:
+        pages.append(request.url)
+        if "index" not in request.url.params:
+            first = scout_page(GROUP_HASH, 105, [0, 1], {"index": 2, "items_count": 50})
+            return httpx.Response(200, json=first)
+        # Another contract's Transfer in the same transaction, as the ticker isn't unique.
+        foreign = scout_page(GROUP_HASH, 105, [3], address=ORIGIN_DOLLAR)["items"]
+        second = scout_page(GROUP_HASH, 105, [2])
+        second["items"] += foreign
+        return httpx.Response(200, json=second)
+
+    rpc_http = PoliteClient(
+        label="testnet-rpc",
+        min_interval=0,
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=receipt_reply)),
+        sleep=lambda _: None,
+    )
+    rpc = RpcClient(rpc_http, "http://rpc.invalid")
+    probe = EvmProbe(CHAIN, rpc, store, scout_serving(answer)[0])
+
+    proof = probe.read_transaction_proof(GROUP_HASH)
+
+    assert proof is not None
+    assert (proof.tx_hash, proof.block_number, proof.success) == (GROUP_HASH, 105, None)
+    assert [transfer.log_index for transfer in proof.transfers] == [0, 1, 2]
+    assert [page.params.get("index") for page in pages] == [None, "2"]
+
+
+def test_a_second_page_going_missing_is_an_outage(store):
+    def answer(tx_hash: str, request: httpx.Request) -> httpx.Response:
+        if "index" not in request.url.params:
+            return httpx.Response(200, json=scout_page(GROUP_HASH, 105, [0], {"index": 1}))
+        return httpx.Response(404, json={"message": "Not found"})
+
+    probe = EvmProbe(CHAIN, SpyRpc(), store, scout_serving(answer)[0])
+
+    with pytest.raises(ChainUnavailable) as raised:
+        probe.read_transaction_proof(GROUP_HASH)
+
+    assert raised.value.reason == "group_proof_unavailable"
+
+
 # SolanaProbe: fixtures.
 
 
@@ -500,24 +702,143 @@ def test_solana_supply_reads_at_the_node_and_records_a_match(store):
     assert reconciliation_rows(store) == 1
 
 
-def test_solana_unchecked_passes_through(store):
+SOLANA_READS = pytest.mark.parametrize(
+    ("fault", "read"),
+    [
+        ("supply", lambda probe: probe.supply_check()),
+        ("accounts", lambda probe: probe.read_balances([WALLET], CURSOR)),
+    ],
+    ids=["supply", "balances"],
+)
+
+
+@SOLANA_READS
+@pytest.mark.parametrize("failure", SOLANA_FAILURES, ids=lambda e: type(e).__name__)
+def test_a_solana_source_failure_is_source_error_with_its_cause(store, fault, read, failure):
     fake = seeded_node(store)
-    fake.read_errors["supply"] = HttpError("rpc: HTTP 503")
-    probe = SolanaProbe(SOLANA, fake, store)
+    fake.read_errors[fault] = failure
 
-    result = probe.supply_check()
+    with pytest.raises(ChainUnavailable) as raised:
+        read(SolanaProbe(SOLANA, fake, store))
 
-    assert result == Unchecked("solana", "rpc: HTTP 503")
+    assert raised.value.reason == "source_error"
+    assert raised.value.__cause__ is failure
     assert reconciliation_rows(store) == 0
 
 
-def test_solana_balance_unchecked_passes_through(store):
+@SOLANA_READS
+def test_a_solana_failure_shows_the_operator_its_scrubbed_text(store, caplog, fault, read):
     fake = seeded_node(store)
-    fake.read_errors["accounts"] = HttpError("rpc: HTTP 503")
+    fake.read_errors[fault] = HttpError("rpc: HTTP 503")
 
-    result = SolanaProbe(SOLANA, fake, store).read_balances([WALLET], CURSOR)
+    with pytest.raises(ChainUnavailable):
+        read(SolanaProbe(SOLANA, fake, store))
 
-    assert result == Unchecked("solana", "rpc: HTTP 503")
+    assert "solana: unchecked: rpc: HTTP 503" in caplog.text
+
+
+def recorded_check(store: Store, check_name: str) -> tuple[str, str, dict[str, Any]]:
+    row = store.db.execute(
+        """
+        SELECT status, reason, detail FROM reconciliation_checks
+        WHERE check_name = ? AND subject = 'solana'
+        """,
+        [check_name],
+    ).fetchone()
+    assert row is not None
+    return row[0], row[1], json.loads(row[2])
+
+
+class KeyedNode(FakeSolanaRpc):
+    """A fake with the real scrub, which FakeSolanaRpc leaves out."""
+
+    def __init__(self, head: int) -> None:
+        super().__init__(head)
+        self._http = PoliteClient(label="solana-rpc")
+        self._url = KEYED_URL
+
+    def scrub(self, text: str) -> str:
+        return SolanaRpc.scrub(self, text)
+
+
+def test_the_log_line_for_an_error_built_outside_the_client_is_scrubbed_too(store, caplog):
+    # solana.py builds some errors from provider fields, such as a signature, that no client saw.
+    store.write_range("solana", [], {}, CURSOR)
+    fake = KeyedNode(CURSOR)
+    fake.read_errors["supply"] = SolanaDataError(f"{KEY}: malformed transaction (KeyError)")
+
+    with pytest.raises(ChainUnavailable):
+        SolanaProbe(SOLANA, fake, store).supply_check()
+
+    assert "solana: unchecked: <solana-rpc>: malformed transaction" in caplog.text
+    assert KEY not in caplog.text
+
+
+def test_a_tail_too_long_is_recorded_as_not_synced_and_says_run_sync_first(store, caplog):
+    fake = seeded_node(store)
+    fake.head = CURSOR + MAX_TAIL_SLOTS + 1
+
+    result = run(store, SolanaProbe(SOLANA, fake, store))
+
+    assert result.chains["solana"] == "unchecked"
+    status, reason, detail = recorded_check(store, "chain_supply")
+    assert (status, reason) == ("unchecked", "not_synced")
+    assert "run sync first" in caplog.text
+    assert "run sync first" not in json.dumps(detail)
+
+
+def test_no_cursor_is_recorded_as_not_synced_and_says_run_sync_first(store, caplog):
+    run(store, SolanaProbe(SOLANA, FakeSolanaRpc(CURSOR), store))
+
+    assert recorded_check(store, "chain_supply")[1] == "not_synced"
+    assert "run sync first" in caplog.text
+
+
+def test_a_supply_pin_stuck_below_the_cursor_is_recorded_as_pin_behind_cursor(store, caplog):
+    fake = seeded_node(store)
+    fake.supply = SlotReading(CURSOR - 1, 0)
+
+    result = run(store, SolanaProbe(SOLANA, fake, store))
+
+    assert result.chains["solana"] == "unchecked"
+    assert recorded_check(store, "chain_supply")[1] == "pin_behind_cursor"
+    assert "stayed below the cursor" in caplog.text
+
+
+def test_a_stale_balance_read_is_recorded_as_pin_behind_cursor(store, caplog):
+    fake = seeded_node(store, solana_row(CURSOR - 1, ZERO_ADDRESS, WALLET, 100))
+    fake.supply = SlotReading(CURSOR, 100)
+    fake.snapshot = BalanceSnapshot(CURSOR - MAX_READ_LAG_SLOTS - 1, {WALLET: 100})
+
+    result = run(store, SolanaProbe(SOLANA, fake, store))
+
+    assert result.chains["solana"] == "unchecked"
+    assert recorded_check(store, "sampled_balances")[1] == "pin_behind_cursor"
+    assert "below the cursor" in caplog.text
+
+
+def test_a_provider_failure_is_recorded_with_its_class_and_never_its_text(store, caplog):
+    fake = seeded_node(store)
+    fake.read_errors["supply"] = HttpError("solana-rpc: HTTP 503: the text a provider sent")
+
+    result = run(store, SolanaProbe(SOLANA, fake, store))
+
+    assert result.chains["solana"] == "unchecked"
+    status, reason, detail = recorded_check(store, "chain_supply")
+    assert (status, reason, detail) == ("unchecked", "source_error", {"error": "HttpError"})
+    assert "the text a provider sent" in caplog.text
+
+
+def test_a_data_failure_is_recorded_with_its_class(store):
+    fake = seeded_node(store, solana_row(CURSOR - 1, ZERO_ADDRESS, WALLET, 100))
+    fake.supply = SlotReading(CURSOR, 100)
+    # Nobody holding anything can't be told from a refused or truncated answer.
+    fake.snapshot = BalanceSnapshot(CURSOR, {})
+
+    run(store, SolanaProbe(SOLANA, fake, store))
+
+    status, reason, detail = recorded_check(store, "sampled_balances")
+    assert (status, reason, detail) == ("unchecked", "source_error", {"error": "SolanaDataError"})
 
 
 @pytest.mark.parametrize(
@@ -737,13 +1058,6 @@ def test_a_solana_pin_time_comes_from_the_node(store):
     assert SolanaProbe(SOLANA, fake, store).pin_timestamp(CURSOR) == 1_800_000_000
 
 
-SOLANA_FAILURES = [
-    HttpError("rpc: HTTP 503"),
-    SolanaRpcError(-32004, "getBlockTime: not available"),
-    SolanaDataError("malformed reply"),
-]
-
-
 class FailingNode(FakeSolanaRpc):
     def __init__(self, failure: Exception) -> None:
         super().__init__(CURSOR)
@@ -823,6 +1137,83 @@ def test_a_reply_that_cant_be_decoded_is_a_proof_outage(store):
         SolanaProbe(SOLANA, proof_node(tx), store).read_transaction_proof("sig")
 
     assert raised.value.reason == "group_proof_unavailable"
+
+
+MALFORMED_SHAPES: dict[str, dict[str, Any]] = {
+    "null-transaction": {"transaction": None},
+    "empty-signatures": {"transaction": {"signatures": []}},
+    "no-signatures": {"transaction": {}},
+    "transaction-is-a-list": {"transaction": []},
+    "signatures-is-a-string": {"transaction": {"signatures": ""}},
+    # Reaches an `instruction.get`, so this one is an AttributeError.
+    "instruction-isnt-an-object": {
+        "transaction": {
+            "signatures": ["sig"],
+            "message": {"instructions": ["not an object"], "accountKeys": []},
+        },
+        "slot": 1,
+        "blockTime": 1,
+        "transactionIndex": 1,
+        "meta": {"err": None, "preTokenBalances": [], "postTokenBalances": []},
+    },
+}
+
+
+@pytest.mark.parametrize("reply", MALFORMED_SHAPES.values(), ids=MALFORMED_SHAPES.keys())
+def test_decoding_a_malformed_reply_is_a_data_error(reply):
+    with pytest.raises(SolanaDataError, match="malformed transaction"):
+        decode_transaction(reply, OUSD_MINT)
+
+
+@pytest.mark.parametrize("reply", [None, [], "not an object", 7], ids=repr)
+def test_decoding_something_that_isnt_an_object_is_a_data_error(reply):
+    with pytest.raises(SolanaDataError, match=r"^\?: malformed transaction"):
+        decode_transaction(reply, OUSD_MINT)
+
+
+def test_an_attribute_error_from_a_malformed_reply_is_caught_as_a_data_error():
+    with pytest.raises(SolanaDataError) as raised:
+        decode_transaction(MALFORMED_SHAPES["instruction-isnt-an-object"], OUSD_MINT)
+
+    assert isinstance(raised.value.__cause__, AttributeError)
+
+
+def test_an_error_on_a_malformed_reply_names_its_signature_when_it_can():
+    with pytest.raises(SolanaDataError, match=r"^sig: malformed transaction"):
+        decode_transaction({"transaction": {"signatures": ["sig"]}}, OUSD_MINT)
+
+
+def test_a_decoding_bug_of_another_kind_still_raises(monkeypatch):
+    def broken(transaction, mint):
+        raise ZeroDivisionError
+
+    monkeypatch.setattr(solana, "_decode", broken)
+
+    with pytest.raises(ZeroDivisionError):
+        decode_transaction({}, OUSD_MINT)
+
+
+@pytest.mark.parametrize("reply", MALFORMED_SHAPES.values(), ids=MALFORMED_SHAPES.keys())
+def test_a_malformed_reply_is_a_proof_outage_and_not_a_crash(store, reply):
+    with pytest.raises(ChainUnavailable) as raised:
+        SolanaProbe(SOLANA, proof_node(reply), store).read_transaction_proof("sig")
+
+    assert raised.value.reason == "group_proof_unavailable"
+    assert isinstance(raised.value.__cause__, SolanaDataError)
+
+
+def test_a_malformed_reply_during_a_sync_is_source_error_and_not_a_crash(store):
+    fake = walked_node(store)
+    fake.transactions["moved"] = {"slot": START + 10, "transactionIndex": 1, "transaction": None}
+    at(fake, CURSOR + 10)
+
+    result = run(store, SolanaProbe(SOLANA, fake, store))
+
+    assert result.chains["solana"] == "unchecked"
+    assert recorded_check(store, "chain_supply")[1:] == (
+        "source_error",
+        {"error": "SolanaDataError"},
+    )
 
 
 def test_a_proof_names_the_transaction_the_node_answered_with(store):
@@ -972,7 +1363,8 @@ def test_every_client_goes_through_polite_client_with_its_throttle(store, monkey
         {"label": "solana-rpc", "min_interval": RPC_INTERVAL},
         {"label": "tempo-rpc", "min_interval": chains["tempo"].rpc_interval},
         {"label": "ethereum-rpc", "min_interval": chains["ethereum"].rpc_interval},
-        {"label": "ethereum-blockscout", "min_interval": BLOCKSCOUT_INTERVAL},
+        # A number here and not the constant, so changing the constant has to be meant.
+        {"label": "ethereum-blockscout", "min_interval": 0.25},
         {"label": "base-rpc", "min_interval": chains["base"].rpc_interval},
     ]
 
@@ -1057,13 +1449,17 @@ def test_a_failure_echoing_the_key_leaves_it_out_of_every_solana_error(store, mo
     store.write_range("solana", [], {}, CURSOR)
     probe = build_probes([load_solana({"SOLANA_RPC_URL": KEYED_URL})], store)[0]
 
-    for read in (probe.pin_timestamp, lambda _: probe.read_transaction_proof("sig")):
+    for read in (
+        probe.supply_check,
+        lambda: probe.pin_timestamp(CURSOR),
+        lambda: probe.read_balances([WALLET], CURSOR),
+        lambda: probe.read_transaction_proof("sig"),
+    ):
         with pytest.raises(ChainUnavailable) as raised:
-            read(CURSOR)
+            read()
         assert_clean(raised.value, caplog)
-    for unchecked in (probe.supply_check(), probe.read_balances([WALLET], CURSOR)):
-        assert isinstance(unchecked, Unchecked)
-        assert KEY not in unchecked.reason
+    # The log line a failed check leaves is the scrubbed text, so it's still there to read.
+    assert "solana: unchecked: solana-rpc: HTTP 403" in caplog.text
 
 
 def test_a_failed_run_stores_nothing_from_the_key(store, monkeypatch, caplog):
