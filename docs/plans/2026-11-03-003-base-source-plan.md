@@ -351,7 +351,7 @@ Plans for units 1.3 and 1.4 weren't available when this was written, so these ne
 ### For 1.3 (Solana)
 
 - **Uses:** Solana's RPC client goes through `PoliteClient`, which brings retries, logging and exception safety, and passes provider error text through `PoliteClient.scrub`.
-- **Uses:** `KEYED_RPC_ENV` already maps `solana`. The CLI check applies once 1.3 adds a `solana` entry to `load_chains`, which 1.3 must do.
+- **Uses:** `KEYED_RPC_ENV` already maps `solana`. 1.3 keeps a separate `SolanaChain` and `load_solana`, and `cli.main` counts Solana as selected, so the CLI check applies to Solana through 1.3's own wiring and 1.3 adds no `solana` entry to `load_chains`.
 - **Order:** B1 lands before 1.3's client. Only B1 changes `http.py`.
 - **Assumes from 1.3:** it leaves the Base entry and existing `Chain` fields as they are, strips and treats blank `SOLANA_RPC_URL` the same way, extends `tests/test_secrets.py` rather than duplicating it, and finishes the README sentences left open by B2.
 
@@ -382,7 +382,7 @@ Plans for units 1.3 and 1.4 weren't available when this was written, so these ne
 
 ## Changes the binding docs need
 
-This plan doesn't edit them, so the coordinator applies these.
+This plan doesn't edit them, so the coordinator applies these. Applied in the Phase 1 binding-docs change.
 
 - `docs/implementation-plan.md`, row 1.2: paths should add `pipeline/ousd/http.py`, `pipeline/ousd/cli.py` and `README.md`.
 - `docs/architecture.md`, Security and secrets: "Never log full RPC URLs" should read "Never log or raise an RPC URL or any part of it", because a bare key leaks just the same.

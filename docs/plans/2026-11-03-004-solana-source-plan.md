@@ -169,7 +169,7 @@ If the crash lands inside a re-read, the cursor may sit a little lower than befo
 
 **If P is behind the cursor** (a lagging node), re-pin up to 5 times, 2 s apart. If it's still behind, the result is `Unchecked`. Recording it would fail the gate, which requires the row's block to equal the cursor.
 
-**Anything that stops those steps returns `Unchecked(chain, reason)`, never a pass:** the read failing, `-32016` persisting, a stored-row conflict, a data stop from the decoder, truncated history, a database with no Solana cursor, or a tail longer than `MAX_TAIL_SLOTS` (100,000 slots, about 11 hours). Reconcile doesn't run a backfill, whether cold or partial, as that would hold the DuckDB lock for hours without warning. A failed comparison after a complete sync is a real `MISMATCH`, not unchecked.
+**Anything that stops those steps returns `Unchecked(chain, reason)`, never a pass:** the read failing, `-32016` persisting, a data stop from the decoder, truncated history, a database with no Solana cursor, or a tail longer than `MAX_TAIL_SLOTS` (100,000 slots, about 11 hours). Reconcile doesn't run a backfill, whether cold or partial, as that would hold the DuckDB lock for hours without warning. A failed comparison after a complete sync is a real `MISMATCH`, not unchecked. A `StoreConflict` isn't unchecked either: it is proven disagreement, so it propagates, as it does on the EVM path, and fails rather than reading as unchecked.
 
 **A supply match says nothing about transfers.** Mints and burns are about 6% of movements, so a supply `MATCH` alone leaves the rest unchecked.
 
@@ -415,8 +415,8 @@ graph LR
 
 **Approach:**
 - `Unchecked(chain, reason)`: frozen. Unit 1.4 moves it to `reconcile.py`.
-- `reconcile_solana(chain, rpc, store)` returns `ChainReconciliation | Unchecked`, following "Supply reconciliation". It catches only `HttpError`, `SolanaRpcError`, `SolanaDataError` and `StoreConflict`. A programming error still raises. Unchecked results aren't written to `reconciliations`, whose columns can't hold them. Reasons go to 1.4 through the return value.
-- `read_sampled_balances(chain, rpc, store, owners)` returns `list[BalanceReading] | Unchecked`, with `BalanceReading(owner, slot, amount)`. It takes one `token_accounts` read, syncs through its slot, and returns the given owners, or every owner when `owners` is `None`. An owner with no account reads 0. An empty list returns `[]` with no requests.
+- `reconcile_solana(chain, rpc, store)` returns `ChainReconciliation | Unchecked`, following "Supply reconciliation". It catches only `HttpError`, `SolanaRpcError` and `SolanaDataError`. A `StoreConflict` propagates, as it does on the EVM path, so proven disagreement fails rather than reading as unchecked. A programming error still raises. Unchecked results aren't written to `reconciliations`, whose columns can't hold them. Reasons go to 1.4 through the return value.
+- `read_sampled_balances(chain, rpc, store, owners)` returns `list[BalanceReading] | Unchecked`, with `BalanceReading(owner, slot, amount)`. It takes one `token_accounts` read, syncs through its slot, and returns the given owners, or every owner when `owners` is `None`. A `StoreConflict` propagates, as in `reconcile_solana`. An owner with no account reads 0. An empty list returns `[]` with no requests.
 - `check_all_balances(chain, rpc, store)` returns `BalanceCheck | Unchecked`, following "Balance check", with `BalanceCheck(chain, slot, wallets_checked, differences)` and a `matched` property. The model query runs on `store.db`, so `store.py` stays unchanged, and 1.4 can replace it with its `balances_at`. Nothing is recorded, because 1.4 adds the table.
 - All three return `Unchecked` for no cursor, with "run sync first", or for a tail over `MAX_TAIL_SLOTS`, before any read.
 
@@ -435,9 +435,9 @@ graph LR
   - A tail transaction fails the invariant.
   - Truncated history, a wrong genesis hash, or a null transaction during the tail.
   - `decimals` isn't 6.
-  - A `StoreConflict` in the tail.
   - No cursor: says run sync first, with no reads or backfill.
   - A tail over `MAX_TAIL_SLOTS`: no `getTransaction` calls.
+- **A `StoreConflict` in the tail** propagates out of `reconcile_solana` and out of `read_sampled_balances`, as proven disagreement. Test with `pytest.raises(StoreConflict)`, with nothing recorded and no `Unchecked` returned.
 - **Programming error:** an unexpected `KeyError` propagates rather than becoming a soft result.
 - **Secrets:** no `Unchecked.reason` holds the URL.
 - **Balances:**
@@ -565,8 +565,8 @@ These come from 1.2's plan as written on 2026-11-03 and aren't on `dev` yet. **I
 
 | Name in `ousd.solana` | Use |
 |---|---|
-| `reconcile_solana(chain, rpc, store) -> ChainReconciliation \| Unchecked` | The per-chain supply check. On a pass or a mismatch it's the same type as other chains, already recorded, with `block_number` the pinned slot |
-| `read_sampled_balances(chain, rpc, store, owners) -> list[BalanceReading] \| Unchecked` | Balances for the given wallets, as 1.4 planned, now all at one slot. **`owners=None` reads every owner in one call, about 10 credits, so `--census` on Solana is cheap enough for every run** |
+| `reconcile_solana(chain, rpc, store) -> ChainReconciliation \| Unchecked` | The per-chain supply check. On a pass or a mismatch it's the same type as other chains, already recorded, with `block_number` the pinned slot. A `StoreConflict` propagates, so 1.4 maps it to `fail`, as on the EVM path |
+| `read_sampled_balances(chain, rpc, store, owners) -> list[BalanceReading] \| Unchecked` | Balances for the given wallets, as 1.4 planned, now all at one slot. A `StoreConflict` propagates. **`owners=None` reads every owner in one call, about 10 credits, so `--census` on Solana is cheap enough for every run** |
 | `check_all_balances(chain, rpc, store) -> BalanceCheck \| Unchecked` | Every wallet against the rows. Used by U5 until 1.4 replaces it |
 | `SolanaRpc.transaction(signature)`, `decode_transaction(transaction, mint)` | Callable on their own. `log_index` is the value stored |
 | `SolanaRpc.block_time(slot) -> int` | The pin's time for the Bridge window, as 1.4 asked |
@@ -581,6 +581,7 @@ These come from 1.2's plan as written on 2026-11-03 and aren't on `dev` yet. **I
 - **A caller must treat `Unchecked` as not passed in a way that lasts.** `Unchecked` writes no row, so an older matched row can still sit at the cursor. Unit 1.4's run-level gate handles this: publishing needs the newest finished run to be `pass`. Don't let a publish step read `reconciliations` alone for Solana.
 - A sampled Solana wallet must be an owner wallet, not a token account. `ZERO_ADDRESS` is never a wallet.
 - A balance mismatch could mean a token account changed owner (S14). It should fail, not be explained away.
+- `StoreConflict` from either function is proven disagreement and propagates, so 1.4 records `fail`. Until then U5's `_reconcile` doesn't catch it, so the run stops with a non-zero exit, never a pass.
 - 1.4 owns the final exit-code rules, and its U8 removes U5's `_reconcile` branch. Until then, U5's unchecked exits 1.
 
 ### Exposes to Phase 2
@@ -611,7 +612,7 @@ Unit 2.8's `sampled_balances` compares at `synced_through`, and Solana has no pa
 
 ## Changes the binding docs need
 
-This plan doesn't edit them. The coordinator applies these or asks for them.
+This plan doesn't edit them. The coordinator applies these or asks for them. Applied in the Phase 1 binding-docs change.
 
 - **`docs/architecture.md`, Core data rules, idempotent writes:** "The key is chain plus transaction plus log index, or the Solana equivalent" matches neither chain's code. Replace with: "The key is chain, block or slot, and log index. On Solana, `log_index` is `(transactionIndex << 12) | position`, so it's unique in the slot and in execution order."
 - **`docs/architecture.md`, Core data rules, reorgs:** add "Solana reads only `finalized`, so it stores no block hashes and has no reorg repair."

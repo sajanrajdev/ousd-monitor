@@ -164,7 +164,7 @@ JSON/CSV dataset, then static Next.js site on Vercel
 - `totalSupply` read on all three EVM chains, and token supply on Solana. The four summed to Bridge's total.
 - Bridge's transparency API is public and needs no key.
 - Recent transfer logs read on Ethereum, Base and Tempo, and recent signatures on Solana, all from public RPC.
-- Older logs worked on Tempo but were refused on Ethereum and Base (HTTP 403), so the backfill needs a keyed RPC provider. Solana history is untested.
+- Older logs worked on Tempo but were refused on Ethereum and Base (HTTP 403), so the backfill needs a keyed RPC provider. Solana's full signature history was read on both the key and the public RPC, with the same rows.
 - Finality differs: Tempo's finalized block matched its tip, while Base was about 600 blocks behind and Ethereum about 76. Reorg lookback should be set per chain.
 
 ## 11. Phases

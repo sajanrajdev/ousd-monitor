@@ -12,9 +12,9 @@ Requirements (R1 to R16) are in `docs/PRD.md`. Structure is in `docs/architectur
 | Unit | Paths |
 |---|---|
 | 1.1 Ingestion foundation: sources, store, reorg repair, per-chain reconciliation | `pipeline/`, `tests/`, `Makefile`, `pyproject.toml` |
-| 1.2 Base source, using `BASE_RPC_URL` | `pipeline/ousd/sources.py`, `chains.py`, tests |
-| 1.3 Solana source, using `SOLANA_RPC_URL` | `pipeline/ousd/solana.py`, tests |
-| 1.4 Full cross-chain reconciliation against Bridge | `pipeline/ousd/reconcile.py`, tests |
+| 1.2 Base source, using `BASE_RPC_URL` | `pipeline/ousd/sources.py`, `chains.py`, `http.py`, `cli.py`, `README.md`, tests |
+| 1.3 Solana source, using `SOLANA_RPC_URL` | `pipeline/ousd/solana.py`, `cli.py`, `README.md`, `tests/fixtures/solana/`, `docs/build-log.md`, tests |
+| 1.4 Full cross-chain reconciliation against Bridge | `pipeline/ousd/reconcile.py`, `probes.py`, `store.py`, `sources.py`, `chains.py`, `cli.py`, `solana.py`, `README.md`, `docs/build-log.md`, tests |
 
 **Done when:** every chain reconciles to the base unit, the cross-chain check passes within a stated tolerance, and `make check` passes in CI.
 
