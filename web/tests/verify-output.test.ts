@@ -8,9 +8,11 @@ import { at, copySample, editJson, plantFile, releaseGrade, tempDir } from "./da
 
 const LINE = "Independent. Not affiliated with Open Standard or Bridge.";
 const BLOCKED = JSON.parse(readFileSync("scripts/blocked-names.json", "utf8")) as string[];
-const CARD = `<section class="chart-card" data-frame="Sample"><h2>T</h2>
+const CARD = `<section class="chart-card" data-frame="Sample"><div class="chart-card__head"><h2>T</h2>
+  <span class="status-chip" data-kind="fact">F</span>
   <details class="info-popover" name="info"><summary aria-label="About: T"></summary>
-  <div class="info-popover__panel"><p>Source: S</p><a href="/methodology/#velocity">Definition</a></div></details>
+  <div class="info-popover__panel"><p>Source: S</p><a href="/methodology/#velocity">Definition</a></div></details></div>
+  <table></table>
   <p class="chart-card__meta">As of <time datetime="2026-11-03">3 Nov</time>
   · <strong>Sample</strong></p>
   <noscript><p class="chart-card__source-note">Source: S · <a href="/methodology/#velocity">Definition</a></p></noscript></section>`;
@@ -126,8 +128,52 @@ describe("verifyOutput", () => {
 
   it("fails with no independence line", () => {
     const html = page(MAIN).replaceAll(LINE, "Something else");
+    const problems = verifyOutput(site({ main: html }), sampleExpected);
+    expect(problems).toContain("index.html: no independence line in the header");
+    expect(problems).toContain("index.html: no independence line in the footer");
+  });
+
+  it.each([
+    [
+      "header",
+      (html: string) => html.replace(`<header><p>${LINE}</p></header>`, "<header></header>"),
+    ],
+    [
+      "header",
+      (html: string) =>
+        html.replace(
+          `<header><p>${LINE}</p></header>`,
+          `<header><details><summary>More</summary><p>${LINE}</p></details></header>`,
+        ),
+    ],
+    [
+      "header",
+      (html: string) =>
+        html.replace(`<header><p>${LINE}</p></header>`, `<header><p hidden>${LINE}</p></header>`),
+    ],
+    ["footer", (html: string) => html.replace(`<footer><p>${LINE}</p>`, "<footer>")],
+    [
+      "footer",
+      (html: string) =>
+        html.replace(`<footer><p>${LINE}</p>`, `<footer><noscript><p>${LINE}</p></noscript>`),
+    ],
+    [
+      "footer",
+      (html: string) =>
+        html.replace(`<footer><p>${LINE}</p>`, `<footer><p class="sr-only">${LINE}</p>`),
+    ],
+  ])("checks the independence line on its own in the %s", (where, change) => {
+    const problems = verifyOutput(site({ main: change(page(MAIN)) }), sampleExpected);
+    expect(problems).toContain(`index.html: no independence line in the ${where}`);
+  });
+
+  it('fails with "not financial advice" only in a details', () => {
+    const html = page(MAIN).replace(
+      "<p>Not financial advice.</p>",
+      "<details><summary>More</summary><p>Not financial advice.</p></details>",
+    );
     expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
-      "index.html: no independence line",
+      'index.html: no "not financial advice"',
     );
   });
 
@@ -191,6 +237,56 @@ describe("verifyOutput", () => {
       [
         "a live trust strip",
         (html: string) => html.replace("Not reconciled", "Reconciled"),
+        'the trust strip doesn\'t say "Not reconciled"',
+      ],
+      [
+        "the banner in a details",
+        (html: string) =>
+          html.replace(
+            "<aside data-dataset-banner>Sample data. Nothing here is real.</aside>",
+            "<details><summary>More</summary><aside data-dataset-banner>Sample data. Nothing here is real.</aside></details>",
+          ),
+        "no Sample banner",
+      ],
+      [
+        "an empty banner",
+        (html: string) => html.replace("Sample data. Nothing here is real.", ""),
+        "no Sample banner",
+      ],
+      [
+        "the verdict chip in a details",
+        (html: string) =>
+          html.replace(
+            '<span class="status-chip" data-kind="opinion">Sample, not a finding</span>',
+            '<details><summary>More</summary><span class="status-chip" data-kind="opinion">Sample, not a finding</span></details>',
+          ),
+        'the verdict chip doesn\'t say "Sample, not a finding"',
+      ],
+      [
+        "the KPI word in a details",
+        (html: string) =>
+          html.replace(
+            '<section data-section="kpi-row"><strong>Sample</strong>',
+            '<section data-section="kpi-row"><details><summary>More</summary><strong>Sample</strong></details>',
+          ),
+        'no "Sample" in the KPI row',
+      ],
+      [
+        "the KPI word in a noscript",
+        (html: string) =>
+          html.replace(
+            '<section data-section="kpi-row"><strong>Sample</strong>',
+            '<section data-section="kpi-row"><noscript><strong>Sample</strong></noscript>',
+          ),
+        'no "Sample" in the KPI row',
+      ],
+      [
+        "the trust strip's words in a details",
+        (html: string) =>
+          html.replace(
+            '<section data-section="trust-strip">Not reconciled',
+            '<section data-section="trust-strip"><details><summary>More</summary>Not reconciled</details>',
+          ),
         'the trust strip doesn\'t say "Not reconciled"',
       ],
     ])("%s", (_name, change, problem) => {
@@ -515,6 +611,135 @@ describe("verifyOutput", () => {
       );
     });
 
+    const HEADING = "<h2>T</h2>";
+    const CHIP = '<span class="status-chip" data-kind="fact">F</span>';
+    const inPanel = (card: string, part: string) =>
+      card.replace(part, "").replace("<p>Source: S</p>", `${part}<p>Source: S</p>`);
+
+    it.each([
+      ["deleted", (card: string) => card.replace(HEADING, "")],
+      ["empty", (card: string) => card.replace(HEADING, "<h2> </h2>")],
+      ["in the popover", (card: string) => inPanel(card, HEADING)],
+      ["in a noscript", (card: string) => card.replace(HEADING, `<noscript>${HEADING}</noscript>`)],
+      ["hidden", (card: string) => card.replace(HEADING, "<h2 hidden>T</h2>")],
+      ["visually hidden", (card: string) => card.replace(HEADING, '<h2 class="sr-only">T</h2>')],
+    ])("fails on a takeaway that's %s", (_name, change) => {
+      const html = page(MAIN.replace(CARD, change(CARD)));
+      expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
+        "index.html: a card has no visible takeaway",
+      );
+    });
+
+    it.each([
+      ["deleted", (card: string) => card.replace(CHIP, "")],
+      ["empty", (card: string) => card.replace(">F</span>", "></span>")],
+      ["in the popover", (card: string) => inPanel(card, CHIP)],
+      ["in a noscript", (card: string) => card.replace(CHIP, `<noscript>${CHIP}</noscript>`)],
+      [
+        "only a word for assistive tech",
+        (card: string) => card.replace(">F</span>", '><span class="sr-only">Fact</span></span>'),
+      ],
+      [
+        "outside the head",
+        (card: string) => card.replace(CHIP, "").replace("<table>", `${CHIP}<table>`),
+      ],
+    ])("fails on a marker that's %s", (_name, change) => {
+      const html = page(MAIN.replace(CARD, change(CARD)));
+      expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
+        "index.html: a card has no visible marker",
+      );
+    });
+
+    it.each([
+      [
+        "a hidden meta line",
+        (card: string) =>
+          card.replace('class="chart-card__meta"', 'class="chart-card__meta" hidden'),
+        "a card has no visible as-of time",
+      ],
+      [
+        "a visually hidden meta line",
+        (card: string) =>
+          card.replace('class="chart-card__meta"', 'class="chart-card__meta sr-only"'),
+        "a card has no visible as-of time",
+      ],
+      [
+        "a meta line hidden inline",
+        (card: string) =>
+          card.replace('class="chart-card__meta"', 'class="chart-card__meta" style="display:none"'),
+        "a card has no visible as-of time",
+      ],
+      [
+        "an as-of with no text",
+        (card: string) => card.replace(">3 Nov</time>", "> </time>"),
+        "a card has no visible as-of time",
+      ],
+      [
+        "an as-of with no datetime value",
+        (card: string) => card.replace('datetime="2026-11-03"', 'datetime=""'),
+        "a card has no visible as-of time",
+      ],
+      [
+        "a popover source with no value",
+        (card: string) => card.replace("<p>Source: S</p>", "<p>Source: </p>"),
+        "a card's popover has no source",
+      ],
+      [
+        "a noscript source with no value",
+        (card: string) => card.replace("Source: S · ", "Source:  · "),
+        "a card's noscript note has no source",
+      ],
+      [
+        "a popover link that isn't to the methodology",
+        (card: string) =>
+          card.replace(
+            '<a href="/methodology/#velocity">Definition</a></div>',
+            '<a href="#velocity">Definition</a></div>',
+          ),
+        "a card's popover has no definition link",
+      ],
+      [
+        "a noscript link with no anchor",
+        (card: string) =>
+          card.replace(
+            '<a href="/methodology/#velocity">Definition</a></p></noscript>',
+            '<a href="/methodology/">Definition</a></p></noscript>',
+          ),
+        "a card's noscript note has no definition link",
+      ],
+      ["no table", (card: string) => card.replace("<table></table>", ""), "a card has no table"],
+    ])("fails on %s", (_name, change, problem) => {
+      const html = page(MAIN.replace(CARD, change(CARD)));
+      expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
+        `index.html: ${problem}`,
+      );
+    });
+
+    describe("a chart that draws only in the browser", () => {
+      const PROBLEM = "index.html: a chart that draws only in the browser has no note for it";
+      const withPlot = (plot: string) =>
+        page(MAIN.replace(CARD, CARD.replace("<table></table>", `<table></table>${plot}`)));
+      const NOTE =
+        '<noscript><p class="chart-area__needs-js">This chart needs JavaScript.</p></noscript>';
+
+      it.each([
+        ["an empty area", '<div><div class="chart-area"></div></div>'],
+        [
+          "a Recharts container beside its legend",
+          '<div><div class="chart-area"><ul><li>Total</li></ul><div class="recharts-responsive-container"></div></div></div>',
+        ],
+      ])("fails on %s with no note", (_name, plot) => {
+        expect(verifyOutput(site({ main: withPlot(plot) }), sampleExpected)).toContain(PROBLEM);
+      });
+
+      it("passes with its note, and a hand-built chart needs none", () => {
+        const noted = withPlot(`<div><div class="chart-area"></div>${NOTE}</div>`);
+        expect(verifyOutput(site({ main: noted }), sampleExpected)).toEqual([]);
+        const built = withPlot('<div><div class="chart-area"><ol><li>$1M</li></ol></div></div>');
+        expect(verifyOutput(site({ main: built }), sampleExpected)).toEqual([]);
+      });
+    });
+
     it.each([
       ["a details", "<details><ol data-pinned-notes><li>A caveat</li></ol></details>"],
       ["a noscript", "<noscript><ol data-pinned-notes><li>A caveat</li></ol></noscript>"],
@@ -597,6 +822,58 @@ describe("freshness in the output", () => {
     const dir = site({ main: html, methodology: realPage("<main>M</main>") });
     expect(verifyOutput(dir, realExpected)).toContain(
       "index.html: the trust strip has no stale text",
+    );
+  });
+
+  it("fails when the stale note is only in a details", () => {
+    const html = page(MAIN).replace(
+      `<p data-stale-note>${STALE_NOTE}</p>`,
+      `<details><summary>More</summary><p data-stale-note>${STALE_NOTE}</p></details>`,
+    );
+    expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
+      "index.html: no stale note",
+    );
+  });
+
+  it("fails when the verdict's stale text is only in a details", () => {
+    const html = page(
+      MAIN.replace(
+        `<p>${STALE_NOTE}</p></section>`,
+        `<details><summary>More</summary><p>${STALE_NOTE}</p></details></section>`,
+      ),
+    );
+    expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
+      "index.html: the verdict block has no stale text",
+    );
+  });
+
+  it("fails when the trust strip's text is only in a noscript, on real data", () => {
+    const html = realPage(REAL_MAIN.replace(STALE_TRUST, `<noscript>${STALE_TRUST}</noscript>`));
+    const dir = site({ main: html, methodology: realPage("<main>M</main>") });
+    expect(verifyOutput(dir, realExpected)).toContain(
+      "index.html: the trust strip has no stale text",
+    );
+  });
+
+  it("reads a details' summary as in view", () => {
+    const html = realPage(
+      REAL_MAIN.replace(STALE_TRUST, `<details><summary>${STALE_TRUST}</summary>More</details>`),
+    );
+    const dir = site({ main: html, methodology: realPage("<main>M</main>") });
+    expect(verifyOutput(dir, realExpected)).toEqual([]);
+  });
+
+  it("fails when a fresh page's fresh sentence is only in a details", () => {
+    const fresh = (body: string) =>
+      realPage(body).replace('data-freshness="stale"', 'data-freshness="fresh"');
+    const dir = site({
+      main: fresh(
+        FRESH_MAIN.replace(FRESH_TRUST, `<details><summary>More</summary>${FRESH_TRUST}</details>`),
+      ),
+      methodology: fresh("<main>M</main>"),
+    });
+    expect(verifyOutput(dir, freshRealExpected)).toContain(
+      "index.html: the trust strip has no fresh text",
     );
   });
 

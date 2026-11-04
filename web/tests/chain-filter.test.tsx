@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { describe, expect, it } from "vitest";
@@ -8,10 +6,11 @@ import { ChainPanels } from "@/components/chain-panels";
 import { ExplainEnhance } from "@/components/explain-enhance";
 import { chainOptions } from "@/lib/chain-scope";
 import { REQUIRED_CHAINS } from "@/lib/definitions";
+import { globalsCss, splitAtHasBlock } from "./css-helpers";
 
 const complete = chainOptions(REQUIRED_CHAINS);
 const partial = chainOptions(["tempo", "solana"]);
-const css = readFileSync(join(process.cwd(), "app/globals.css"), "utf8");
+const css = globalsCss;
 
 describe("the chain filter", () => {
   it("is a named group of native radios, with the first option chosen", () => {
@@ -88,15 +87,44 @@ describe("chain panels", () => {
   });
 
   it("has a hiding rule for every filter value, and only where :has() is supported", () => {
-    const start = css.indexOf("@supports selector(:has(*))");
-    expect(start).toBeGreaterThan(-1);
-    expect(css.slice(0, start)).not.toContain(".chain-panel:not(");
+    const { inside, outside } = splitAtHasBlock(css);
+    expect(outside).not.toMatch(/\.chain-panels?\b[^{}]*\{[^}]*display:\s*none/);
+    expect(outside).not.toContain("[data-chain-panel");
     for (const value of ["all", ...REQUIRED_CHAINS]) {
-      expect(css.slice(start)).toMatch(
+      expect(inside).toMatch(
         new RegExp(
           `input\\[value="${value}"\\]:checked\\)\\s+\\.chain-panel:not\\(\\[data-chain-panel="${value}"\\]\\)`,
         ),
       );
     }
+  });
+
+  it("hides the filter itself where :has() isn't supported, as it could change nothing", () => {
+    expect(css).toMatch(
+      /@supports not selector\(:has\(\*\)\) \{\s*\.chain-filter \{\s*display: none;/,
+    );
+  });
+
+  it("widens panels by the shown panel's toggle, for every filter value, from 1056", () => {
+    const { inside } = splitAtHasBlock(css);
+    const wide = /@media \(min-width: 1056px\) \{([^}]*)\{\s*grid-column: 1 \/ -1;/.exec(inside)!;
+    expect(wide).not.toBeNull();
+    expect(wide[1]).toContain(".card-grid > .chart-card:has(> .data-toggle[open])");
+    for (const value of ["all", ...REQUIRED_CHAINS]) {
+      expect(wide[1]).toMatch(
+        new RegExp(
+          `input\\[value="${value}"\\]:checked\\)\\s+\\.card-grid\\s+> \\.chain-panels:has\\(> \\[data-chain-panel="${value}"\\] \\.data-toggle\\[open\\]\\)`,
+        ),
+      );
+    }
+  });
+
+  it("keeps the chosen option and an open trigger visible in forced colours", () => {
+    const forced = /@media \(forced-colors: active\) \{([^}]*\{[^}]*\})/.exec(css)!;
+    expect(forced).not.toBeNull();
+    expect(forced[1]).toContain(".chain-filter input:checked + span");
+    expect(forced[1]).toContain(".info-popover[open] > summary");
+    expect(forced[1]).toContain("background: Highlight");
+    expect(forced[1]).toContain("color: HighlightText");
   });
 });

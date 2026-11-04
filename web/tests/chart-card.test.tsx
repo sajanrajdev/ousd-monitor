@@ -69,6 +69,27 @@ describe("chart card", () => {
     expect(within(toggle).getByRole("table", { name: table.caption, hidden: true })).toBeTruthy();
   });
 
+  it("keeps the takeaway and marker in the card's head, outside its popover", () => {
+    const { container } = render(
+      <main>
+        <ChartCard {...props} />
+        <TableCard {...props} />
+      </main>,
+    );
+    const heads = container.querySelectorAll(".chart-card__head");
+    expect(heads).toHaveLength(2);
+    for (const head of heads) {
+      const heading = head.querySelector(":scope > h2")!;
+      const chip = head.querySelector(":scope > .status-chip")!;
+      expect(heading.textContent).toBe(props.takeaway);
+      expect(heading.closest("details")).toBeNull();
+      expect(chip.getAttribute("data-kind")).toBe("fact");
+      expect(chip.closest("details")).toBeNull();
+    }
+    expect(container.querySelector(".info-popover__panel .status-chip")).toBeNull();
+    expect(container.querySelector(".info-popover__panel h2")).toBeNull();
+  });
+
   it("keeps the summary for assistive tech, visually hidden", () => {
     const { container } = render(<ChartCard {...props} />);
     const hidden = container.querySelector(".chart-card > .sr-only")!;
@@ -115,6 +136,21 @@ describe("chart card", () => {
     expect(needing.closest("[aria-hidden]")).toBeNull();
     expect(needing.closest("noscript")).not.toBeNull();
     expect(parsed(<ChartCard {...props} />).querySelector(".chart-area__needs-js")).toBeNull();
+  });
+
+  it("hides the plot from assistive tech unless it is real content", () => {
+    const { container, rerender } = render(<ChartCard {...props} />);
+    const area = () => container.querySelector(".chart-area")!;
+    expect(area().getAttribute("aria-hidden")).toBe("true");
+    expect(area().hasAttribute("data-plot-content")).toBe(false);
+    rerender(<ChartCard {...props} plotIsContent />);
+    expect(area().hasAttribute("aria-hidden")).toBe(false);
+    expect(area().hasAttribute("data-plot-content")).toBe(true);
+  });
+
+  it("gives the noscript definition link a 24px target", () => {
+    const link = parsed(<ChartCard {...props} />).querySelector("noscript a")!;
+    expect(link.className).toContain("target-link");
   });
 
   it("renders its pinned notes after the plot, and none when it has none", () => {

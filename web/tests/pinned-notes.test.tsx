@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { describe, expect, it } from "vitest";
-import { Pin, PinnedNotes, type PinnedNote } from "@/components/pinned-notes";
+import { Pin, pinNumber, PinnedNotes, type PinnedNote } from "@/components/pinned-notes";
 
 const notes: PinnedNote[] = [
   { kind: "velocity-warning", chain: "ethereum", text: "On Ethereum, a one-off jump." },
@@ -13,16 +13,42 @@ describe("pins and notes", () => {
     const { container } = render(
       <>
         <div aria-hidden="true" data-testid="graphic">
-          <Pin number={1} />
-          <Pin number={2} />
+          <Pin notes={notes} kind="placed" />
+          <Pin notes={notes} kind="velocity-warning" chain="ethereum" />
         </div>
         <PinnedNotes notes={notes} />
       </>,
     );
     const inChart = [...screen.getByTestId("graphic").querySelectorAll(".pin")];
-    const inList = [...container.querySelectorAll("[data-pinned-notes] > li > .pin")];
-    expect(inList.map((pin) => pin.textContent)).toEqual(["1", "2"]);
-    expect(inList.map((pin) => pin.textContent)).toEqual(inChart.map((pin) => pin.textContent));
+    expect(inChart.map((pin) => pin.textContent)).toEqual(["2", "1"]);
+    const numberOf = (kind: string) =>
+      container.querySelector(`[data-pinned-notes] [data-note="${kind}"] .pin`)!.textContent;
+    expect(numberOf("velocity-warning")).toBe(inChart[1].textContent);
+    expect(numberOf("placed")).toBe(inChart[0].textContent);
+  });
+
+  it("renumbers the pin when a conditional note before it drops out", () => {
+    const without = notes.slice(1);
+    expect(pinNumber(notes, "placed")).toBe(2);
+    expect(pinNumber(without, "placed")).toBe(1);
+    const { container } = render(<Pin notes={without} kind="placed" />);
+    expect(container.querySelector(".pin")!.textContent).toBe("1");
+  });
+
+  it("draws no pin when its note isn't there, or is on another chain", () => {
+    const { container, rerender } = render(<Pin notes={notes.slice(1)} kind="velocity-warning" />);
+    expect(container.querySelector(".pin")).toBeNull();
+    rerender(<Pin notes={notes} kind="velocity-warning" chain="base" />);
+    expect(container.querySelector(".pin")).toBeNull();
+    expect(pinNumber(notes, "velocity-warning", "base")).toBeNull();
+  });
+
+  it("numbers two notes of one kind by chain", () => {
+    const two: PinnedNote[] = [
+      { kind: "velocity-warning", chain: "ethereum", text: "On Ethereum." },
+      { kind: "velocity-warning", chain: "base", text: "On Base." },
+    ];
+    expect(pinNumber(two, "velocity-warning", "base")).toBe(2);
   });
 
   it("is an ordered list with the note's words outside any graphic", () => {
@@ -52,7 +78,7 @@ describe("pins and notes", () => {
   });
 
   it("never makes a pin focusable", () => {
-    const { container } = render(<Pin number={1} />);
+    const { container } = render(<Pin notes={notes} kind="placed" />);
     const pin = container.querySelector(".pin")!;
     expect(pin.tagName).toBe("SPAN");
     expect(pin.getAttribute("aria-hidden")).toBe("true");
@@ -69,7 +95,7 @@ describe("pins and notes", () => {
     const { container } = render(
       <main>
         <div aria-hidden="true">
-          <Pin number={1} />
+          <Pin notes={notes} kind="placed" />
         </div>
         <PinnedNotes notes={notes} />
       </main>,

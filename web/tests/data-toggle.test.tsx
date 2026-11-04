@@ -1,11 +1,10 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { fireEvent, render, screen } from "@testing-library/react";
 import axe from "axe-core";
 import { describe, expect, it } from "vitest";
 import { DataToggle } from "@/components/data-toggle";
+import { globalsCss, splitAtHasBlock } from "./css-helpers";
 
-const css = readFileSync(join(process.cwd(), "app/globals.css"), "utf8");
+const css = globalsCss;
 
 describe("the data toggle", () => {
   it("is a native details, closed, with its content in the static HTML", () => {
@@ -34,12 +33,24 @@ describe("the data toggle", () => {
   });
 
   it("hides the plot and keeps the notes, only where :has() is supported", () => {
-    const supports = css.slice(css.indexOf("@supports selector(:has(*))"));
-    expect(css.indexOf(".chart-card:has(> .data-toggle[open]) .chart-card__plot")).toBeGreaterThan(
-      css.indexOf("@supports selector(:has(*))"),
-    );
-    expect(supports).toContain(".chart-card:has(> .data-toggle[open]) .chart-card__plot");
-    expect(css).not.toMatch(/data-toggle\[open\][^{]*(data-pinned-notes|pinned-notes)[^{]*\{/);
+    const { inside, outside } = splitAtHasBlock(css);
+    expect(inside).toContain(".chart-card:has(> .data-toggle[open]) .chart-card__plot");
+    expect(outside).not.toContain(".chart-card__plot {");
+    expect(css).not.toMatch(/data-toggle\[open\][^{]*pinned-notes[^{]*\{/);
+  });
+
+  it('says "Chart" only where opening it swaps the chart out', () => {
+    const { inside, outside } = splitAtHasBlock(css);
+    expect(outside).toMatch(/\.data-toggle__to-chart \{\s*display: none;/);
+    expect(outside).not.toContain(".data-toggle[open] .data-toggle__to-chart");
+    expect(inside).toMatch(/\.data-toggle\[open\] \.data-toggle__to-chart \{\s*display: inline;/);
+    expect(inside).toMatch(/\.data-toggle\[open\] \.data-toggle__to-table \{\s*display: none;/);
+  });
+
+  it("lets a wide table scroll inside its panel rather than clip", () => {
+    const panel = /\.data-toggle__panel \{([^}]*)\}/.exec(css)![1];
+    expect(panel).toContain("grid-template-columns: minmax(0, 1fr)");
+    expect(panel).toContain("overflow-x: auto");
   });
 
   it("has no axe violations, open", async () => {

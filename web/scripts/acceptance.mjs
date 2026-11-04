@@ -20,8 +20,13 @@ const MIN_FILTER_TARGET = 36;
 // Longer than the enhancer's hover delays, so a panel has had the chance to change.
 const HOVER_SETTLE_MS = 500;
 const STEP_TIMEOUT_MS = 5000;
+const BOX_SLACK_PX = 0.5;
+// The frame's hatched edges are pseudo-elements, which leave axe unable to judge the text near them.
+const WITHOUT_FRAME_EDGES = `html[data-frame] body::before, html[data-frame] body::after,
+  .chart-card[data-frame]::before { content: none !important; }`;
 
 const counts = new Map();
+const undeterminedContrast = [];
 const failures = [];
 
 function check(name, where, ok, detail = "") {
@@ -62,8 +67,9 @@ async function loadHarness() {
       load("/components/pinned-notes.tsx"),
       load("/lib/chain-scope.ts"),
     ]);
-  const card = (name, props) =>
-    h(
+  const card = (name, props) => {
+    const notes = [{ kind: "harness", text: `On ${name}, a made-up caveat.` }];
+    return h(
       ChartCard,
       {
         takeaway: `A made-up finding about ${name}`,
@@ -73,7 +79,7 @@ async function loadHarness() {
         definitionHref: "/methodology/#velocity",
         frameWord: "Sample",
         summary: `A made-up summary of ${name}.`,
-        notes: [{ kind: "harness", text: `On ${name}, a made-up caveat.` }],
+        notes,
         table: {
           caption: `Made-up amounts for ${name}`,
           columns: ["Chain", "One", "Two", "Three", "Four", "Five", "Six", "Seven"].map(
@@ -98,8 +104,9 @@ async function loadHarness() {
         },
         ...props,
       },
-      h(Pin, { number: 1 }),
+      h(Pin, { notes, kind: "harness" }),
     );
+  };
   const markup = (chains) => {
     const options = scope.chainOptions(chains);
     return renderToStaticMarkup(
@@ -135,14 +142,35 @@ async function enhancerReady(page) {
   await page.evaluate(() => document.activeElement?.blur());
 }
 
-async function openPage(browser, origin, folder, markup, { width, js, touch = false }) {
+// Swaps the two @supports conditions in the built CSS, so Chromium applies what a browser without
+// :has() would. Rules using :has() outside those blocks don't change what the filter or toggle do.
+async function behaveWithoutHas(page) {
+  await page.route("**/*.css", async (route) => {
+    const response = await route.fetch();
+    const css = (await response.text())
+      .replaceAll("not selector(:has(*))", "SUPPORTED")
+      .replaceAll("selector(:has(*))", "not selector(html)")
+      .replaceAll("SUPPORTED", "selector(html)");
+    await route.fulfill({ response, body: css });
+  });
+}
+
+async function openPage(
+  browser,
+  origin,
+  folder,
+  markup,
+  { width, js, touch = false, forcedColors = "none", withoutHas = false },
+) {
   const context = await browser.newContext({
     viewport: { width, height: HEIGHT },
     javaScriptEnabled: js,
     hasTouch: touch,
+    forcedColors,
   });
   context.setDefaultTimeout(STEP_TIMEOUT_MS);
   const page = await context.newPage();
+  if (withoutHas) await behaveWithoutHas(page);
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => {
@@ -179,6 +207,18 @@ const openCount = (page) => page.locator(".info-popover[open]").count();
 const isOpen = (locator) => locator.evaluate((details) => details.open);
 const focusIsOn = (locator) => locator.evaluate((element) => document.activeElement === element);
 
+const chosenOptionDiffers = (page) =>
+  page.evaluate(() => {
+    const look = (selector) => {
+      const { backgroundColor, color } = getComputedStyle(document.querySelector(selector));
+      return `${backgroundColor} ${color}`;
+    };
+    return (
+      look(".chain-filter input:checked + span") !==
+      look(".chain-filter input:not(:checked) + span")
+    );
+  });
+
 async function checkFilter(page, where, js, chains) {
   const radios = page.locator(".chain-filter input");
   const values = await radios.evaluateAll((inputs) => inputs.map((input) => input.value));
@@ -189,6 +229,7 @@ async function checkFilter(page, where, js, chains) {
     (await page.locator(".chain-filter label").first().innerText()).trim() === firstLabel,
   );
   check("the filter lists only chains in the data", where, values.length === chains.length + 1);
+  check("the chosen option looks different", where, await chosenOptionDiffers(page));
   for (const [index, value] of values.entries()) {
     await page.locator(".chain-filter label").nth(index).click();
     const shown = await shownPanels(page);
@@ -213,6 +254,136 @@ async function checkFilter(page, where, js, chains) {
   );
   await page.keyboard.press("ArrowLeft");
   check("the left arrow moves back", where, (await shownPanels(page))[0] === values[0]);
+}
+
+// What must be in view with nothing opened. A stylesheet can hide what verify-output can't read.
+async function checkInView(page, where) {
+  const missing = await page.evaluate(() => {
+    const seen = (element) => {
+      if (!element?.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true })) return false;
+      const box = element.getBoundingClientRect();
+      return box.width > 1 && box.height > 1;
+    };
+    const lacking = [];
+    const need = (name, element) => {
+      if (!seen(element)) lacking.push(name);
+    };
+    const root = document.documentElement;
+    need("the header's independence line", document.querySelector("header .independence-line"));
+    need("the footer's independence line", document.querySelector("footer .independence-line"));
+    if (root.dataset.frame) need("the banner", document.querySelector("[data-dataset-banner]"));
+    const verdict = document.querySelector('[data-section="verdict"]');
+    if (verdict) {
+      need("the headline", verdict.querySelector("h1"));
+      need("the headline's marker", verdict.querySelector('.status-chip[data-kind="opinion"]'));
+      const when = [...verdict.querySelectorAll(".freshness-text > *")];
+      if (!when.some(seen)) lacking.push("the as-of line");
+      const trust = document.querySelectorAll('[data-section="trust-strip"] .freshness-text > *');
+      if (![...trust].some(seen)) lacking.push("the trust status");
+      for (const value of document.querySelectorAll("[data-kpi-value]")) need("a KPI value", value);
+      for (const chip of document.querySelectorAll('[data-section="kpi-row"] .status-chip')) {
+        need("a KPI marker", chip.querySelector("[aria-hidden]") ?? chip);
+      }
+    }
+    const note = document.querySelector("[data-stale-note] .freshness-text > *");
+    if (!verdict && root.dataset.freshness === "stale") need("the stale note", note);
+    for (const card of document.querySelectorAll(".chart-card")) {
+      if (!card.checkVisibility()) continue;
+      need("a card's heading", card.querySelector(".chart-card__head :is(h2, h3)"));
+      const chip = card.querySelector(".chart-card__head .status-chip");
+      need("a card's marker", chip?.querySelector("[aria-hidden]") ?? chip);
+      need("a card's meta line", card.querySelector(".chart-card__meta"));
+      need("a card's as-of time", card.querySelector(".chart-card__meta time"));
+      if (root.dataset.frame) {
+        need("a card's frame word", card.querySelector(".chart-card__frame-word"));
+      }
+      for (const item of card.querySelectorAll("[data-pinned-notes] > li")) {
+        need("a pinned note", item);
+        need("a note's number", item.querySelector(".pin"));
+      }
+    }
+    return lacking;
+  });
+  check(
+    "everything essential is in view",
+    where,
+    missing.length === 0,
+    [...new Set(missing)].join(", "),
+  );
+}
+
+// On a fresh page, before any click, as a mouse changes what counts as :focus-visible.
+async function checkFocusRings(page, where) {
+  await page.keyboard.press("Shift");
+  for (const selector of [
+    ".info-popover > summary",
+    ".data-toggle > summary",
+    ".chain-filter input:checked",
+    "header a",
+  ]) {
+    const target = page.locator(selector).first();
+    await target.focus();
+    const shows = await target.evaluate((element) => {
+      const ringed = element.matches(".chain-filter input") ? element.nextElementSibling : element;
+      const { outlineStyle, outlineWidth } = getComputedStyle(ringed);
+      return outlineStyle !== "none" && parseFloat(outlineWidth) > 0;
+    });
+    check("focus shows an outline", where, shows, selector);
+  }
+  await page.evaluate(() => document.activeElement?.blur());
+}
+
+async function checkMethodologyPage(browser, origin, where, js) {
+  const context = await browser.newContext({ javaScriptEnabled: js });
+  const page = await context.newPage();
+  await page.goto(`${origin}/methodology/`, { waitUntil: "networkidle" });
+  await checkInView(page, `${where} methodology`);
+  await context.close();
+}
+
+// Forced colours drop backgrounds, so the chosen option and open trigger need their own rule.
+async function checkForcedColors(browser, origin, folder, markup, where, options) {
+  const { context, page } = await openPage(browser, origin, folder, markup, {
+    ...options,
+    forcedColors: "active",
+  });
+  check("the chosen option shows in forced colours", where, await chosenOptionDiffers(page));
+  const trigger = page.locator("#harness-plain .info-popover > summary");
+  const before = await trigger.evaluate((element) => getComputedStyle(element).backgroundColor);
+  await trigger.click();
+  const after = await trigger.evaluate((element) => getComputedStyle(element).backgroundColor);
+  check("an open trigger shows in forced colours", where, before !== after);
+  await context.close();
+}
+
+// Long but complete: no filter that can do nothing, every panel, and a toggle that doesn't say Chart.
+async function checkWithoutHas(browser, origin, folder, markup, chains, where, options) {
+  const { context, page } = await openPage(browser, origin, folder, markup, {
+    ...options,
+    withoutHas: true,
+  });
+  check(
+    "without :has(), the filter is hidden",
+    where,
+    !(await page.locator(".chain-filter").isVisible()),
+  );
+  const shown = await shownPanels(page);
+  check("without :has(), every panel shows", where, shown.length === chains.length + 1, `${shown}`);
+  const card = page.locator("#harness-plain");
+  const summary = card.locator(".data-toggle > summary");
+  await summary.click();
+  check(
+    "without :has(), the toggle doesn't say Chart",
+    where,
+    (await summary.innerText()).trim().startsWith("Table"),
+  );
+  check(
+    "without :has(), the plot stays",
+    where,
+    await card.locator(".chart-card__plot").isVisible(),
+  );
+  check("without :has(), the table shows", where, await card.locator("table").isVisible());
+  await context.close();
 }
 
 async function checkOneAtATime(page, where) {
@@ -278,6 +449,7 @@ async function checkHover(page, where) {
   const away = () => page.mouse.move(0, 0);
   const settle = () => page.waitForTimeout(HOVER_SETTLE_MS);
 
+  await page.evaluate(() => document.activeElement?.blur());
   await trigger.hover();
   await settle();
   check("hover opens", where, await isOpen(popover));
@@ -302,6 +474,23 @@ async function checkHover(page, where) {
   await away();
   await settle();
   check("leaving closes one that wasn't clicked", where, !(await isOpen(popover)));
+}
+
+// A popover left open with focus far away: Escape closes it and leaves the reader where they are.
+async function checkEscapeStaysPut(page, where) {
+  const popover = page.locator("#harness-plain .info-popover");
+  await popover.locator("summary").click();
+  await page.mouse.move(0, 0);
+  const footerLink = page.locator("footer a").first();
+  await footerLink.focus();
+  const openHeight = (await popover.boundingBox()).height;
+  const before = await page.evaluate(() => window.scrollY);
+  await page.keyboard.press("Escape");
+  check("Escape closes from elsewhere", where, (await openCount(page)) === 0);
+  check("Escape leaves focus elsewhere", where, await focusIsOn(footerLink));
+  const moved = Math.abs((await page.evaluate(() => window.scrollY)) - before);
+  // Closing a panel shortens the page, so at its foot the scroll can move by that much and no more.
+  check("Escape doesn't jump the page", where, moved <= openHeight + 1, `${moved}px`);
 }
 
 async function checkTap(browser, origin, folder, markup, where, options) {
@@ -395,18 +584,91 @@ async function checkNoSidewaysScroll(page, where) {
       over <= 0,
       `${value}: ${over}px`,
     );
+    const outside = await page.evaluate((slack) => {
+      const PARTS =
+        ".hairline-table, .data-toggle__panel, .info-popover__panel, .pinned-notes, .chart-area";
+      return [...document.querySelectorAll(".chart-card")]
+        .filter((card) => card.checkVisibility())
+        .flatMap((card) => {
+          const box = card.getBoundingClientRect();
+          return [...card.querySelectorAll(PARTS)]
+            .filter((part) => part.checkVisibility())
+            .filter((part) => {
+              const inner = part.getBoundingClientRect();
+              return inner.left < box.left - slack || inner.right > box.right + slack;
+            })
+            .map((part) => part.className || part.tagName);
+        });
+    }, BOX_SLACK_PX);
+    check("every table and panel fits inside its card", where, outside.length === 0, `${outside}`);
   }
 }
 
-async function checkAxe(page, where) {
-  const { violations } = await new AxeBuilder({ page }).include("main").analyze();
+function checkAxeResults(where, state, violations) {
   const serious = violations.filter((rule) => ["serious", "critical"].includes(rule.impact));
   check(
-    "axe finds nothing serious with everything open",
+    `axe finds nothing serious with toggles ${state}`,
     where,
     serious.length === 0,
     serious.map((rule) => `${rule.id}: ${rule.nodes.length}`).join(", "),
   );
+}
+
+// Contrast needs what a normal pass skips: the graphic, hidden from assistive tech but read by eyes,
+// and the text beside the frame's edges. So this drops both, and only judges contrast.
+async function checkContrast(page, where, state) {
+  const style = await page.addStyleTag({ content: WITHOUT_FRAME_EDGES });
+  await page.evaluate(() => {
+    for (const area of document.querySelectorAll(".chart-area[aria-hidden]")) {
+      area.removeAttribute("aria-hidden");
+      area.dataset.wasHidden = "";
+    }
+  });
+  const { violations, incomplete } = await new AxeBuilder({ page })
+    .withRules(["color-contrast"])
+    .analyze();
+  await page.evaluate(() => {
+    for (const area of document.querySelectorAll(".chart-area[data-was-hidden]")) {
+      area.setAttribute("aria-hidden", "true");
+      delete area.dataset.wasHidden;
+    }
+  });
+  await style.evaluate((tag) => tag.remove());
+  const failing = violations.flatMap((rule) => rule.nodes);
+  check(
+    `contrast passes in the graphic and beside the frame, toggles ${state}`,
+    where,
+    failing.length === 0,
+    failing
+      .slice(0, 4)
+      .map((node) => node.target.join(" "))
+      .join(", "),
+  );
+  return incomplete.flatMap((rule) => rule.nodes).length;
+}
+
+async function checkAxe(page, where) {
+  const undetermined = {};
+  const openToggles = (open) =>
+    page.evaluate((value) => {
+      for (const toggle of document.querySelectorAll(".data-toggle")) toggle.open = value;
+    }, open);
+  await page.evaluate(() => {
+    for (const details of document.querySelectorAll("main details:not(.data-toggle)")) {
+      details.removeAttribute("name");
+      details.open = true;
+    }
+  });
+  for (const [state, open] of [
+    ["closed", false],
+    ["open", true],
+  ]) {
+    await openToggles(open);
+    const { violations } = await new AxeBuilder({ page }).analyze();
+    checkAxeResults(where, state, violations);
+    undetermined[state] = await checkContrast(page, where, state);
+  }
+  undeterminedContrast.push(`${where}: ${undetermined.closed} closed, ${undetermined.open} open`);
 }
 
 async function checkWithoutJavaScript(page, where) {
@@ -414,8 +676,25 @@ async function checkWithoutJavaScript(page, where) {
   check("source and definition show as a plain note", where, await note.isVisible());
   check("the note holds the source", where, (await note.innerText()).includes("Source:"));
   check("the note links the definition", where, (await note.locator("a").count()) === 1);
+  const blank = await page.evaluate(
+    () =>
+      [...document.querySelectorAll(".chart-area")]
+        .filter((area) => area.checkVisibility())
+        .filter(
+          (area) =>
+            !area.textContent.trim() ||
+            (area.querySelector(".recharts-responsive-container") &&
+              !area.querySelector(".recharts-responsive-container svg")),
+        )
+        .filter((area) => {
+          const note = area.parentElement.querySelector(".chart-area__needs-js");
+          return !note?.checkVisibility();
+        }).length,
+  );
+  check("an empty chart area has the note", where, blank === 0, `${blank} without`);
   const needsJs = page.locator(".chart-area__needs-js");
   check("the step line says it needs JavaScript", where, (await needsJs.count()) === 1);
+  check("and the note is visible", where, await needsJs.isVisible());
   check("and points to the Table button", where, (await needsJs.innerText()).includes("The Table"));
 }
 
@@ -431,10 +710,13 @@ async function checkFolder(browser, folder, harness) {
       const options = { width, js };
       const { context, page, errors } = await openPage(browser, origin, folder, markup, options);
       const group = (name, run) => guarded(name, where, run);
+      await group("in view", () => checkInView(page, where));
+      await group("focus", () => checkFocusRings(page, where));
       await group("the filter", () => checkFilter(page, where, js, chains));
       await group("one at a time", () => checkOneAtATime(page, where));
       await group("nothing covered", () => checkNothingCovered(page, where));
       if (js) await group("hover", () => checkHover(page, where));
+      if (js) await group("Escape", () => checkEscapeStaysPut(page, where));
       if (!js) await group("no script", () => checkWithoutJavaScript(page, where));
       await group("the toggle", () => checkToggle(page, where, width));
       await group("targets", () => checkTargets(page, where));
@@ -443,6 +725,13 @@ async function checkFolder(browser, folder, harness) {
       check("no console errors", where, errors.length === 0, errors.slice(0, 3).join(" | "));
       await context.close();
       await guarded("tap", where, () => checkTap(browser, origin, folder, markup, where, options));
+      await guarded("methodology", where, () => checkMethodologyPage(browser, origin, where, js));
+      await guarded("forced colours", where, () =>
+        checkForcedColors(browser, origin, folder, markup, where, options),
+      );
+      await guarded("no :has()", where, () =>
+        checkWithoutHas(browser, origin, folder, markup, chains, where, options),
+      );
     }
   }
   server.close();
@@ -470,6 +759,8 @@ try {
 
 for (const [name, { pass, fail }] of counts)
   console.log(`${fail ? "FAIL" : "ok  "} ${pass}/${pass + fail} ${name}`);
+// Not a pass or a fail: what axe couldn't judge, such as text on the hatched fills.
+for (const line of undeterminedContrast) console.log(`Contrast axe couldn't judge, ${line}`);
 for (const failure of failures) console.error(`FAIL ${failure}`);
 console.log(
   `${failures.length === 0 ? "Passed" : "Failed"}: ${counts.size} checks, ${failures.length} failures.`,

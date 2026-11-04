@@ -31,6 +31,9 @@ export type ChartCardProps = {
   moreTables?: ReactNode;
   // For a chart that only draws in the browser. A hand-built chart is in the static HTML.
   needsJs?: boolean;
+  // For a plot that is itself real content, such as a table with words for assistive tech. Otherwise
+  // the graphic is hidden from assistive tech, as the summary and table carry what it shows.
+  plotIsContent?: boolean;
   // Words a reader needs beside the chart or table, such as a caveat with a link. Read by everyone:
   // the graphic is hidden from assistive tech, and the summary is a plain string.
   note?: ReactNode;
@@ -38,7 +41,10 @@ export type ChartCardProps = {
 };
 
 // A card whose content is its table: no chart, and no second table behind a toggle.
-export type TableCardProps = Omit<ChartCardProps, "children" | "moreTables" | "needsJs">;
+export type TableCardProps = Omit<
+  ChartCardProps,
+  "children" | "moreTables" | "needsJs" | "plotIsContent"
+>;
 
 type CardFrameProps = Pick<
   ChartCardProps,
@@ -117,7 +123,7 @@ function CardFrame({
       <noscript>
         <p className="chart-card__source-note">
           Source: {source} ·{" "}
-          <a href={definitionHref} className="underline underline-offset-4">
+          <a href={definitionHref} className="target-link underline underline-offset-4">
             Definition
           </a>
         </p>
@@ -132,6 +138,7 @@ export function ChartCard({
   notes = [],
   moreTables,
   needsJs = false,
+  plotIsContent = false,
   note,
   ...frame
 }: ChartCardProps) {
@@ -140,7 +147,11 @@ export function ChartCard({
       <div className="chart-card__body" data-notes={notes.length > 0 || undefined}>
         <div className="chart-card__plot">
           {/* aria-hidden and nothing focusable inside; not inert, so hover tooltips still work. */}
-          <div className="chart-area" aria-hidden="true">
+          <div
+            className="chart-area"
+            aria-hidden={plotIsContent ? undefined : "true"}
+            data-plot-content={plotIsContent || undefined}
+          >
             {children}
           </div>
           {needsJs ? (

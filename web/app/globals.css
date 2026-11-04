@@ -195,6 +195,11 @@ h2 {
   background: none;
 }
 
+.chart-area[data-plot-content] {
+  height: auto;
+  background: none;
+}
+
 @media (min-width: 768px) {
   .chart-area {
     height: var(--chart-height-tablet);
@@ -375,6 +380,7 @@ h2 {
 }
 
 .info-popover > summary::before {
+  content: "i";
   content: "i" / "";
 }
 
@@ -457,15 +463,18 @@ h2 {
   background: var(--color-secondary-strong);
 }
 
-.data-toggle:not([open]) .data-toggle__to-chart,
-.data-toggle[open] .data-toggle__to-table {
+/* It says Chart only where opening it really swaps the chart out, in the @supports block below. */
+.data-toggle__to-chart {
   display: none;
 }
 
+/* A table too wide for its card scrolls inside it and never clips. */
 .data-toggle__panel {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
   margin-top: 0.75rem;
+  overflow-x: auto;
 }
 
 /* A segmented control over native radios. The radio covers its option, so the whole of it is the
@@ -555,6 +564,14 @@ h2 {
     display: none;
   }
 
+  .data-toggle[open] .data-toggle__to-chart {
+    display: inline;
+  }
+
+  .data-toggle[open] .data-toggle__to-table {
+    display: none;
+  }
+
   .chart-card:has(> .data-toggle[open]) .chart-card__body {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -580,6 +597,23 @@ h2 {
       > .chain-panels:has(> [data-chain-panel="solana"] .data-toggle[open]) {
       grid-column: 1 / -1;
     }
+  }
+}
+
+/* Choosing an option couldn't change anything here, so there's no control to mislead with. */
+@supports not selector(:has(*)) {
+  .chain-filter {
+    display: none;
+  }
+}
+
+/* Forced colours drop backgrounds, and the background is what shows these are chosen. */
+@media (forced-colors: active) {
+  .chain-filter input:checked + span,
+  .info-popover[open] > summary {
+    background: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none;
   }
 }
 

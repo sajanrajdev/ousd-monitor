@@ -86,9 +86,14 @@ function listen(root: Document): () => void {
     if (event.key !== "Escape") return;
     const open = openPopovers()[0];
     if (!open) return;
+    const focused = root.activeElement;
+    const onNothing = !focused || focused === root.body;
     open.open = false;
     keepOpen();
-    open.querySelector("summary")?.focus();
+    // Focus somewhere else stays there, as moving it would scroll the page away from the reader.
+    if (onNothing || open.contains(focused)) {
+      open.querySelector("summary")?.focus({ preventScroll: onNothing });
+    }
   };
 
   // A screen reader hears the radio and not the panel it shows, so this says which one is showing.

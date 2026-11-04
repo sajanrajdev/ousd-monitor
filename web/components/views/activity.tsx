@@ -137,6 +137,16 @@ export function ActivityView({ activity, kpis, definitions, warnings, state }: A
         }}
         note={
           <>
+            {all ? (
+              <>
+                <p data-note="everyday-meaning">
+                  Everyday means under {everydayLabel}, nothing more.
+                </p>
+                <p className="mt-3" data-note="hops">
+                  Hops across transactions still count more than once.
+                </p>
+              </>
+            ) : null}
             {scope ? <Day0Note scope={scope} /> : null}
             <SmallTicketNote />
             <div className="mt-4">
@@ -204,7 +214,8 @@ export function ActivityView({ activity, kpis, definitions, warnings, state }: A
         }}
         note={
           <>
-            <p data-note="velocity-denominators">
+            <p data-note="wallets-not-people">Wallets, not people.</p>
+            <p className="mt-3" data-note="velocity-denominators">
               {VELOCITY_EXPLANATION}{" "}
               <a href={definitionHref("velocity")} className="underline underline-offset-4">
                 How velocity is worked out

@@ -184,8 +184,8 @@ Three layers, none covering data. Each is native HTML, and works by tap and keyb
 | **Data toggle** | Tap, click or keyboard | The chart's table in full, with exact amounts and any further tables. It swaps the chart for the table | The only copy of a finding or caveat | Works the same |
 
 - **A popover pushes and doesn't float.** It opens in flow under the card's or cell's head, moving the plot down, so it covers nothing at any width. One is open at a time.
-- **Popover behaviour:** a trigger at least 24 px with a name. Escape closes it and returns focus. With a mouse, moving onto the panel keeps it open, and a click keeps it open until dismissed. It has no animation.
-- **Pins in a chart are decoration.** The graphic is hidden from assistive technology and out of the tab order, so a pin is never a link or a focusable element. Its note reads on its own without it.
+- **Popover behaviour:** a trigger at least 24 px with a name. Escape closes it, and returns focus when focus was in it or nowhere, so it never scrolls a reader away. With a mouse, moving onto the panel keeps it open, and a click keeps it open until dismissed. It has no animation.
+- **Pins in a chart are decoration.** The graphic is hidden from assistive technology and out of the tab order, so a pin is never a link or a focusable element. Its note reads on its own without it. A plot that is real content, such as the chain grid's table, isn't a graphic and isn't hidden.
 - **A pin comes from the data.** It appears because the manifest or a condition in the config says so, so it can't go false when the data changes.
 
 ## Charts
@@ -229,6 +229,8 @@ None of these states may move into a popover or a data toggle.
 - With JavaScript off, a chart that needs it says "This chart needs JavaScript. The Table button has the same data." The filter and data toggles still work, and sources and definitions show as plain notes.
 - Full keyboard use, with visible focus states. The filter uses arrow keys, and popovers and toggles use Enter and Space.
 - Targets at least 24 px, and the filter's at least 36 px.
+- In forced colours the chosen filter option and an open popover's trigger use `Highlight`, as backgrounds drop out.
+- Without `:has()`, every panel shows and the filter is hidden, because choosing an option couldn't change anything.
 - Axe runs with every popover and toggle open, because it skips closed content.
 
 ## Tailwind

@@ -36,6 +36,17 @@ describe("the real activity view", () => {
     }
   });
 
+  it.each([
+    ["everyday-meaning", "Everyday means under"],
+    ["hops", "Hops across transactions still count more than once."],
+    ["wallets-not-people", "Wallets, not people."],
+  ])("keeps the %s caveat visible, with nothing opened", (kind, words) => {
+    const { container } = mount();
+    const note = container.querySelector(`[data-note="${kind}"]`)!;
+    expect(note.textContent).toContain(words);
+    expect(note.closest("details, noscript, .sr-only")).toBeNull();
+  });
+
   it("shows one waterfall row per step, in the mart's order, hatched when removed", () => {
     const { container } = mount();
     const rows = [...container.querySelectorAll("[data-step]")];

@@ -92,10 +92,16 @@ describe("the enhancer", () => {
     expect(details(0).open).toBe(false);
   });
 
-  it("ignores touch and pen hover", () => {
-    fireEvent.pointerOver(trigger(0), { pointerType: "touch" });
+  it.each(["touch", "pen"])("ignores %s hover", (pointerType) => {
+    fireEvent.pointerOver(trigger(0), { pointerType });
     wait();
     expect(details(0).open).toBe(false);
+  });
+
+  it("does open for a mouse by the same event, so the two above test something", () => {
+    fireEvent.pointerOver(trigger(0), { pointerType: "mouse" });
+    wait();
+    expect(details(0).open).toBe(true);
   });
 
   it("stays open while the mouse moves onto the panel", () => {
@@ -153,6 +159,22 @@ describe("the enhancer", () => {
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     expect(details(0).open).toBe(false);
     expect(document.activeElement).toBe(trigger(0));
+  });
+
+  it("returns focus on Escape when nothing has focus", () => {
+    fireEvent.click(trigger(0));
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(document.activeElement).toBe(trigger(0));
+  });
+
+  it("closes on Escape but leaves focus where it is when it's somewhere else", () => {
+    fireEvent.click(trigger(0));
+    const elsewhere = screen.getByRole("button");
+    elsewhere.focus();
+    fireEvent.keyDown(elsewhere, { key: "Escape" });
+    expect(details(0).open).toBe(false);
+    expect(document.activeElement).toBe(elsewhere);
   });
 
   it("leaves focus alone on Escape with nothing open", () => {
