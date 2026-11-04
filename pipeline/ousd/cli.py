@@ -4,7 +4,9 @@ import argparse
 import logging
 import os
 import sys
+import time
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from ousd.chains import (
     DECIMALS,
@@ -14,25 +16,42 @@ from ousd.chains import (
     load_chains,
     missing_rpc_keys,
 )
-from ousd.http import PoliteClient
+from ousd.http import HttpError, PoliteClient
 from ousd.ingest import sync_chain
-from ousd.reconcile import ChainReconciliation, compare_with_bridge, reconcile_chain
-from ousd.solana import (
-    RPC_INTERVAL,
-    BalanceCheck,
-    SolanaChain,
-    SolanaRpc,
+from ousd.probes import build_probes, history_for, rpc_for, solana_rpc_for
+from ousd.reconcile import (
+    FULL_SCOPE,
+    PARTIAL_SCOPE,
+    BalanceFinding,
+    BalanceRead,
+    BridgeFigures,
+    BridgeWait,
+    ChainProbe,
+    ChainReconciliation,
+    CheckOutcome,
+    GroupFinding,
+    RunResult,
     Unchecked,
-    check_all_balances,
-    load_solana,
-    reconcile_solana,
-    sync_solana,
+    check_at_block,
+    compare_with_bridge,
+    exit_code,
+    run_reconciliation,
 )
-from ousd.sources import BlockscoutClient, RpcClient, bridge_total_base_units
+from ousd.solana import SolanaChain, load_solana, sync_solana
+from ousd.sources import BridgeSnapshot, TransactionProof, bridge_snapshot
 from ousd.store import Store, StoreConflict
 
-BLOCKSCOUT_INTERVAL = 0.25
-MAX_SHOWN_DIFFERENCES = 10
+# Wallets read per progress line, and proofs per progress line. A read this long is otherwise
+# silent for minutes, and a silent gap should mean a real hang.
+BALANCE_CHUNK = 100
+PROOF_PROGRESS = 250
+
+CHECK_LABELS = {
+    "sampled_balances": "balances",
+    "balance_census": "census",
+    "same_looking": "same-looking groups",
+    "bridge": "Bridge check",
+}
 
 
 def format_units(base_units: int) -> str:
@@ -42,30 +61,20 @@ def format_units(base_units: int) -> str:
     return f"{sign}{whole:,}.{fraction:0{DECIMALS}d}"
 
 
-def _rpc_for(chain: Chain) -> RpcClient:
-    http = PoliteClient(label=f"{chain.name}-rpc", min_interval=chain.rpc_interval)
-    return RpcClient(http, chain.rpc_url)
-
-
-def _solana_rpc(chain: SolanaChain) -> SolanaRpc:
-    http = PoliteClient(label=f"{chain.name}-rpc", min_interval=RPC_INTERVAL)
-    return SolanaRpc(http, chain.rpc_url)
+def _say(text: str) -> None:
+    print(text, flush=True)
 
 
 def _sync(chains: Sequence[Chain | SolanaChain], store: Store) -> int:
     for chain in chains:
         if isinstance(chain, SolanaChain):
-            solana = sync_solana(chain, _solana_rpc(chain), store)
+            solana = sync_solana(chain, solana_rpc_for(chain), store)
             print(
                 f"{solana.chain}: synced to slot {solana.tip}, "
                 f"{solana.transfers_stored} transfers stored"
             )
             continue
-        history = None
-        if chain.blockscout_url:
-            http = PoliteClient(label=f"{chain.name}-blockscout", min_interval=BLOCKSCOUT_INTERVAL)
-            history = BlockscoutClient(http, chain.blockscout_url)
-        result = sync_chain(chain, _rpc_for(chain), store, history)
+        result = sync_chain(chain, rpc_for(chain), store, history_for(chain))
         reorg = f", reorg repaired at {result.reorg_fork_block}" if result.reorg_fork_block else ""
         print(
             f"{result.chain}: synced to {result.tip} (finalized {result.finalized}), "
@@ -74,9 +83,67 @@ def _sync(chains: Sequence[Chain | SolanaChain], store: Store) -> int:
     return 0
 
 
-def _print_reconciliation(result: ChainReconciliation) -> None:
-    verdict = "MATCH" if result.matched else "MISMATCH"
-    print(f"{result.chain} at block {result.block_number}: {verdict}")
+class _Narrated:
+    """A probe that says what it is doing, so a long read is never silent.
+
+    Reads of wallets on an EVM chain are split into chunks, which changes nothing: every wallet is
+    read at the same pinned hash. Solana's read and sync are one call, so it is announced only.
+    """
+
+    def __init__(self, probe: ChainProbe, chunked: bool) -> None:
+        self.name = probe.name
+        self.needs_census = probe.needs_census
+        self._probe = probe
+        self._chunked = chunked
+        self._proofs = 0
+
+    def supply_check(self) -> ChainReconciliation | Unchecked:
+        _say(f"{self.name}: syncing, then reading supply")
+        return self._probe.supply_check()
+
+    def pin_timestamp(self, height: int) -> int:
+        return self._probe.pin_timestamp(height)
+
+    def read_balances(self, addresses: Sequence[str], height: int) -> list[BalanceRead] | Unchecked:
+        total = len(addresses)
+        if total <= BALANCE_CHUNK:
+            return self._probe.read_balances(addresses, height)
+        if not self._chunked:
+            _say(f"{self.name}: reading {total} wallets")
+            return self._probe.read_balances(addresses, height)
+        reads: list[BalanceRead] = []
+        for start in range(0, total, BALANCE_CHUNK):
+            chunk = self._probe.read_balances(addresses[start : start + BALANCE_CHUNK], height)
+            if isinstance(chunk, Unchecked):
+                return chunk
+            reads.extend(chunk)
+            _say(f"{self.name}: read {len(reads)}/{total} wallets")
+        return reads
+
+    def read_transaction_proof(self, tx_hash: str) -> TransactionProof | None:
+        proof = self._probe.read_transaction_proof(tx_hash)
+        self._proofs += 1
+        if self._proofs % PROOF_PROGRESS == 0:
+            _say(f"{self.name}: {self._proofs} transactions proven")
+        return proof
+
+
+def _verdict(status: str, reason: str | None) -> str:
+    return status.upper() if reason is None else f"{status.upper()} ({reason})"
+
+
+def _print_reconciliation(outcome: CheckOutcome, result: ChainReconciliation) -> None:
+    if not result.matched:
+        verdict = "MISMATCH"
+    elif outcome.reason == "diagnostic_only":
+        verdict = "MATCH (diagnostic only, nothing recorded)"
+    elif outcome.status == "pass":
+        verdict = "MATCH"
+    else:
+        # Equal figures that were not accepted: never shown as a plain match.
+        verdict = _verdict(outcome.status, outcome.reason)
+    attempt = f" (attempt {outcome.attempt})" if outcome.attempt and outcome.attempt > 1 else ""
+    print(f"{result.chain} at block {result.block_number}: {verdict}{attempt}")
     print(f"  minted         {format_units(result.minted)}")
     print(f"  burned         {format_units(result.burned)}")
     print(f"  mints - burns  {format_units(result.event_supply)}")
@@ -84,69 +151,136 @@ def _print_reconciliation(result: ChainReconciliation) -> None:
     print(f"  difference     {format_units(result.difference)} ({result.difference} base units)")
 
 
-def _print_unchecked(result: Unchecked) -> None:
-    print(f"{result.chain}: UNCHECKED: {result.reason}")
+def _print_outcome(outcome: CheckOutcome) -> None:
+    if outcome.check_name == "chain_supply":
+        if outcome.reconciliation:
+            _print_reconciliation(outcome, outcome.reconciliation)
+        else:
+            reason = outcome.reason or "no reason recorded"
+            print(f"{outcome.subject}: {outcome.status.upper()}: {reason}")
+        return
+    label = CHECK_LABELS.get(outcome.check_name, outcome.check_name)
+    subject = "" if outcome.check_name == "bridge" else f"{outcome.subject} "
+    attempt = f" (attempt {outcome.attempt})" if outcome.attempt and outcome.attempt > 1 else ""
+    print(f"{subject}{label}: {_verdict(outcome.status, outcome.reason)}{attempt}")
 
 
-def _print_solana_balances(check: BalanceCheck | Unchecked) -> bool:
-    if isinstance(check, Unchecked):
-        _print_unchecked(check)
-        return False
-    verdict = "MATCH" if check.matched else "MISMATCH"
-    print(
-        f"{check.chain} balances at slot {check.slot}: {verdict} ({check.wallets_checked} wallets)"
-    )
-    for difference in check.differences[:MAX_SHOWN_DIFFERENCES]:
+def _utc(seconds: float) -> str:
+    return datetime.fromtimestamp(seconds, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _print_bridge(figures: BridgeFigures, title: str) -> None:
+    comparison = figures.comparison
+    age = max(0, int(figures.fetched_at) - figures.snapshot.last_updated)
+    print(f"{title}")
+    print(f"  Bridge updated   {_utc(figures.snapshot.last_updated)} (age {age} s when fetched)")
+    print(f"  chains included  {', '.join(comparison.chains_included)}")
+    print(f"  chains missing   {', '.join(comparison.chains_missing) or 'none'}")
+    print(f"  chains total     {format_units(comparison.chains_total)}")
+    print(f"  Bridge total     {format_units(comparison.bridge_total)}")
+    print(f"  difference       {format_units(comparison.difference)}")
+
+
+def _report(
+    event: CheckOutcome | BridgeWait | BridgeFigures | BalanceFinding | GroupFinding,
+) -> None:
+    """Print each event as it happens, so one chain's failure doesn't hide what the others found
+    and a crash later in the run leaves everything before it on screen."""
+    if isinstance(event, CheckOutcome):
+        _print_outcome(event)
+    elif isinstance(event, BridgeFigures):
+        _print_bridge(event, f"Bridge comparison, attempt {event.attempt}:")
+    elif isinstance(event, BridgeWait):
+        _say(
+            f"Bridge: waiting {event.seconds} s before attempt {event.attempt + 1}, "
+            f"until {_utc(event.resume_at)}"
+        )
+    elif isinstance(event, BalanceFinding):
         print(
-            f"  {difference.owner}  on-chain {format_units(difference.onchain)}"
-            f"  stored {format_units(difference.stored)}"
+            f"  {event.chain} wallet {event.address} at {event.height}: "
+            f"model {format_units(event.model_balance)}, "
+            f"on-chain {format_units(event.observed_balance)}"
         )
-    if len(check.differences) > MAX_SHOWN_DIFFERENCES:
-        print(f"  ... {len(check.differences)} wallets differ in all")
-    return check.matched
+    elif isinstance(event, GroupFinding):
+        mixed = ", mixes rows with and without a block hash" if event.mixed_hash else ""
+        print(
+            f"  {event.chain} transaction {event.tx_hash}: {event.verdict.replace('_', ' ')}, "
+            f"stored positions {list(event.stored_positions)}, "
+            f"proven positions {list(event.proven_positions)}{mixed}"
+        )
 
 
-def _reconcile_solana(chain: SolanaChain, store: Store) -> tuple[ChainReconciliation | None, bool]:
-    rpc = _solana_rpc(chain)
-    # Balances first, so the supply row is the one left at the cursor.
-    balances_ok = _print_solana_balances(check_all_balances(chain, rpc, store))
-    supply = reconcile_solana(chain, rpc, store)
-    if isinstance(supply, Unchecked):
-        _print_unchecked(supply)
-        return None, False
-    _print_reconciliation(supply)
-    return supply, balances_ok and supply.matched
+def _print_result(status: str, code: int, scope: str, outcomes: Sequence[CheckOutcome]) -> int:
+    """The last word on a run. Only a status of pass, at full scope, may be a pass."""
+    if code == 0 and (status != "pass" or scope != FULL_SCOPE):
+        code = exit_code("unchecked")
+    print(f"RESULT: {'FULL PASS' if code == 0 else 'FAIL' if code == 1 else 'UNCHECKED'}")
+    if scope == PARTIAL_SCOPE:
+        print("  scope: partial run, so it cannot be a full pass")
+    # Every attempt, so a mismatch that a later attempt didn't repeat is still listed.
+    for outcome in outcomes:
+        if outcome.status != "pass":
+            attempt = f" (attempt {outcome.attempt})" if outcome.attempt else ""
+            print(
+                f"  {outcome.check_name} {outcome.subject}{attempt}: "
+                f"{_verdict(outcome.status, outcome.reason)}"
+            )
+    return code
 
 
-def _reconcile(chains: Sequence[Chain | SolanaChain], store: Store, at_block: int | None) -> int:
-    results = []
-    all_ok = True
-    for chain in chains:
-        # Print as we go, so one chain's failure doesn't hide what the others found.
+def _fetch_bridge() -> BridgeSnapshot:
+    url = os.environ.get("BRIDGE_API_URL", DEFAULT_BRIDGE_URL)
+    return bridge_snapshot(PoliteClient(label="bridge"), url)
+
+
+def _print_information(outcomes: Sequence[CheckOutcome]) -> None:
+    """A partial run asks Bridge nothing, so its figures are shown here, as information only."""
+    latest: dict[str, ChainReconciliation] = {}
+    for outcome in outcomes:
+        if outcome.check_name == "chain_supply" and outcome.reconciliation:
+            latest[outcome.subject] = outcome.reconciliation
+    if not latest:
+        return
+    title = "Bridge comparison (information only, not a check):"
+    try:
+        snapshot = _fetch_bridge()
+    except (HttpError, ValueError):
+        # No message: a provider's text can hold a URL.
+        print(f"{title} Bridge could not be read")
+        return
+    comparison = compare_with_bridge(list(latest.values()), snapshot.total)
+    _print_bridge(BridgeFigures(0, snapshot, time.time(), comparison), title)
+
+
+def _check_at_block(chain: Chain, store: Store, block: int) -> int:
+    """A diagnostic: nothing is recorded, no sync runs and Bridge isn't read."""
+    outcome = check_at_block(chain, rpc_for(chain), store, block)
+    _print_outcome(outcome)
+    return _print_result(outcome.status, exit_code(outcome.status), PARTIAL_SCOPE, [outcome])
+
+
+def _reconcile(
+    chains: Sequence[Chain | SolanaChain],
+    store: Store,
+    at_block: int | None = None,
+    census: Sequence[str] = (),
+) -> int:
+    if at_block is not None:
+        chain = chains[0]
         if isinstance(chain, SolanaChain):
-            solana, ok = _reconcile_solana(chain, store)
-            all_ok &= ok
-            if solana is not None:
-                results.append(solana)
-            continue
-        results.append(reconcile_chain(chain, _rpc_for(chain), store, at_block))
-        _print_reconciliation(results[-1])
-        all_ok &= results[-1].matched
+            raise ValueError("--at-block is not available for solana")
+        return _check_at_block(chain, store, at_block)
 
-    if at_block is None:
-        url = os.environ.get("BRIDGE_API_URL", DEFAULT_BRIDGE_URL)
-        comparison = compare_with_bridge(
-            results, bridge_total_base_units(PoliteClient(label="bridge"), url)
-        )
-        status = "PARTIAL" if comparison.is_partial else "FULL"
-        print(f"Bridge comparison: {status}")
-        print(f"  chains included  {', '.join(comparison.chains_included)}")
-        print(f"  chains missing   {', '.join(comparison.chains_missing) or 'none'}")
-        print(f"  chains total     {format_units(comparison.chains_total)}")
-        print(f"  Bridge total     {format_units(comparison.bridge_total)}")
-        print(f"  difference       {format_units(comparison.difference)}")
-
-    return 0 if all_ok else 1
+    probes = [
+        _Narrated(probe, chunked=not isinstance(chain, SolanaChain))
+        for chain, probe in zip(chains, build_probes(chains, store), strict=True)
+    ]
+    result: RunResult = run_reconciliation(
+        probes, store, _report, bridge=_fetch_bridge, census=census
+    )
+    if result.scope == PARTIAL_SCOPE:
+        _print_information(result.outcomes)
+    return _print_result(result.status, result.exit_code, result.scope, result.outcomes)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -157,6 +291,13 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("sync", help="ingest transfers up to the tip and repair reorgs")
     reconcile = commands.add_parser("reconcile", help="compare events with totalSupply()")
     reconcile.add_argument("--at-block", type=int, help="check a past block (needs archive state)")
+    reconcile.add_argument(
+        "--census",
+        action="append",
+        default=[],
+        metavar="CHAIN",
+        help="read every wallet of this chain (repeatable)",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -180,6 +321,13 @@ def main(argv: list[str] | None = None) -> int:
         and isinstance(chains[0], SolanaChain)
     ):
         parser.error("--at-block is not available for solana: getTokenSupply has no past-slot read")
+    census = getattr(args, "census", [])
+    if unknown := set(census) - set(available):
+        parser.error(f"unknown chain in --census: {', '.join(sorted(unknown))}")
+    if not_selected := set(census) - {chain.name for chain in chains}:
+        parser.error(f"--census needs the chain in this run: {', '.join(sorted(not_selected))}")
+    if census and args.at_block is not None:
+        parser.error("--census does not apply to --at-block")
     missing = missing_rpc_keys([chain.name for chain in chains], os.environ)
     if missing:
         parser.error(f"set {', '.join(missing)} in .env, or limit the run with --chain")
@@ -188,10 +336,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "sync":
             return _sync(chains, store)
-        return _reconcile(chains, store, args.at_block)
+        return _reconcile(chains, store, args.at_block, census)
     except StoreConflict as conflict:
         # Proven disagreement with stored rows: stop, never pass.
         print(f"error: {conflict}", file=sys.stderr)
+        if args.command == "reconcile":
+            print("RESULT: FAIL")
         return 1
     finally:
         store.close()
