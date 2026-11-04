@@ -6,7 +6,7 @@ Honest notes on what went wrong and what the data taught us. Newest phase last.
 
 ### What went wrong
 
-**The first mint on Ethereum was earlier than the brief said.** We were told the first log was near block 25180434. The first Transfer returned from that range came from a non-zero address, which means the sender already held tokens. Searching from block 0 found a 5 OUSD mint at block 25153426, and the first log of any kind at 25137271. Starting at the suggested block would have lost that mint, and reconciliation would have been off by a small amount. `start_block` is now 25137271.
+**The first mint on Ethereum was earlier than first assumed.** We expected the first log near block 25180434. The first Transfer returned from that range came from a non-zero address, which means the sender already held tokens. Searching from block 0 found a 5 OUSD mint at block 25153426, and the first log of any kind at 25137271. Starting at the suggested block would have lost that mint, and reconciliation would have been off by a small amount. `start_block` is now 25137271.
 
 **Blockscout's free rate limit is far tighter than expected.** It allowed about 10 pages, then returned 429 with `x-ratelimit-limit: 10` and a reset 22 to 36 minutes away. The first version backed off for about 30 seconds in total and then crashed. The client now reads `Retry-After` and `x-ratelimit-reset`, and pauses before the next request when a success spends the last of a window. The reset header's unit is inferred to be milliseconds from its size, not from documentation. Each rejected request may also push the reset further out, but we did not test that. A cold Ethereum backfill takes hours because of this.
 
@@ -32,7 +32,7 @@ Honest notes on what went wrong and what the data taught us. Newest phase last.
 - **A conflicting row was silently dropped.** `ON CONFLICT DO NOTHING` also hid a different row at the same position. It now raises. This adds about 15 ms per 20,000 rows at 2M stored rows.
 - **Smaller ones.** A Bridge total given as a JSON number or with too many decimals was silently truncated, and now raises. Nothing checked `chain_id`, so a mispasted RPC URL looked like a quiet chain. Logs from another contract weren't rejected locally. Provider URLs reached logs, errors and `repr(Chain)`. A rate limit hint outlived its response and could repeat a long wait after an unrelated failure. A node lagging behind every stored block got advice to rebuild the database, which costs hours. `--chain tempo` listed Ethereum as neither checked nor missing. A sync after a long backfill finished hours behind the tip, too old for reconciliation on public nodes.
 
-**More commits that failed the check.** Three commits in this review (`793eae1`, `5214ec1`, `1c75e51`) went in with one test failing, because the command was `make check | tail && git commit`, and a pipeline's exit status is `tail`'s. This is the same mistake as the earlier lint failure. The test had pinned the old request sequence, and the next commit updated it. Those three don't pass on their own. Run the check without a pipe when a commit depends on it.
+**More commits that failed the check.** Three commits in this review went in with one test failing, because the command was `make check | tail && git commit`, and a pipeline's exit status is `tail`'s. This is the same mistake as the earlier lint failure. The test had pinned the old request sequence, and a follow-up commit updated it. Run the check without a pipe when a commit depends on it.
 
 **Decisions from the review.**
 
