@@ -59,3 +59,58 @@ Honest notes on what went wrong and what the data taught us. Newest phase last.
 **Public node limits on Ethereum.** PublicNode served `eth_call` state at 64 blocks back but refused at 128, and logs at 10,000 blocks back but refused at 50,000. So reconciliation has to run right after a sync. Blockscout logs have no block hash, which is why it only serves blocks more than 2,000 behind the tip.
 
 **Bridge's figure moves quickly.** It read 872,221,164.60664 at the start of the day and 889,381,963.45664 hours later. Any full check needs a stated timing tolerance, as the PRD says.
+
+## Phase 1, 2026-11-04: the first full reconciliation
+
+### Result
+
+The first full pass ran at 2026-11-04 09:24 UTC. Run scope `full`, exit 0, and the publish gate reads it as usable. Every difference below is 0 base units.
+
+| Chain | Block or slot | Minted | Burned | Net, equal to supply | Transfers | Balance check |
+|---|---|---|---|---|---|---|
+| Tempo | 47370805 | 745,972,873.52 | 126,307,115.77 | 619,665,757.75 | 370,446 | Census of 2,004 wallets, 0 mismatches |
+| Ethereum | 26340519 | 209,850,230.89 | 97,679,283.70 | 112,170,947.19 | 37,240 | 423 balance reads including its census, 0 mismatches |
+| Base | 53497416 | 112,317,166.82 | 21,290,034.06 | 91,027,132.76 | 71,130 | 50 sampled wallets, 0 mismatches |
+| Solana | 465246653 | 120,140,472.34 | 40,463,624.86336 | 79,676,847.47664 | 64,945 | Every wallet read, 8,871, 0 mismatches |
+
+"Net, equal to supply" is mints minus burns, and it matched `totalSupply()` on the EVM chains and `getTokenSupply` on Solana.
+
+**Bridge matched on the first attempt.** Bridge's `last_updated` was 2026-11-04T09:00:38Z, and we fetched it 601 s later. The four chains at that window summed to 902,538,033.87664, Bridge reported 902,538,033.87664, and the difference was 0. The sum of the four chains at their tips was higher, because supply kept moving after Bridge's time. That is why the check takes each chain's supply at Bridge's own time and not at the tip. Comparing tips would have reported a mismatch that wasn't one.
+
+**Same-looking groups are all real.** Tempo's 3,247 transactions with a group were proven from their receipts, and Ethereum's 6 from Blockscout logs. No address has a negative balance on any chain.
+
+**A second full run also passed.** At 2026-11-04 09:25 UTC it exited 0 again, with no census flag. Bridge read 902,540,685.17664, updated 09:20:49Z, which equals the chain sum, a difference of 0.
+
+### Base
+
+The first cold backfill took 16 min 38 s, with no retries and no reorgs logged. It stored 70,743 transfers to block 53490000. Earlier checks matched at the start block, before and at the first mint, and at 52483090. A second cold backfill agreed with the first row for row, with 0 differences either way through block 53488800. It stopped once on a `-32603` "internal filter error" at block 52.53M, and that error is now retried.
+
+### Solana
+
+Two runs, about 175 minutes in total, with 2,802 HTTP 429 retries. No part of a key appeared in any log.
+
+**The first run stopped at the invariant on a plain burn.** At slot 459717019 it met a burn that was not a `Checked` form. All 142 mints and burns in our sample were `Checked` forms, so the decoder assumed they all were. The stop stored no wrong number. A small decoder change resumed the run from its cursor.
+
+**Credits charged are unknown.** The RPC doesn't report them, and the provider's dashboard wasn't read.
+
+### What reviews found before the real run
+
+These were found before any real run, by reviews that reproduced each one against fakes. Each has a test now.
+
+- **Keys leaked through parse errors.** A provider key could reach a log or an error through a parse error.
+- **The publish gate trusted the run row alone.** A pass could still be read as current after newer rows landed, or after rows changed at the same height. The gate now also compares each chain's cursor, pin hash and transfer count with what the run recorded.
+- **A stale Solana balance read could hide a mismatch.** A balance read at an older slot than the comparison could leave later movements unchecked and still report a match. A read now has to sit within about a minute of the cursor.
+- **A probe could answer for the wrong chain.** A reader for one chain could answer a question about another.
+- **A comparison row was written before its check row.** The order was wrong, so the check row now comes first.
+
+### Known limits
+
+- **A lost transfer can pass.** A transfer lost between two wallets with no later rows passes until one of them is drawn into a sample. On Tempo that is about 3% a run.
+- **A Bridge error can pass.** An error exactly equal to the moves inside the window matches one of the attainable sums.
+- **Scrubbing has gaps.** A key under 8 characters, a key joined by `-` or `_`, and a key that is fully percent-encoded all survive scrubbing.
+- **Solana has no reorg test.** It reads finalized data only, so there is nothing to simulate.
+- **`solana.py`'s checks are protected by hand.** Path enforcement for that file is an owner change, so for now a reviewer has to watch it.
+
+### Decision closed
+
+**The key stays chain, block or slot, and log index.** This closes the earlier "Revisit with Solana". Solana's `log_index` is built from the transaction index and the position within the transaction, so it fits the same key, and no table needed rebuilding.
