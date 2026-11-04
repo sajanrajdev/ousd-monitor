@@ -1,6 +1,6 @@
 """DuckDB storage. Every write that spans tables is one transaction."""
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import duckdb
@@ -67,37 +67,15 @@ class Store:
     def write_range(
         self,
         chain: str,
-        transfers: Iterable[Transfer],
+        transfers: Sequence[Transfer],
         block_hashes: Mapping[int, str],
         synced_through: int,
     ) -> None:
         """Store one ingested range and advance the cursor, all or nothing."""
-        rows = [
-            (
-                chain,
-                t.block_number,
-                t.log_index,
-                t.block_hash,
-                t.block_timestamp,
-                t.tx_hash,
-                t.from_address,
-                t.to_address,
-                # As text, because the driver would otherwise guess a type row by row.
-                str(t.value),
-            )
-            for t in transfers
-        ]
         self.db.begin()
         try:
-            if rows:
-                self.db.executemany(
-                    """
-                    INSERT INTO transfers
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS HUGEINT))
-                    ON CONFLICT DO NOTHING
-                    """,
-                    rows,
-                )
+            if transfers:
+                self._insert_transfers(chain, transfers)
             if block_hashes:
                 self.db.executemany(
                     "INSERT OR REPLACE INTO blocks VALUES (?, ?, ?)",
@@ -110,6 +88,32 @@ class Store:
         except Exception:
             self.db.rollback()
             raise
+
+    def _insert_transfers(self, chain: str, transfers: Sequence[Transfer]) -> None:
+        # One list per column is far faster than executemany. Values travel as text
+        # because a list of Python ints has no single type DuckDB can bind to HUGEINT.
+        self.db.execute(
+            """
+            INSERT INTO transfers
+            SELECT
+                $chain, unnest($block_number::BIGINT[]), unnest($log_index::INTEGER[]),
+                unnest($block_hash::VARCHAR[]), unnest($block_timestamp::BIGINT[]),
+                unnest($tx_hash::VARCHAR[]), unnest($from_address::VARCHAR[]),
+                unnest($to_address::VARCHAR[]), unnest($value::VARCHAR[])::HUGEINT
+            ON CONFLICT DO NOTHING
+            """,
+            {
+                "chain": chain,
+                "block_number": [t.block_number for t in transfers],
+                "log_index": [t.log_index for t in transfers],
+                "block_hash": [t.block_hash for t in transfers],
+                "block_timestamp": [t.block_timestamp for t in transfers],
+                "tx_hash": [t.tx_hash for t in transfers],
+                "from_address": [t.from_address for t in transfers],
+                "to_address": [t.to_address for t in transfers],
+                "value": [str(t.value) for t in transfers],
+            },
+        )
 
     def rollback_to(self, chain: str, block_number: int) -> None:
         """Forget everything above block_number, so that range is ingested again."""
