@@ -1,6 +1,7 @@
 """Clients for the upstream data sources: JSON-RPC, Blockscout and Bridge."""
 
 import re
+import time
 from collections.abc import Callable, Iterator
 from datetime import datetime
 from typing import Any, NamedTuple
@@ -11,7 +12,7 @@ from ousd.chains import DECIMALS
 from ousd.decode import (
     TRANSFER_TOPIC,
     Transfer,
-    _address_from_topic,
+    address_from_topic,
     decode_blockscout_log,
     decode_rpc_log,
 )
@@ -74,6 +75,12 @@ _MALFORMED = (ValueError, KeyError, TypeError, AttributeError, IndexError, Arith
 # Longest stretch of a provider's reply kept in an error, after scrubbing. A whole log has to fit,
 # because its tx hash, block and data come after the topics.
 _DETAIL_LIMIT = 2000
+# A node's transient eth_getLogs failure: a rerun of the same query works. Retried a few times, then
+# raised like any other error.
+_TRANSIENT_CODE = -32603
+_TRANSIENT_MESSAGE = "internal filter error"
+_TRANSIENT_RETRIES = 3
+_TRANSIENT_BACKOFF = 1.0  # Seconds; doubles each retry.
 
 
 def _parse[T](http: PoliteClient, url: str, what: str, read: Callable[[], T]) -> T:
@@ -90,20 +97,44 @@ def _parse[T](http: PoliteClient, url: str, what: str, read: Callable[[], T]) ->
     raise ValueError(http.scrub(f"malformed {what}: {failure}", url)[:_DETAIL_LIMIT])
 
 
+def _is_transient(error: Any) -> bool:
+    return (
+        isinstance(error, dict)
+        and error.get("code") == _TRANSIENT_CODE
+        and _TRANSIENT_MESSAGE in str(error.get("message"))
+    )
+
+
 class RpcClient:
-    def __init__(self, http: PoliteClient, url: str) -> None:
+    def __init__(
+        self, http: PoliteClient, url: str, sleep: Callable[[float], None] = time.sleep
+    ) -> None:
         self._http = http
         self._url = url
+        self._sleep = sleep
 
-    def _call(self, method: str, params: list[Any]) -> Any:
+    def _once(self, method: str, params: list[Any]) -> tuple[bool, Any]:
+        """One request: whether the node answered with an error, and that error or the result."""
         payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         body = self._http.request_json("POST", self._url, json=payload)
-        if self._parse(f"{method} response", lambda: "error" in body):
-            error = self._parse(f"{method} response", lambda: body["error"])
+        failed = self._parse(f"{method} response", lambda: "error" in body)
+        return failed, self._parse(
+            f"{method} response", lambda: body["error"] if failed else body["result"]
+        )
+
+    def _call(self, method: str, params: list[Any]) -> Any:
+        retries = 0
+        while True:
+            failed, value = self._once(method, params)
+            if not failed:
+                return value
+            if method == "eth_getLogs" and retries < _TRANSIENT_RETRIES and _is_transient(value):
+                self._sleep(_TRANSIENT_BACKOFF * 2**retries)
+                retries += 1
+                continue
             # Decided on the raw text: scrubbing rewrites it when a host or path is a word in it.
-            capped = TOO_MANY_RESULTS in str(error)
-            raise RpcError(self._http.scrub(f"{method} {params}: {error}", self._url), capped)
-        return self._parse(f"{method} response", lambda: body["result"])
+            capped = TOO_MANY_RESULTS in str(value)
+            raise RpcError(self._http.scrub(f"{method} {params}: {value}", self._url), capped)
 
     def _parse[T](self, what: str, read: Callable[[], T]) -> T:
         return _parse(self._http, self._url, what, read)
@@ -224,8 +255,8 @@ def _proof_transfer(
         raise ValueError(f"not an ERC-20 Transfer log at index {log_index}")
     return ProofTransfer(
         log_index,
-        _address_from_topic(present[1]),
-        _address_from_topic(present[2]),
+        address_from_topic(present[1]),
+        address_from_topic(present[2]),
         int(data, 16),
     )
 

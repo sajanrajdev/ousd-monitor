@@ -8,6 +8,8 @@ import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
+import duckdb
+
 from ousd.chains import (
     DECIMALS,
     DEFAULT_BRIDGE_URL,
@@ -332,7 +334,19 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         parser.error(f"set {', '.join(missing)} in .env, or limit the run with --chain")
 
-    store = Store(os.environ.get("OUSD_DB_PATH", DEFAULT_DB_PATH))
+    try:
+        store = Store(os.environ.get("OUSD_DB_PATH", DEFAULT_DB_PATH))
+    except duckdb.IOException as exc:
+        # A running sync holds the file. Not a verdict, so not exit 1. The error text carries the
+        # path, so it is never echoed.
+        held = "lock" in str(exc).lower()
+        print(
+            "error: database in use: another process holds it; try again when it finishes"
+            if held
+            else "error: cannot open the database; check OUSD_DB_PATH",
+            file=sys.stderr,
+        )
+        return 2
     try:
         if args.command == "sync":
             return _sync(chains, store)

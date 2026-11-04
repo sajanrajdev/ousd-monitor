@@ -1,3 +1,6 @@
+import subprocess
+import sys
+
 import httpx
 import pytest
 from ousd import cli, probes, reconcile
@@ -673,3 +676,42 @@ def test_no_key_or_url_reaches_any_output_of_any_command(env, monkeypatch, capsy
         assert raised is not None
     else:
         assert code == 3
+
+
+def test_a_held_database_exits_two_without_a_traceback_or_the_path(env, capsys):
+    # DuckDB only refuses a second process, so the holder is one.
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "import duckdb, sys; db = duckdb.connect(sys.argv[1]);"
+            " print('held', flush=True); input()",
+            str(env),
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "held"
+        assert cli.main(["--chain", "tempo", "sync"]) == 2
+    finally:
+        holder.communicate("\n", timeout=30)
+
+    captured = capsys.readouterr()
+    assert "database in use: another process holds it; try again when it finishes" in captured.err
+    assert str(env) not in captured.err + captured.out
+    assert "RESULT" not in captured.out
+
+
+def test_a_database_that_cannot_be_opened_is_not_called_held(env, capsys):
+    env.mkdir()  # A directory where the file should be.
+
+    assert cli.main(["--chain", "tempo", "sync"]) == 2
+
+    err = capsys.readouterr().err
+    assert "cannot open the database" in err
+    assert "in use" not in err
+    assert str(env) not in err

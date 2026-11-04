@@ -182,6 +182,63 @@ def test_rpc_error_is_raised_with_the_method_name():
         RpcClient(http_with(handler), "http://rpc.invalid").tip()
 
 
+FILTER_ERROR = {"code": -32603, "message": "internal filter error"}
+
+
+def flaky_logs(failures: int, error: dict = FILTER_ERROR):
+    """A handler that fails `failures` times, then returns no logs. Counts its calls."""
+    calls = []
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) <= failures:
+            return httpx.Response(200, json={"id": 1, "error": error})
+        return httpx.Response(200, json={"id": 1, "result": []})
+
+    return handler, calls
+
+
+def test_a_transient_filter_error_is_retried_with_a_backoff_then_succeeds():
+    handler, calls = flaky_logs(2)
+    waits: list[float] = []
+    client = RpcClient(http_with(handler), "http://rpc.invalid", sleep=waits.append)
+
+    assert client.transfers(TOKEN, 1, 2) == []
+    assert len(calls) == 3
+    assert waits == [1.0, 2.0]
+
+
+def test_a_filter_error_that_keeps_coming_is_raised_after_the_retries():
+    handler, calls = flaky_logs(100)
+    waits: list[float] = []
+    client = RpcClient(http_with(handler), "http://rpc.invalid", sleep=waits.append)
+
+    with pytest.raises(RpcError, match="internal filter error"):
+        client.transfers(TOKEN, 1, 2)
+
+    assert len(calls) == 4
+    assert len(waits) == 3
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        {"code": -32000, "message": "internal filter error"},
+        {"code": -32603, "message": "something else"},
+    ],
+)
+def test_other_rpc_errors_are_not_retried(error):
+    handler, calls = flaky_logs(100, error)
+    waits: list[float] = []
+    client = RpcClient(http_with(handler), "http://rpc.invalid", sleep=waits.append)
+
+    with pytest.raises(RpcError):
+        client.transfers(TOKEN, 1, 2)
+
+    assert len(calls) == 1
+    assert waits == []
+
+
 def test_range_over_the_result_cap_is_split_until_it_fits():
     logs_by_block = {
         block: {
