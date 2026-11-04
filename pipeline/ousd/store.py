@@ -103,6 +103,16 @@ CREATE TABLE IF NOT EXISTS transfer_group_audits (
     audited_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (chain, tx_hash)
 );
+CREATE TABLE IF NOT EXISTS check_results (
+    run_id VARCHAR NOT NULL,
+    check_name VARCHAR NOT NULL,
+    status VARCHAR NOT NULL,  -- passed, failed, skipped
+    blocking BOOLEAN NOT NULL,
+    detail VARCHAR NOT NULL,
+    checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    data_fingerprint VARCHAR,  -- What the checks saw, so publish can refuse data that has moved.
+    PRIMARY KEY (run_id, check_name)
+);
 """
 
 # Applied after SCHEMA, so a bridge_comparisons table made with its seven columns is upgraded.
@@ -167,6 +177,18 @@ class LatestReconciliation:
     finished_at: datetime
     chains: dict[str, ChainPin]
     usable: bool
+
+
+@dataclass(frozen=True)
+class StoredCheck:
+    """One blocking check's recorded result, with its time as naive UTC."""
+
+    check_name: str
+    status: str
+    blocking: bool
+    detail: str
+    checked_at: datetime
+    data_fingerprint: str | None
 
 
 # One row per balance change: received is positive, sent is negative. Shared by balance queries.
@@ -789,6 +811,48 @@ class Store:
         return LatestReconciliation(
             run_id, scope, status, exit_code, started_at, finished_at, chains, usable
         )
+
+    def replace_check_results(
+        self,
+        run_id: str,
+        results: Sequence[tuple[str, str, bool, str]],
+        checked_at: datetime,
+        data_fingerprint: str | None,
+    ) -> None:
+        """Record one run's checks as (name, status, blocking, detail), all or nothing.
+
+        Replaces whatever that run_id recorded before, so a rerun can't keep an old pass.
+        """
+        self.db.begin()
+        try:
+            self.db.execute(
+                "DELETE FROM check_results WHERE run_id = ? AND check_name <> ALL(?::VARCHAR[])",
+                [run_id, [name for name, *_ in results]],
+            )
+            self.db.executemany(
+                "INSERT OR REPLACE INTO check_results "
+                "(run_id, check_name, status, blocking, detail, checked_at, data_fingerprint) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(run_id, *result, checked_at, data_fingerprint) for result in results],
+            )
+            self.db.commit()
+        except BaseException:
+            # Ctrl-C included: a transaction left open would hold the connection.
+            self._rollback()
+            raise
+
+    def check_results(self, run_id: str) -> list[StoredCheck]:
+        return [
+            StoredCheck(*row)
+            for row in self.db.execute(
+                """
+                SELECT check_name, status, blocking, detail, checked_at AT TIME ZONE 'UTC',
+                       data_fingerprint
+                FROM check_results WHERE run_id = ? ORDER BY check_name
+                """,
+                [run_id],
+            ).fetchall()
+        ]
 
     def _pin_is_current(
         self, chain: str, height: int | None, pin_hash: str | None, count: int | None

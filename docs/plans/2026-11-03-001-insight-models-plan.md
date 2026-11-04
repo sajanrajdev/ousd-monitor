@@ -955,7 +955,7 @@ CREATE TABLE IF NOT EXISTS check_results (
 
 **Non-blocking warnings**, in the manifest: day-over-day change above 25% in total, placed or circulating, or above 100% in 7-day everyday volume.
 
-**Partial coverage.** The expected chains are `REQUIRED_CHAINS` in `chains.py`, so there is one list. With a chain missing, `cross_chain_supply` and `reconciliation_gate` are `failed` and publish refuses. With `--allow-partial` on the CLI (or `OUSD_ALLOW_PARTIAL=1`), they are `skipped` instead, the other checks run for the chains present, and the manifest says `coverage.complete: false`. This is a local preview for Phase 3 development, **never for a public release**.
+**Partial coverage.** The expected chains are `REQUIRED_CHAINS` in `chains.py`, so there is one list. With a chain missing, `cross_chain_supply` and `reconciliation_gate` are `failed` and publish refuses. With `--allow-partial` on the CLI, they are `skipped` instead, the other checks run for the chains present, and the manifest says `coverage.complete: false`. This is a local preview for Phase 3 development, **never for a public release**.
 
 **Interfaces**
 
@@ -1016,6 +1016,30 @@ data/published/
 ```
 
 Write to `<stamp>.tmp`, validate, rename, then create a temporary symlink and `os.replace` it onto `latest`. So a reader never sees a half-written dataset. Keep the last 14 folders.
+
+### Overrides made when building 2.8
+
+These replace the text above and below where they differ. Each is recorded so the plan stays true.
+
+- **Validate first.** Every payload is built and validated in memory, before anything is written, not after writing to `<stamp>.tmp`. The `.tmp` folder and the rename stay, so a write failure can't leave half a dataset either.
+- **Refusal marks the last good dataset stale.** Publish rewrites one field group in `latest/manifest.json`, in one step: `stale: true`, `stale_since` (the first refusal) and `stale_reason`. The data files and their hashes don't change. So `stale` is no longer "always false on write". A new good publish clears it, as its manifest is fresh. Unit 2.7 should call `mark_stale` in its failure path, because a failed blocking check stops Dagster before publish can refuse. The site may still compare `generated_at` with the build time as well.
+- **No exit status is evidence.** `dbt_tests` doesn't take dbt's exit code from Dagster. It always reads `run_results.json`, and fails on any node that didn't pass, on a command other than `build`, and on a narrowed build, since `dbt build --select x` also exits 0. It also fails if the marts weren't built from the stored transfers, or from the labels file the manifest names. Unit 2.7 runs dbt, then calls `run_checks` with the same `Sources`.
+- **`run_checks(store, marts, run_id, allow_partial, now, sources)`.** No `chains` argument: `REQUIRED_CHAINS` is the one list, and `list[Chain]` can't hold Solana and would bring `rpc_url` into a module that has no use for it. `publish` also takes `sources`.
+- **What the checks saw.** `check_results` gains `data_fingerprint`, a hash of the raw cursors, counts and tip hashes, the published marts and the labels file. Publish refuses when it no longer matches, and repeats `reconciliation_gate` and `freshness` against the store and its own clock. So a recorded pass can't publish data that moved after it, or a week-old pass.
+- **The published numbers must be the gate's.** A real publish refuses unless every `mart_reconciliation` row comes from the run the gate accepted.
+- **`--allow-partial` has no environment variable.** `OUSD_ALLOW_PARTIAL` is dropped, as one left set would turn a scheduled release into a preview that exits 0.
+- **`--allow-partial` output.** It goes to `preview-not-for-release/`, beside `published/`, as `preview-<stamp>/`, under `latest-preview`. It never writes under `published/`, and a refused preview doesn't mark the real dataset stale. Every JSON file has `preview: true`, and the manifest has a plain `notice`. The manifest schema refuses `preview: false` with incomplete coverage, a skipped check or a `preview-` version. **The Phase 3 site build must fail on `preview: true` for a release.**
+- **Labels are published, in `labels.json`.** This replaces "Labels are not published in Phase 3": unit 3.4 needs them, with the source legend, so a reader can see how we know each label. Rows have `chain`, `entity`, `category`, `source_type`, `source_url`, `confidence` and `date_checked`, and **no address column**. An explorer `source_url` holds the address it points at, as the link has to open: that is the one exception to the "no wallet address" scan. The address scan test covers it, so holders' wallets still appear nowhere.
+- **Issuer rows and `issuer_labeled` differ.** `mart_supply_journey.issuer_labeled` is true for an `issuer` or an `issuer_route` label. Solana has route rows and no `issuer` row, so it is labeled and still lacks an issuer row. `labels.json` says both, per chain, with `chains_without_issuer_row`, and the known limits say so.
+- **Unit 2.7 calls `run_checks` once per run,** in one multi-asset check, and yields the seven results it returns, instead of one function and one write per check. `run_checks` records all seven together and decides which chains each covers, so a rerun can't keep an old pass.
+- **Exit 2 and no stale mark for a database in use,** or for a second publish in the same second. Neither says anything about the data. Any other failure marks stale.
+- **The attestation link is the site's.** `known_limits` says this isn't an attestation and points to Bridge's reports in words. The PRD's link is added by Phase 3, as this unit has no way to check a URL.
+- **`reconciliation.json`** adds `run_id` and `in_latest_run` per row, and `latest_run`. `reconciliations` records no run, so a chain row's `run_id` is the run whose supply check recorded the same figures.
+- **Velocity.** `activity.json` and `summary.kpis` carry both denominators, `circulating_supply` and `total_supply`, and `definitions.velocity` names them. Basis points have no upper bound in the schema, as velocity passes 10,000: Ethereum on 2026-11-03 was 33,260, against a headline of 8,912.
+- **Verdict.** A fourth state, `no_clear_statement`, for no data, zero supply, a chain under seven full days or before `journey_first_day`, a check that didn't pass, or a chain with no issuer label that could change the answer. `verdict` adds `as_of`, `facts`, `estimates` and `opinions`. `text` holds no opinion. Placed and everyday percentages in the text are floors, so 49.99% never reads as 50%. Share of OUSD is rounded, and reads "about". A chain with route wallets but no wallet labeled `issuer` counts as unlabeled for this, which today means Solana: if leaving its placed supply out would change the answer, the verdict is `no_clear_statement`. With a skipped check there are no `facts`. Share of OUSD is left out when all four chains are in scope.
+- **Known limits are data:** `summary.known_limits`, as `id` and `text`.
+- **Times.** The manifest adds `time_zone: "UTC"` and `coverage.last_transfer_at`. Each schema requires a trailing `Z`.
+- **Activity on a day with no supply.** The KPI columns are null there, since the KPI mart has no row for that day.
 
 ## Dataset schema
 
@@ -1089,7 +1113,7 @@ Version 1. The Phase 3 site depends on this, and validates it at build. Any brea
 
 **CSV:** `journey`, `activity` and `chain_roles`, same columns and base units, flattening `leading_for` with `;`.
 
-**Labels are not published in Phase 3.** Journey and activity are aggregates, so no wallet appears. Only the Sentora vault and similar named venues reach the site, through the methodology page. This keeps doxxing risk low. Revisit for view C.
+**`labels.json`:** every label, with how we know it, and the source legend from `labels/README.md`, for the methodology page (unit 3.4). See the overrides above. Journey and activity stay aggregates, so no holder's wallet appears.
 
 **Verdict.** `verdict.py` picks a template by state, computed from the chains with data. `scope` lists those chains, and the text names them.
 

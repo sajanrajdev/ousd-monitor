@@ -681,6 +681,8 @@ dependencies = [
     { name = "dbt-duckdb" },
     { name = "duckdb" },
     { name = "httpx" },
+    { name = "jsonschema" },
+    { name = "pyyaml" },
 ]
 
 [package.dev-dependencies]
@@ -697,6 +699,8 @@ requires-dist = [
     { name = "dbt-duckdb", specifier = ">=1.8" },
     { name = "duckdb", specifier = ">=1.1" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "jsonschema", specifier = ">=4" },
+    { name = "pyyaml", specifier = ">=6" },
 ]
 
 [package.metadata.requires-dev]

@@ -1,0 +1,1335 @@
+"""The publish step, end to end over a world built by the real dbt project."""
+
+import csv
+import hashlib
+import io
+import json
+import os
+import re
+import shutil
+import time
+from datetime import UTC, datetime, timedelta
+from functools import partial as bind
+from pathlib import Path
+
+import duckdb
+import jsonschema
+import pytest
+from ousd import checks, cli
+from ousd import publish as publisher
+from ousd.chains import REQUIRED_CHAINS
+from ousd.publish import PublishRefused
+from publish_world import (
+    EVERYDAY,
+    HUGE,
+    ISSUERS,
+    NOW,
+    OUSD,
+    REAL_LABELS,
+    RECONCILED_AT,
+    ROOT,
+    RUN,
+    build_world,
+    record_run,
+    wallets,
+)
+
+JSON_FILES = (
+    "manifest.json",
+    "summary.json",
+    "journey.json",
+    "activity.json",
+    "chain_roles.json",
+    "reconciliation.json",
+    "labels.json",
+)
+CSV_FILES = ("journey.csv", "activity.csv", "chain_roles.csv")
+UTC_TIME = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+EVM_ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
+SECRET = "k3y9aZ7QwErTyUiOpAsDfGhJkLzXcVbNm"
+LATER = NOW + timedelta(days=1)
+
+
+@pytest.fixture(scope="module")
+def full_template(tmp_path_factory):
+    return build_world(tmp_path_factory.mktemp("full-world"))
+
+
+@pytest.fixture(scope="module")
+def partial_template(tmp_path_factory):
+    return build_world(tmp_path_factory.mktemp("partial-world"), ("tempo", "ethereum"))
+
+
+@pytest.fixture
+def world(full_template, tmp_path):
+    yield full_template.copy(tmp_path / "world")
+    # Each copy holds two databases, and pytest would otherwise keep one for every test.
+    shutil.rmtree(tmp_path)
+
+
+@pytest.fixture
+def partial(partial_template, tmp_path):
+    yield partial_template.copy(tmp_path / "world")
+    shutil.rmtree(tmp_path)
+
+
+@pytest.fixture
+def published(world):
+    world.run_checks()
+    return world, world.publish()
+
+
+def read_json(folder: Path, name: str):
+    return json.loads((folder / name).read_text())
+
+
+def snapshot(folder: Path) -> dict[str, bytes]:
+    return {path.name: path.read_bytes() for path in folder.iterdir()}
+
+
+def assert_refuses_and_leaves_the_last_good_dataset(world, make_it_fail, match, **kwargs):
+    """The second publish fails: the pointer doesn't move, no folder remains, every published
+    number stays, and the manifest says stale."""
+    world.run_checks()
+    first = world.publish()
+    before = snapshot(first)
+    make_it_fail()
+    with pytest.raises(PublishRefused, match=match):
+        world.publish(now=NOW + timedelta(hours=1), **kwargs)
+    assert os.readlink(world.out / "latest") == first.name
+    assert sorted(path.name for path in world.out.iterdir()) == sorted(["latest", first.name])
+    after = snapshot(first)
+    assert {name: data for name, data in after.items() if name != "manifest.json"} == {
+        name: data for name, data in before.items() if name != "manifest.json"
+    }
+    manifest = read_json(first, "manifest.json")
+    assert manifest["stale"] is True
+    assert manifest["stale_since"] == "2026-11-04T07:00:00Z"
+    assert match in manifest["stale_reason"] or re.search(match, manifest["stale_reason"])
+    schema = json.loads((publisher.SCHEMA_DIR / "manifest.schema.json").read_text())
+    jsonschema.validate(manifest, schema)
+    return manifest
+
+
+# The happy path
+
+
+def test_all_passed_writes_the_folder_and_updates_latest(published):
+    world, folder = published
+    assert folder == world.out / "20261104T060000Z"
+    assert os.readlink(world.out / "latest") == folder.name
+    assert sorted(path.name for path in folder.iterdir()) == sorted(JSON_FILES + CSV_FILES)
+    assert sorted(path.name for path in world.out.iterdir()) == sorted(["latest", folder.name])
+    assert not world.preview_root.exists()
+
+
+def test_every_file_validates_against_its_schema(published):
+    _, folder = published
+    for name in JSON_FILES:
+        schema = json.loads(
+            (publisher.SCHEMA_DIR / f"{name.removesuffix('.json')}.schema.json").read_text()
+        )
+        jsonschema.Draft202012Validator.check_schema(schema)
+        jsonschema.validate(read_json(folder, name), schema)
+
+
+def test_every_object_in_every_schema_is_closed():
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "object" or ("properties" in node and "required" in node):
+                assert node.get("additionalProperties") not in (None, True), node
+            # allOf only narrows the shapes defined above it, so it defines no object of its own.
+            for key, value in node.items():
+                if key != "allOf":
+                    walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    for path in publisher.SCHEMA_DIR.glob("*.schema.json"):
+        walk(json.loads(path.read_text()))
+
+
+def test_manifest_files_match_the_files_on_disk(published):
+    _, folder = published
+    files = read_json(folder, "manifest.json")["files"]
+    assert sorted(files) == sorted(
+        name for name in JSON_FILES + CSV_FILES if name != "manifest.json"
+    )
+    for name, entry in files.items():
+        assert entry["sha256"] == hashlib.sha256((folder / name).read_bytes()).hexdigest()
+    assert files["journey.json"]["rows"] == len(read_json(folder, "journey.json")["data"])
+    with (folder / "activity.csv").open(newline="") as handle:
+        assert files["activity.csv"]["rows"] == len(list(csv.DictReader(handle)))
+    assert files["summary.json"]["rows"] == 4
+
+
+def test_the_manifest_has_data_as_of_commit_and_check_results(published):
+    _, folder = published
+    manifest = read_json(folder, "manifest.json")
+    assert manifest["dataset_version"] == "20261104T060000Z"
+    assert manifest["generated_at"] == "2026-11-04T06:00:00Z"
+    assert manifest["time_zone"] == "UTC"
+    assert re.fullmatch(r"[0-9a-f]{12}", manifest["git_commit"])
+    assert manifest["preview"] is False
+    assert manifest["notice"] is None
+    assert manifest["stale"] is False
+    assert manifest["check_run_id"] == RUN
+    assert manifest["coverage"]["data_as_of"] == dict.fromkeys(REQUIRED_CHAINS, "2026-11-03")
+    assert manifest["coverage"]["last_transfer_at"]["tempo"] == "2026-11-04T01:00:00Z"
+    assert [check["name"] for check in manifest["checks"]] == list(checks.CHECK_NAMES)
+    assert {check["status"] for check in manifest["checks"]} == {"passed"}
+    assert manifest["definitions"]["placed_days"] == 14
+    assert manifest["definitions"]["placed_min_base_units"] == "1000000000000"
+    assert manifest["definitions"]["journey_first_day"] == "2026-10-14"
+    assert len(manifest["labels_sha256"]) == 64
+    assert manifest["warnings"] == []
+
+
+def test_coverage_with_four_chains(published):
+    _, folder = published
+    coverage = read_json(folder, "manifest.json")["coverage"]
+    assert coverage["chains_expected"] == list(REQUIRED_CHAINS)
+    assert coverage["chains_included"] == list(REQUIRED_CHAINS)
+    assert coverage["chains_missing"] == []
+    assert coverage["complete"] is True
+
+
+def test_a_rerun_with_the_same_data_is_byte_identical_but_for_two_fields(published):
+    world, first = published
+    second = world.publish(now=LATER)
+    assert second != first
+    one, other = snapshot(first), snapshot(second)
+    assert one.keys() == other.keys()
+    for name in one:
+        if name != "manifest.json":
+            assert one[name] == other[name], name
+    left, right = json.loads(one["manifest.json"]), json.loads(other["manifest.json"])
+    for manifest in (left, right):
+        del manifest["generated_at"], manifest["dataset_version"]
+    assert left == right
+
+
+def test_amounts_above_2_53_survive_as_exact_strings(published):
+    _, folder = published
+    journey = read_json(folder, "journey.json")["data"]
+    tempo = [row for row in journey if row["chain"] == "tempo"]
+    exact = str(HUGE + 150_000_000 * OUSD)
+    assert float(exact) != int(exact)
+    assert tempo[-1]["total_supply"] == exact
+    assert exact in (folder / "journey.csv").read_text()
+    kpi = next(r for r in read_json(folder, "summary.json")["kpis"] if r["chain"] == "tempo")
+    assert kpi["total_supply"] == exact
+
+
+def test_every_amount_is_a_string(published):
+    _, folder = published
+    for name in ("journey.json", "activity.json", "chain_roles.json"):
+        for row in read_json(folder, name)["data"]:
+            for column, value in row.items():
+                if column in publisher._AMOUNTS and value is not None:
+                    assert isinstance(value, str), (name, column)
+
+
+def test_rows_are_sorted_by_chain_then_day(published):
+    _, folder = published
+    for name in ("journey.json", "activity.json"):
+        keys = [(row["chain"], row["day"]) for row in read_json(folder, name)["data"]]
+        assert keys == sorted(keys)
+
+
+def test_journey_starts_after_the_placed_window_and_activity_does_not(published):
+    _, folder = published
+    days = [row["day"] for row in read_json(folder, "journey.json")["data"]]
+    assert min(days) == "2026-10-14"
+    assert min(row["day"] for row in read_json(folder, "activity.json")["data"]) == "2026-09-30"
+
+
+def test_csv_has_the_same_columns_and_flattens_leading_for(published):
+    _, folder = published
+    for name in ("journey", "activity", "chain_roles"):
+        rows = read_json(folder, f"{name}.json")["data"]
+        with (folder / f"{name}.csv").open(newline="") as handle:
+            read = list(csv.DictReader(handle))
+        assert list(read[0]) == list(rows[0])
+        assert len(read) == len(rows)
+    tempo = next(r for r in read if r["chain"] == "tempo")
+    assert "supply" in tempo["leading_for"].split(";")
+
+
+def test_leading_for_names_the_largest_share(published):
+    _, folder = published
+    roles = {row["chain"]: row for row in read_json(folder, "chain_roles.json")["data"]}
+    assert "supply" in roles["tempo"]["leading_for"]
+    assert "supply" not in roles["base"]["leading_for"]
+    # No chain leads a measure nobody has any of.
+    assert not any("lending_flow" in row["leading_for"] for row in roles.values())
+
+
+# Refusals
+
+
+def test_one_check_failed_refuses_and_the_last_good_dataset_stays_marked_stale(world):
+    assert_refuses_and_leaves_the_last_good_dataset(
+        world,
+        lambda: (
+            world.mart_sql("UPDATE mart_activity_waterfall SET fees = fees + 1"),
+            world.run_checks(now=NOW),
+        ),
+        "volume_waterfall",
+    )
+
+
+def test_a_failed_check_with_nothing_published_leaves_no_folder(world):
+    world.mart_sql("UPDATE mart_activity_waterfall SET fees = fees + 1")
+    world.run_checks()
+    with pytest.raises(PublishRefused, match="volume_waterfall"):
+        world.publish()
+    assert not world.out.exists()
+
+
+def test_every_check_must_pass_in_the_same_run(world):
+    world.run_checks(run_id="one")
+    world.raw_sql("DELETE FROM check_results WHERE run_id = 'one' AND check_name = 'freshness'")
+    world.run_checks(run_id="two")
+    world.raw_sql("DELETE FROM check_results WHERE run_id = 'two' AND check_name = 'dbt_tests'")
+    for run_id, gone in (("one", "freshness"), ("two", "dbt_tests")):
+        with pytest.raises(PublishRefused, match=f"{gone} is missing"):
+            world.publish(run_id=run_id)
+
+
+def test_a_run_id_with_no_rows_refuses(world):
+    world.run_checks()
+    with pytest.raises(PublishRefused, match="no check results for run other"):
+        world.publish(run_id="other")
+
+
+def test_skipped_is_refused_without_allow_partial(partial):
+    partial.run_checks(allow_partial=True)
+    with pytest.raises(PublishRefused, match="reconciliation_gate is skipped"):
+        partial.publish()
+    assert not partial.out.exists()
+
+
+def test_a_row_recorded_as_not_blocking_refuses(world):
+    world.run_checks()
+    world.raw_sql("UPDATE check_results SET blocking = false WHERE check_name = 'freshness'")
+    with pytest.raises(PublishRefused, match="not blocking"):
+        world.publish()
+
+
+def test_a_schema_failure_refuses_with_latest_unchanged(world):
+    """A float reached an amount column. Nothing may be written, not even part of a dataset."""
+    world.run_checks()
+    world.publish()
+    world.mart_sql("ALTER TABLE mart_supply_journey ALTER total_supply TYPE DOUBLE")
+    world.run_checks()
+    with pytest.raises(PublishRefused, match=r"journey\.json fails its schema"):
+        world.publish(now=LATER)
+    assert os.readlink(world.out / "latest") == "20261104T060000Z"
+    assert sorted(path.name for path in world.out.iterdir()) == ["20261104T060000Z", "latest"]
+
+
+def test_nothing_is_written_before_everything_validates(world, monkeypatch):
+    world.run_checks()
+    real = publisher._validate
+    seen = []
+
+    def spy(name, payload):
+        assert not world.out.exists(), "a file was written before validation finished"
+        seen.append(name)
+        real(name, payload)
+
+    monkeypatch.setattr(publisher, "_validate", spy)
+    world.publish()
+    assert sorted(seen) == sorted(JSON_FILES)
+
+
+def test_a_failure_while_writing_leaves_no_half_dataset(world, monkeypatch):
+    world.run_checks()
+    first = world.publish()
+    written = []
+    real_write = Path.write_bytes
+
+    def fail_third(self, data):
+        written.append(self.name)
+        if len(written) == 3:
+            raise OSError("disk full")
+        return real_write(self, data)
+
+    monkeypatch.setattr(Path, "write_bytes", fail_third)
+    with pytest.raises(PublishRefused, match="OSError"):
+        world.publish(now=LATER)
+    monkeypatch.undo()
+    assert os.readlink(world.out / "latest") == first.name
+    assert sorted(path.name for path in world.out.iterdir()) == sorted(["latest", first.name])
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda w: w.mart_sql("UPDATE mart_supply_journey SET holders = holders + 1"),
+        lambda w: w.raw_sql(
+            "UPDATE sync_state SET synced_through = synced_through + 1 WHERE chain = 'base'"
+        ),
+        lambda w: w.sources.labels.write_text(w.sources.labels.read_text() + "\n"),
+        lambda w: w.sources.run_results.write_text(
+            json.dumps({**json.loads(w.sources.run_results.read_text()), "elapsed_time": 1})
+        ),
+    ],
+    ids=["marts", "raw", "labels", "dbt-record"],
+)
+def test_data_that_moved_after_the_checks_refuses(world, tamper):
+    world.run_checks()
+    tamper(world)
+    with pytest.raises(PublishRefused, match="changed since these checks ran"):
+        world.publish()
+
+
+def test_old_results_are_not_fresh_at_publish_time(world):
+    world.run_checks()
+    with pytest.raises(PublishRefused, match="freshness no longer passes"):
+        world.publish(now=NOW + timedelta(days=3))
+
+
+def test_a_failed_run_after_the_checks_refuses(world):
+    world.run_checks()
+    with world.store() as store:
+        record_run(store, status="fail", exit_code=1, at=RECONCILED_AT + timedelta(minutes=1))
+    with pytest.raises(PublishRefused, match="reconciliation_gate no longer passes"):
+        world.publish()
+
+
+def test_marts_whose_reconciliation_is_not_the_gate_run_refuse(world):
+    # The gate is satisfied, and the mart shows figures its run never proved.
+    world.mart_sql(
+        "UPDATE mart_reconciliation SET event_value = event_value - 1 "
+        "WHERE kind = 'chain' AND subject = 'tempo'"
+    )
+    world.run_checks()
+    with pytest.raises(PublishRefused, match="not from run"):
+        world.publish()
+
+
+@pytest.mark.parametrize(
+    "tamper,word",
+    [
+        ("UPDATE mart_reconciliation SET passed = false WHERE subject = 'base'", "not from run"),
+        ("UPDATE mart_reconciliation SET difference = 1 WHERE subject = 'base'", "not from run"),
+        ("DELETE FROM mart_reconciliation WHERE subject = 'solana'", "not from run"),
+        ("UPDATE mart_reconciliation SET run_id = 'other' WHERE kind = 'bridge'", "Bridge row"),
+        ("UPDATE mart_reconciliation SET passed = false WHERE kind = 'bridge'", "Bridge row"),
+        ("UPDATE mart_reconciliation SET difference = 1 WHERE kind = 'bridge'", "Bridge row"),
+        ("DELETE FROM mart_reconciliation WHERE kind = 'bridge'", "Bridge row"),
+    ],
+)
+def test_every_published_reconciliation_row_must_be_the_gate_run(world, tamper, word):
+    world.mart_sql(tamper)
+    world.run_checks()
+    with pytest.raises(PublishRefused, match=word):
+        world.publish()
+
+
+def test_a_run_that_crashed_with_the_same_figures_does_not_take_over_the_numbers(world):
+    with world.store() as store:
+        crashed = store.start_run("full")
+        for row in store.db.execute(
+            "SELECT subject, attempt, pin_height, pin_hash, transfer_count, "
+            "CAST(reference_value AS VARCHAR), CAST(observed_value AS VARCHAR) "
+            "FROM reconciliation_checks WHERE check_name = 'chain_supply'"
+        ).fetchall():
+            chain, attempt, height, pin_hash, count, reference, observed = row
+            store.record_check(
+                crashed,
+                "chain_supply",
+                chain,
+                attempt,
+                "pass",
+                pin_height=height,
+                pin_hash=pin_hash,
+                transfer_count=count,
+                reference_value=int(reference),
+                observed_value=int(observed),
+            )
+        finished = store.latest_reconciliation().run_id
+    world.run_checks()
+    rows = read_json(world.publish(), "reconciliation.json")["data"]
+    assert {row["run_id"] for row in rows} == {finished}
+
+
+@pytest.mark.parametrize("fingerprints", [("a", None), ("a", "b")], ids=["missing", "two"])
+def test_checks_that_describe_two_states_of_the_data_refuse(world, fingerprints):
+    world.run_checks()
+    world.raw_sql("UPDATE check_results SET data_fingerprint = ?", [fingerprints[0]])
+    world.raw_sql(
+        "UPDATE check_results SET data_fingerprint = ? WHERE check_name = 'freshness'",
+        [fingerprints[1]],
+    )
+    with pytest.raises(PublishRefused, match="one state of the data"):
+        world.publish()
+
+
+def test_a_database_in_use_refuses_without_calling_anything_stale(published, monkeypatch):
+    world, folder = published
+
+    def held(*args, **kwargs):
+        raise duckdb.IOException("Could not set lock on file")
+
+    monkeypatch.setattr(publisher, "Store", held)
+    with pytest.raises(publisher.PublishUnavailable, match="in use"):
+        world.publish(now=LATER)
+    assert read_json(folder, "manifest.json")["stale"] is False
+
+
+def test_a_second_publish_in_the_same_second_calls_nothing_stale(published):
+    world, folder = published
+    with pytest.raises(publisher.PublishUnavailable, match="try again"):
+        world.publish()
+    assert read_json(folder, "manifest.json")["stale"] is False
+    assert os.readlink(world.out / "latest") == folder.name
+
+
+def test_missing_databases_refuse_and_are_not_created(world):
+    world.run_checks()
+    world.marts_file.unlink()
+    with pytest.raises(PublishRefused, match="marts database does not exist"):
+        world.publish()
+    assert not world.marts_file.exists()
+    world.raw.unlink()
+    with pytest.raises(PublishRefused, match="raw database does not exist"):
+        world.publish()
+    assert not world.raw.exists()
+
+
+def test_a_naive_clock_is_a_bug_not_a_time(published):
+    world, _ = published
+    with pytest.raises(ValueError, match="time zone"):
+        world.publish(now=datetime(2026, 11, 5, 6, 0))
+
+
+def test_a_good_publish_clears_stale(world):
+    assert_refuses_and_leaves_the_last_good_dataset(
+        world, lambda: world.raw_sql("DELETE FROM check_results"), "no check results"
+    )
+    world.run_checks()
+    folder = world.publish(now=LATER)
+    assert read_json(world.out / "latest", "manifest.json")["stale"] is False
+    assert (world.out / "latest").resolve() == folder.resolve()
+
+
+def test_stale_keeps_the_first_time_it_went_stale(published):
+    world, folder = published
+    assert publisher.mark_stale(world.out, NOW + timedelta(hours=1), "first")
+    assert publisher.mark_stale(world.out, NOW + timedelta(hours=2), "second")
+    manifest = read_json(folder, "manifest.json")
+    assert manifest["stale_since"] == "2026-11-04T07:00:00Z"
+    assert manifest["stale_reason"] == "second"
+    for name, entry in manifest["files"].items():
+        assert entry["sha256"] == hashlib.sha256((folder / name).read_bytes()).hexdigest()
+
+
+def test_mark_stale_with_nothing_published_does_nothing(tmp_path):
+    assert publisher.mark_stale(tmp_path / "nothing", NOW, "reason") is False
+
+
+def test_a_damaged_manifest_does_not_replace_the_refusal_and_is_reported(published):
+    world, folder = published
+    (folder / "manifest.json").write_text("not json")
+    with pytest.raises(PublishRefused, match="no check results") as refused:
+        world.publish(run_id="other", now=LATER)
+    assert "could not be marked stale: JSONDecodeError" in str(refused.value)
+
+
+def test_a_manifest_from_an_older_schema_can_still_be_marked_stale(published):
+    world, folder = published
+    manifest = read_json(folder, "manifest.json")
+    del manifest["time_zone"]
+    (folder / "manifest.json").write_text(json.dumps(manifest))
+    assert publisher.mark_stale(world.out, LATER, "reason")
+    assert read_json(folder, "manifest.json")["stale"] is True
+    assert sorted(p.name for p in folder.iterdir() if p.name.endswith(".tmp")) == []
+
+
+def test_a_pointer_that_cannot_be_swapped_leaves_no_new_folder(world, monkeypatch):
+    world.run_checks()
+    first = world.publish()
+
+    def refuse(*args):
+        raise OSError("no")
+
+    monkeypatch.setattr(publisher, "_point", refuse)
+    with pytest.raises(PublishRefused, match="OSError"):
+        world.publish(now=LATER)
+    monkeypatch.undo()
+    assert os.readlink(world.out / "latest") == first.name
+    assert sorted(path.name for path in world.out.iterdir()) == sorted(["latest", first.name])
+    assert read_json(first, "manifest.json")["stale"] is True
+
+
+def test_an_interrupt_after_the_swap_keeps_the_folder_the_pointer_names(world, monkeypatch):
+    world.run_checks()
+    world.publish()
+    real = publisher._point
+
+    def interrupted(root, pointer, target):
+        real(root, pointer, target)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(publisher, "_point", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        world.publish(now=LATER)
+    assert (world.out / "latest" / "manifest.json").is_file()
+
+
+# Pruning
+
+
+def test_only_the_newest_folders_stay_and_latest_is_never_removed(world):
+    world.run_checks()
+    for offset in range(publisher.KEEP_FOLDERS + 3):
+        newest = world.publish(now=NOW + timedelta(minutes=offset))
+    folders = [path.name for path in world.out.iterdir() if path.name != "latest"]
+    assert len(folders) == publisher.KEEP_FOLDERS
+    assert newest.name in folders
+    assert "20261104T060000Z" not in folders
+    assert os.readlink(world.out / "latest") == newest.name
+
+
+def test_pruning_keeps_latest_even_when_it_is_the_oldest(published):
+    world, folder = published
+    for offset in range(1, publisher.KEEP_FOLDERS + 2):
+        (world.out / f"20270101T{offset:02d}0000Z").mkdir()
+    publisher._prune(world.out, "latest")
+    assert folder.exists()
+    assert os.readlink(world.out / "latest") == folder.name
+
+
+def test_pruning_clears_leftovers_and_leaves_other_folders_alone(published):
+    world, _ = published
+    (world.out / "20261101T000000Z.tmp").mkdir()
+    (world.out / "notes").mkdir()
+    publisher._prune(world.out, "latest")
+    assert not (world.out / "20261101T000000Z.tmp").exists()
+    assert (world.out / "notes").exists()
+
+
+# The preview
+
+
+def test_a_preview_cannot_be_taken_for_the_real_dataset(partial):
+    partial.run_checks(allow_partial=True)
+    folder = partial.publish(allow_partial=True)
+
+    assert folder == partial.preview_root / "preview-20261104T060000Z"
+    assert os.readlink(partial.preview_root / publisher.LATEST_PREVIEW) == folder.name
+    # Nothing at all under the real root, and no pointer called `latest` anywhere.
+    assert not partial.out.exists()
+    assert not (partial.preview_root / "latest").exists()
+
+    manifest = read_json(folder, "manifest.json")
+    assert manifest["preview"] is True
+    assert "never for public release" in manifest["notice"]
+    assert manifest["dataset_version"] == "preview-20261104T060000Z"
+    for name in JSON_FILES:
+        assert read_json(folder, name).get("preview") is True, name
+
+
+def test_coverage_with_two_chains(partial):
+    partial.run_checks(allow_partial=True)
+    folder = partial.publish(allow_partial=True)
+    coverage = read_json(folder, "manifest.json")["coverage"]
+    assert coverage["chains_expected"] == list(REQUIRED_CHAINS)
+    assert coverage["chains_included"] == ["tempo", "ethereum"]
+    assert coverage["chains_missing"] == ["base", "solana"]
+    assert coverage["complete"] is False
+    assert sorted(coverage["data_as_of"]) == ["ethereum", "tempo"]
+    statuses = {
+        check["name"]: check["status"] for check in read_json(folder, "manifest.json")["checks"]
+    }
+    assert statuses["reconciliation_gate"] == statuses["cross_chain_supply"] == "skipped"
+
+
+def test_a_preview_verdict_states_no_facts_and_names_its_chains(partial):
+    partial.run_checks(allow_partial=True)
+    summary = read_json(partial.publish(allow_partial=True), "summary.json")
+    verdict = summary["verdict"]
+    assert verdict["scope"] == ["tempo", "ethereum"]
+    assert verdict["text"].startswith("Local preview, not fully reconciled. On Tempo and Ethereum")
+    assert "all chains" not in verdict["text"].lower()
+    assert verdict["facts"] == []
+    assert "chains_missing" in {limit["id"] for limit in summary["known_limits"]}
+
+
+def test_a_real_manifest_with_partial_coverage_fails_its_schema(partial):
+    """So a site build that validates can't be handed a preview dressed as a release."""
+    partial.run_checks(allow_partial=True)
+    manifest = read_json(partial.publish(allow_partial=True), "manifest.json")
+    schema = json.loads((publisher.SCHEMA_DIR / "manifest.schema.json").read_text())
+    manifest["preview"] = False
+    manifest["notice"] = None
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(manifest, schema)
+    manifest["dataset_version"] = "20261104T060000Z"
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(manifest, schema)
+
+
+@pytest.fixture
+def real_manifest(published):
+    _, folder = published
+    schema = json.loads((publisher.SCHEMA_DIR / "manifest.schema.json").read_text())
+    manifest = read_json(folder, "manifest.json")
+    jsonschema.validate(manifest, schema)
+    return manifest, schema
+
+
+def duplicate_check(manifest):
+    manifest["checks"][1] = dict(manifest["checks"][0])
+
+
+def reorder_checks(manifest):
+    manifest["checks"].reverse()
+
+
+def skip_a_check(manifest):
+    manifest["checks"][5]["status"] = "skipped"
+
+
+def no_reconciliation(manifest):
+    manifest["reconciliation"] = None
+
+
+def missing_a_day(manifest):
+    del manifest["coverage"]["data_as_of"]["base"]
+
+
+def missing_a_cursor(manifest):
+    del manifest["coverage"]["synced_through"]["solana"]
+
+
+def repeated_chain(manifest):
+    manifest["coverage"]["chains_included"][3] = "tempo"
+
+
+def missing_a_file(manifest):
+    del manifest["files"]["labels.json"]
+
+
+def stale_without_a_time(manifest):
+    manifest["stale"] = True
+
+
+def fresh_with_a_reason(manifest):
+    manifest["stale_reason"] = "why"
+
+
+def local_time(manifest):
+    manifest["generated_at"] = "2026-11-04T01:00:00-05:00"
+
+
+def rpc_url_field(manifest):
+    manifest["rpc_url"] = "http://example.invalid"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        duplicate_check,
+        reorder_checks,
+        skip_a_check,
+        no_reconciliation,
+        missing_a_day,
+        missing_a_cursor,
+        repeated_chain,
+        missing_a_file,
+        stale_without_a_time,
+        fresh_with_a_reason,
+        local_time,
+        rpc_url_field,
+    ],
+)
+def test_the_manifest_schema_refuses_a_release_that_breaks_its_promises(real_manifest, change):
+    manifest, schema = real_manifest
+    change(manifest)
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(manifest, schema)
+
+
+def test_a_preview_does_not_touch_the_real_dataset(world):
+    world.run_checks()
+    real = world.publish()
+    before = snapshot(real)
+    world.mart_sql("UPDATE mart_activity_waterfall SET fees = fees + 1")
+    world.run_checks(allow_partial=True)
+    with pytest.raises(PublishRefused):
+        world.publish(allow_partial=True, now=LATER)
+    assert snapshot(real) == before
+    assert not world.preview_root.exists() or not list(world.preview_root.iterdir())
+
+
+def test_preview_still_needs_the_checks_that_can_run(partial):
+    partial.mart_sql("UPDATE mart_activity_waterfall SET fees = fees + 1 WHERE chain = 'tempo'")
+    partial.run_checks(allow_partial=True)
+    with pytest.raises(PublishRefused, match="volume_waterfall"):
+        partial.publish(allow_partial=True)
+
+
+# Labels
+
+
+def test_labels_carry_how_we_know_and_no_address_column(published):
+    _, folder = published
+    labels = read_json(folder, "labels.json")
+    assert set(labels["data"][0]) == {
+        "chain",
+        "entity",
+        "category",
+        "source_type",
+        "source_url",
+        "confidence",
+        "date_checked",
+    }
+    with REAL_LABELS.open(newline="") as handle:
+        assert len(labels["data"]) == len(list(csv.DictReader(handle)))
+    unnamed = [row for row in labels["data"] if row["source_type"] == "derived_rule"]
+    assert unnamed and all(row["entity"] is None for row in unnamed)
+    assert any(row["entity"] == "Bridge" and row["category"] == "issuer" for row in labels["data"])
+
+
+def test_a_label_link_can_only_be_one_a_reader_can_open_or_a_rule_here(world):
+    """The site renders these as links, so the schema refuses anything else, such as script."""
+    world.run_checks()
+    path = world.sources.labels
+    good = path.read_text()
+    assert ",https://" in good
+    path.write_text(good.replace(",https://", ",javascript:", 1))
+    world.run_checks()
+    with pytest.raises(PublishRefused, match=r"labels\.json fails its schema"):
+        world.publish()
+
+
+def test_the_source_legend_is_published_as_data(published):
+    _, folder = published
+    legend = read_json(folder, "labels.json")["source_legend"]
+    assert [row["source_type"] for row in legend["source_types"]] == [
+        "explorer_tag",
+        "project_docs",
+        "company_docs",
+        "official_statement",
+        "published_research",
+        "onchain_metadata",
+        "derived_rule",
+    ]
+    tag = legend["source_types"][0]
+    assert tag["meaning"] == "A block explorer shows this name on the address"
+    assert tag["how_to_check"].startswith("Open the link")
+    assert legend["reading_a_label"].startswith("a named label always has a web source")
+
+
+def test_a_label_source_type_missing_from_the_legend_refuses(world, tmp_path):
+    readme = tmp_path / "README.md"
+    text = (ROOT / "labels" / "README.md").read_text()
+    readme.write_text(text.replace("| `explorer_tag` |", "| `other_kind` |"))
+    world.run_checks()
+    sources = checks.Sources(
+        run_results=world.sources.run_results,
+        labels=world.sources.labels,
+        legend=readme,
+        dbt_project=world.sources.dbt_project,
+    )
+    with pytest.raises(PublishRefused, match="not in the legend"):
+        publisher.publish(RUN, world.marts_file, world.raw, world.out, now=NOW, sources=sources)
+
+
+def test_a_readme_without_the_legend_refuses(world, tmp_path):
+    readme = tmp_path / "README.md"
+    readme.write_text("# Labels\n")
+    world.run_checks()
+    sources = checks.Sources(
+        run_results=world.sources.run_results,
+        labels=world.sources.labels,
+        legend=readme,
+        dbt_project=world.sources.dbt_project,
+    )
+    with pytest.raises(PublishRefused, match="no source legend"):
+        publisher.publish(RUN, world.marts_file, world.raw, world.out, now=NOW, sources=sources)
+
+
+def test_it_says_which_chains_lack_an_issuer_row(published):
+    """Solana has route wallets, so the mart's flag is true, and still no issuer row."""
+    _, folder = published
+    labels = read_json(folder, "labels.json")
+    assert labels["chains_without_issuer_row"] == ["solana"]
+    coverage = {row["chain"]: row for row in labels["issuer_coverage"]}
+    assert coverage["solana"]["has_issuer_row"] is False
+    assert coverage["solana"]["issuer_route_rows"] > 0
+    assert coverage["solana"]["issuer_labeled"] is True
+    assert coverage["tempo"]["issuer_rows"] == 1
+    manifest = read_json(folder, "manifest.json")
+    assert manifest["coverage"]["chains_without_issuer_row"] == ["solana"]
+    limits = {
+        limit["id"]: limit["text"] for limit in read_json(folder, "summary.json")["known_limits"]
+    }
+    assert "Solana has no wallet labeled as the issuer" in limits["no_issuer_row"]
+
+
+def test_journey_carries_issuer_labeled_per_row(world):
+    world.mart_sql("UPDATE mart_supply_journey SET issuer_labeled = false WHERE chain = 'base'")
+    world.run_checks()
+    folder = world.publish()
+    journey = read_json(folder, "journey.json")["data"]
+    assert {row["issuer_labeled"] for row in journey if row["chain"] == "tempo"} == {True}
+    assert {row["issuer_labeled"] for row in journey if row["chain"] == "base"} == {False}
+    limits = {
+        limit["id"]: limit["text"] for limit in read_json(folder, "summary.json")["known_limits"]
+    }
+    assert "Base has no issuer" in limits["no_issuer_label"]
+
+
+# Reconciliation numbers
+
+
+def test_reconciliation_numbers_carry_their_run(published):
+    world, folder = published
+    with world.store() as store:
+        run_id = store.latest_reconciliation().run_id
+    payload = read_json(folder, "reconciliation.json")
+    rows = payload["data"]
+    assert [(row["kind"], row["subject"]) for row in rows] == [
+        ("bridge", "all_chains"),
+        ("chain", "base"),
+        ("chain", "ethereum"),
+        ("chain", "solana"),
+        ("chain", "tempo"),
+    ]
+    assert {row["run_id"] for row in rows} == {run_id}
+    assert all(row["passed"] and row["difference"] == "0" for row in rows)
+    assert all(UTC_TIME.match(row["checked_at"]) for row in rows)
+    tempo = rows[-1]
+    assert tempo["event_value"] == tempo["reference_value"]
+    assert int(tempo["event_value"]) > HUGE
+    assert all(row["in_latest_run"] is True for row in rows)
+    assert payload["latest_run"] == {
+        "run_id": run_id,
+        "scope": "full",
+        "status": "pass",
+        "finished_at": "2026-11-04T05:30:00Z",
+    }
+    assert read_json(folder, "manifest.json")["reconciliation"] == payload["latest_run"]
+
+
+def test_a_day_with_no_supply_keeps_its_volume_and_has_null_kpis(world):
+    world.mart_sql("DELETE FROM mart_activity_kpis WHERE chain = 'base' AND day_utc = '2026-10-01'")
+    world.run_checks()
+    folder = world.publish()
+    row = next(
+        r
+        for r in read_json(folder, "activity.json")["data"]
+        if r["chain"] == "base" and r["day"] == "2026-10-01"
+    )
+    assert row["headline_value"] == str(EVERYDAY)
+    assert row["total_supply"] is None and row["velocity_bps"] is None
+    assert row["active_wallets_7d"] is None
+    with (folder / "activity.csv").open(newline="") as handle:
+        written = next(
+            r for r in csv.DictReader(handle) if r["chain"] == "base" and r["day"] == "2026-10-01"
+        )
+    assert written["total_supply"] == ""
+
+
+def test_a_preview_with_no_kpis_for_a_chain_leaves_that_chain_out(world):
+    world.mart_sql("DELETE FROM mart_activity_kpis WHERE chain = 'base'")
+    world.run_checks()
+    with pytest.raises(PublishRefused, match="chains missing from the dataset: base"):
+        world.publish()
+
+
+# Velocity
+
+
+def test_both_velocity_denominators_are_published(published):
+    _, folder = published
+    rows = read_json(folder, "activity.json")["data"]
+    newest = next(r for r in rows if r["chain"] == "ethereum" and r["day"] == "2026-11-03")
+    circulating, total = int(newest["circulating_supply"]), int(newest["total_supply"])
+    assert newest["velocity_bps"] == int(newest["clean_7d"]) * 10_000 // (7 * circulating)
+    assert newest["headline_velocity_bps"] == int(newest["headline_7d"]) * 10_000 // (7 * total)
+    # Small circulating supply makes clean velocity read higher than headline. That isn't a bug.
+    assert circulating < total
+    assert newest["velocity_bps"] > newest["headline_velocity_bps"]
+    definitions = read_json(folder, "manifest.json")["definitions"]["velocity"]
+    assert definitions["velocity_bps"]["denominator"] == "circulating_supply"
+    assert definitions["headline_velocity_bps"]["denominator"] == "total_supply"
+    limits = {
+        limit["id"]: limit["text"] for limit in read_json(folder, "summary.json")["known_limits"]
+    }
+    assert "can exceed" in limits["velocity_denominators"]
+
+
+def test_the_real_ethereum_velocity_figures_publish_unchanged(world):
+    """33,260 against 8,912, from Ethereum on 2026-11-03. No schema cap may refuse or clip them."""
+    world.mart_sql(
+        "UPDATE mart_activity_kpis SET velocity_bps = 33260, headline_velocity_bps = 8912 "
+        "WHERE chain = 'ethereum' AND day_utc = '2026-11-03'"
+    )
+    world.run_checks()
+    folder = world.publish()
+    row = next(
+        r
+        for r in read_json(folder, "activity.json")["data"]
+        if r["chain"] == "ethereum" and r["day"] == "2026-11-03"
+    )
+    assert (row["velocity_bps"], row["headline_velocity_bps"]) == (33260, 8912)
+    kpi = next(r for r in read_json(folder, "summary.json")["kpis"] if r["chain"] == "ethereum")
+    assert (kpi["velocity_bps"], kpi["headline_velocity_bps"]) == (33260, 8912)
+    assert "total_supply" in kpi and "circulating_supply" in kpi
+
+
+# Summary and verdict
+
+
+def test_the_summary_verdict_comes_from_the_published_kpis(published):
+    _, folder = published
+    summary = read_json(folder, "summary.json")
+    verdict = summary["verdict"]
+    assert verdict["state"] == "mostly_placed"
+    assert verdict["scope"] == list(REQUIRED_CHAINS)
+    assert verdict["text"].startswith("On Tempo, Ethereum, Base and Solana, ")
+    assert verdict["as_of"] == dict.fromkeys(REQUIRED_CHAINS, "2026-11-03")
+    assert verdict["facts"] and verdict["estimates"] and verdict["opinions"]
+    assert summary["notice"] == "Independent. Not affiliated with Open Standard or Bridge."
+    assert {limit["id"] for limit in summary["known_limits"]} >= {
+        "not_an_attestation",
+        "placed_is_not_intent",
+        "clean_volume_counts_hops",
+        "lost_transfer_can_pass",
+    }
+    base = next(row for row in summary["kpis"] if row["chain"] == "base")
+    assert base["clean_everyday_7d"] == str(7 * EVERYDAY)
+    assert base["placed_share_bps"] == int(base["placed_supply"]) * 10_000 // int(
+        base["total_supply"]
+    )
+
+
+def test_under_seven_days_of_history_is_no_clear_statement(world):
+    world.mart_sql(
+        "UPDATE mart_activity_kpis SET headline_velocity_bps = NULL "
+        "WHERE chain = 'solana' AND day_utc = '2026-11-03'"
+    )
+    world.run_checks()
+    verdict = read_json(world.publish(), "summary.json")["verdict"]
+    assert verdict["state"] == "no_clear_statement"
+    assert "Solana has less than seven full days" in verdict["text"]
+
+
+def test_a_chain_with_only_route_wallets_is_named_in_the_verdict_estimates(published):
+    _, folder = published
+    verdict = read_json(folder, "summary.json")["verdict"]
+    assert any("Solana has no wallet labeled as the issuer" in e for e in verdict["estimates"])
+
+
+def test_a_chain_with_only_route_wallets_can_make_the_verdict_unclear(world):
+    """Solana's placed supply alone carries the answer here, and may be issuer inventory."""
+    world.mart_sql(
+        """
+        UPDATE mart_supply_journey SET placed_supply = CASE chain WHEN 'solana' THEN total_supply
+            ELSE total_supply * 49 // 100 - 1 END,
+        total_supply = total_supply
+        WHERE day_utc = '2026-11-03'
+        """
+    )
+    world.mart_sql(
+        """
+        UPDATE mart_supply_journey SET total_supply = CASE chain
+            WHEN 'tempo' THEN 1000000000000000 WHEN 'ethereum' THEN 1000000000000000
+            WHEN 'base' THEN 1000000000000000 ELSE 300000000000000 END,
+        placed_supply = CASE chain WHEN 'solana' THEN 300000000000000 ELSE 490000000000000 END
+        WHERE day_utc = '2026-11-03'
+        """
+    )
+    world.mart_sql(
+        """
+        UPDATE mart_activity_kpis SET total_supply = CASE chain
+            WHEN 'solana' THEN 300000000000000 ELSE 1000000000000000 END
+        WHERE day_utc = '2026-11-03'
+        """
+    )
+    world.run_checks()
+    verdict = read_json(world.publish(), "summary.json")["verdict"]
+    assert verdict["state"] == "no_clear_statement"
+    assert "Solana has no wallet labeled as the issuer" in verdict["text"]
+
+
+def test_warnings_are_in_the_manifest_and_never_block(world):
+    world.mart_sql(
+        "UPDATE mart_supply_journey SET placed_supply = placed_supply // 2 "
+        "WHERE chain = 'base' AND day_utc = '2026-11-03'"
+    )
+    results = world.run_checks()
+    assert {result.status for result in results.values()} == {"passed"}
+    folder = world.publish()
+    warnings = read_json(folder, "manifest.json")["warnings"]
+    assert [(w["chain"], w["metric"], w["day"]) for w in warnings] == [
+        ("base", "placed_supply", "2026-11-03")
+    ]
+    assert warnings[0]["current"] == str(int(warnings[0]["previous"]) // 2)
+
+
+# What must never reach the dataset
+
+
+def text_of(folder: Path) -> dict[str, str]:
+    return {path.name: path.read_text() for path in folder.iterdir()}
+
+
+def test_no_wallet_address_reaches_a_published_row(published):
+    """Only a label's source link may hold one, and that link has to open for a reader to check."""
+    _, folder = published
+    with REAL_LABELS.open(newline="") as handle:
+        labels = list(csv.DictReader(handle))
+    labeled = {row["address"].lower() for row in labels}
+    for name, text in text_of(folder).items():
+        found = EVM_ADDRESS.findall(text)
+        if name != "labels.json":
+            assert found == [], name
+    for row in read_json(folder, "labels.json")["data"]:
+        values = {key: value for key, value in row.items() if key != "source_url"}
+        assert not EVM_ADDRESS.search(json.dumps(values))
+        for address in EVM_ADDRESS.findall(row["source_url"]):
+            assert address.lower() in labeled, row
+
+
+def test_no_fixture_wallet_on_any_chain_reaches_a_file(published):
+    _, folder = published
+    holders = [a for chain in REQUIRED_CHAINS for a in wallets(chain).values()]
+    issuers = list(ISSUERS.values())
+    for name, text in text_of(folder).items():
+        assert not [address for address in holders if address in text], name
+        if name != "labels.json":
+            assert not [address for address in issuers if address in text], name
+
+
+def test_no_rpc_url_or_env_value_reaches_a_file(world, monkeypatch):
+    urls = {
+        "BASE_RPC_URL": f"http://base.invalid/v2/{SECRET}",
+        "SOLANA_RPC_URL": f"http://solana.invalid/v2/{SECRET}",
+        "TEMPO_RPC_URL": f"http://tempo.invalid/?key={SECRET}",
+        "ETHEREUM_RPC_URL": f"http://ethereum.invalid/{SECRET}",
+    }
+    for name, value in urls.items():
+        monkeypatch.setenv(name, value)
+    results_path = world.sources.run_results
+    results = json.loads(results_path.read_text())
+    # dbt's arguments are not copied wholesale, so a value put there goes no further.
+    results["args"]["vars"]["rpc_url"] = urls["BASE_RPC_URL"]
+    results_path.write_text(json.dumps(results))
+    world.run_checks()
+    folder = world.publish()
+    for name, text in text_of(folder).items():
+        assert SECRET not in text, name
+        assert "rpc_url" not in text.lower(), name
+        assert ".invalid" not in text, name
+
+
+def test_a_refusal_never_stores_a_url_in_the_manifest(world, monkeypatch):
+    monkeypatch.setenv("BASE_RPC_URL", f"http://base.invalid/v2/{SECRET}")
+    world.run_checks()
+    world.publish()
+
+    def explode(*args, **kwargs):
+        raise RuntimeError(f"failed at http://base.invalid/v2/{SECRET}")
+
+    monkeypatch.setattr(publisher, "mart_rows", explode)
+    with pytest.raises(PublishRefused) as refused:
+        world.publish(now=LATER)
+    assert SECRET not in str(refused.value)
+    assert SECRET not in (world.out / "latest" / "manifest.json").read_text()
+
+
+# Times are UTC, in any zone
+
+
+def utc_times_in(value):
+    if isinstance(value, dict):
+        for inner in value.values():
+            yield from utc_times_in(inner)
+    elif isinstance(value, list):
+        for inner in value:
+            yield from utc_times_in(inner)
+    elif isinstance(value, str) and re.match(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T", value):
+        yield value
+
+
+@pytest.fixture(params=["Asia/Tokyo", "America/Los_Angeles"])
+def far_from_utc(request, monkeypatch):
+    monkeypatch.setenv("TZ", request.param)
+    time.tzset()
+    yield request.param
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_published_times_are_utc_in_another_time_zone(world, far_from_utc):
+    assert time.timezone != 0
+    world.run_checks()
+    with world.store() as store:
+        # Proves this test bites: the session really is elsewhere.
+        zone = store.db.execute("SELECT current_setting('TimeZone')").fetchone()
+        assert zone == (far_from_utc,)
+        raw = store.db.execute("SELECT checked_at FROM check_results LIMIT 1").fetchone()
+        assert raw is not None and raw[0].utcoffset() != timedelta(0)
+    folder = world.publish()
+    assert folder.name == "20261104T060000Z"
+    manifest = read_json(folder, "manifest.json")
+    assert manifest["generated_at"] == "2026-11-04T06:00:00Z"
+    assert {check["checked_at"] for check in manifest["checks"]} == {"2026-11-04T06:00:00Z"}
+    assert manifest["reconciliation"]["finished_at"] == "2026-11-04T05:30:00Z"
+    assert manifest["coverage"]["last_transfer_at"]["tempo"] == "2026-11-04T01:00:00Z"
+    assert manifest["coverage"]["data_as_of"]["tempo"] == "2026-11-03"
+    for name in JSON_FILES:
+        times = list(utc_times_in(read_json(folder, name)))
+        assert all(UTC_TIME.match(moment) for moment in times), (name, times)
+    reconciliation = read_json(folder, "reconciliation.json")
+    assert {row["checked_at"] for row in reconciliation["data"]} == {"2026-11-04T05:30:00Z"}
+
+
+def test_a_time_zone_does_not_change_one_byte(world, tmp_path, monkeypatch):
+    world.run_checks()
+    utc = snapshot(world.publish())
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    time.tzset()
+    try:
+        elsewhere = world.copy(tmp_path / "elsewhere")
+        elsewhere.run_checks()
+        assert snapshot(elsewhere.publish()) == utc
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
+def test_freshness_is_measured_in_utc_in_another_time_zone(world, far_from_utc):
+    limit = RECONCILED_AT + timedelta(hours=36)
+    world.raw_sql("UPDATE transfers SET block_timestamp = block_timestamp + 86400 * 30")
+    assert world.run_checks(now=limit - timedelta(minutes=1))["freshness"].status == "passed"
+    assert world.run_checks(now=limit + timedelta(minutes=1))["freshness"].status == "failed"
+
+
+def test_mark_stale_writes_utc_in_another_time_zone(published, far_from_utc):
+    world, folder = published
+    publisher.mark_stale(world.out, datetime(2026, 11, 4, 16, 0, tzinfo=UTC), "reason")
+    assert read_json(folder, "manifest.json")["stale_since"] == "2026-11-04T16:00:00Z"
+
+
+# The commands
+
+
+@pytest.fixture
+def commands(world, monkeypatch):
+    """The real commands with a fixed clock, and with no provider key in the environment."""
+    for name in ("BASE_RPC_URL", "SOLANA_RPC_URL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("OUSD_DB_PATH", str(world.raw))
+    monkeypatch.setenv("OUSD_MARTS_DB_PATH", str(world.marts_file))
+    monkeypatch.setenv("OUSD_PUBLISHED_DIR", str(world.out))
+    real_check, real_publish = cli.run_checks, cli.publish
+
+    def run_checks(store, marts, run_id, allow_partial):
+        return real_check(store, marts, run_id, allow_partial, NOW, world.sources)
+
+    monkeypatch.setattr(cli, "run_checks", run_checks)
+    monkeypatch.setattr(cli, "publish", bind(real_publish, now=NOW, sources=world.sources))
+    return world
+
+
+def test_check_then_publish_with_no_key_set(commands, capsys):
+    assert cli.main(["check", "--run-id", RUN]) == 0
+    printed = capsys.readouterr().out
+    assert "RESULT: PASSED" in printed
+    assert all(f"{name}: PASSED" in printed for name in checks.CHECK_NAMES)
+    assert cli.main(["publish", "--run-id", RUN]) == 0
+    assert "PUBLISHED" in capsys.readouterr().out
+    assert (commands.out / "latest" / "manifest.json").is_file()
+
+
+def test_a_failing_check_exits_one(commands, capsys):
+    commands.mart_sql("UPDATE mart_activity_waterfall SET fees = fees + 1")
+    assert cli.main(["check", "--run-id", RUN]) == 1
+    printed = capsys.readouterr().out
+    assert "volume_waterfall: FAILED" in printed
+    assert "RESULT: FAILED" in printed
+
+
+def test_publish_refusal_exits_one_and_reads_only_the_store(commands, capsys):
+    """Publish was never told the check passed. With no rows it has nothing to believe."""
+    assert cli.main(["publish", "--run-id", RUN]) == 1
+    assert "PUBLISH REFUSED: no check results" in capsys.readouterr().out
+    assert not commands.out.exists()
+
+
+def test_a_check_with_no_database_does_not_create_one(commands, capsys):
+    commands.raw.unlink()
+    assert cli.main(["check", "--run-id", RUN]) == 1
+    assert not commands.raw.exists()
+    commands.marts_file.unlink()
+    assert cli.main(["publish", "--run-id", RUN]) == 1
+    assert not commands.raw.exists()
+
+
+def test_allow_partial_on_the_command_line_writes_only_a_preview(commands, capsys):
+    assert cli.main(["check", "--run-id", RUN, "--allow-partial"]) == 0
+    assert cli.main(["publish", "--run-id", RUN, "--allow-partial"]) == 0
+    assert "LOCAL PREVIEW, NOT A RELEASE" in capsys.readouterr().out
+    assert not commands.out.exists()
+    assert (commands.preview_root / "latest-preview" / "manifest.json").is_file()
+
+
+def test_nothing_in_the_environment_can_turn_a_release_into_a_preview(commands, monkeypatch):
+    monkeypatch.setenv("OUSD_ALLOW_PARTIAL", "1")
+    assert cli.main(["check", "--run-id", RUN]) == 0
+    assert cli.main(["publish", "--run-id", RUN]) == 0
+    assert (commands.out / "latest").is_symlink()
+    assert not commands.preview_root.exists()
+
+
+def test_a_partial_check_does_not_end_in_passed(partial, monkeypatch, capsys):
+    real = cli.run_checks
+    monkeypatch.setenv("OUSD_DB_PATH", str(partial.raw))
+    monkeypatch.setenv("OUSD_MARTS_DB_PATH", str(partial.marts_file))
+
+    def run_checks(store, marts, run_id, allow_partial):
+        return real(store, marts, run_id, allow_partial, NOW, partial.sources)
+
+    monkeypatch.setattr(cli, "run_checks", run_checks)
+    assert cli.main(["check", "--run-id", RUN, "--allow-partial"]) == 0
+    printed = capsys.readouterr().out
+    assert "RESULT: LOCAL PREVIEW ONLY, NOT RECONCILED" in printed
+    assert "RESULT: PASSED" not in printed
+
+
+def test_a_database_in_use_exits_two_from_both_commands(commands, monkeypatch, capsys):
+    def held(*args, **kwargs):
+        raise duckdb.IOException("Could not set lock on file")
+
+    monkeypatch.setattr(cli, "Store", held)
+    monkeypatch.setattr(publisher, "Store", held)
+    assert cli.main(["check", "--run-id", RUN]) == 2
+    assert cli.main(["publish", "--run-id", RUN]) == 2
+    assert "in use" in capsys.readouterr().err
+
+
+def test_chain_does_not_apply_to_the_new_commands(commands):
+    with pytest.raises(SystemExit):
+        cli.main(["--chain", "tempo", "check", "--run-id", RUN])
+
+
+def test_run_id_is_required(commands):
+    with pytest.raises(SystemExit):
+        cli.main(["publish"])
+
+
+def test_the_csv_writer_flattens_values():
+    data = publisher._csv_bytes([{"a": ["x", "y"], "b": True, "c": None, "d": "1"}])
+    assert list(csv.reader(io.StringIO(data.decode()))) == [
+        ["a", "b", "c", "d"],
+        ["x;y", "true", "", "1"],
+    ]
