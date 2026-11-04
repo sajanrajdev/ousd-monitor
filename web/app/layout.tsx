@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import "@fontsource-variable/inter";
 import "@fontsource-variable/newsreader";
 import "./globals.css";
-import { DatasetBanner } from "@/components/dataset-banner";
+import { DatasetBanner, StaleNote } from "@/components/dataset-banner";
 import { FreshnessWatch } from "@/components/freshness";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -38,6 +38,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <FreshnessWatch clock={state.clock} />
         <SiteHeader />
         <DatasetBanner state={state} />
+        <StaleNote state={state} />
         {children}
         <SiteFooter />
       </body>

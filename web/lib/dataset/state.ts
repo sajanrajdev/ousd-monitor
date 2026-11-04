@@ -2,7 +2,7 @@
 import { dayRange } from "../aggregate.ts";
 import { DEFAULT_DEFINITIONS, REQUIRED_CHAINS, CHECK_LABELS } from "../definitions.ts";
 import { formatAsOf, formatUtcDateTime, UNKNOWN_TEXT, type AsOfRange } from "../format.ts";
-import { isFreshAt, type FreshnessClock } from "./clock.ts";
+import { FUTURE_SKEW_MS, isFreshAt, type FreshnessClock } from "./clock.ts";
 import type { DatasetFiles } from "./rows.ts";
 
 export { isFreshAt, type FreshnessClock };
@@ -83,6 +83,21 @@ function reconciliationProblems({ manifest, reconciliation }: DatasetFiles): str
   return problems;
 }
 
+// Nothing in a dataset can happen after it was written, beyond a little drift in a block's time.
+function futureTimeProblems(manifest: DatasetFiles["manifest"]): string[] {
+  const limit = Date.parse(manifest.generated_at) + FUTURE_SKEW_MS;
+  const times: [string, string | undefined][] = [
+    ["reconciliation.finished_at", manifest.reconciliation?.finished_at],
+    ...Object.entries(manifest.coverage.last_transfer_at).map(([chain, time]): [string, string] => [
+      `${chain}'s last_transfer_at`,
+      time,
+    ]),
+  ];
+  return times
+    .filter(([, time]) => time !== undefined && Date.parse(time) > limit)
+    .map(([name]) => `${name} is later than generated_at`);
+}
+
 // A release needs all of this. Anything else is preview, whatever the manifest calls itself.
 export function releaseProblems(files: DatasetFiles): string[] {
   const { manifest, summary, journey, activity, chain_roles: roles } = files;
@@ -103,7 +118,10 @@ export function releaseProblems(files: DatasetFiles): string[] {
     if (!summary.verdict.scope.includes(chain)) {
       problems.push(`verdict.scope doesn't cover ${chain}`);
     }
+    const kpiRows = summary.kpis.filter((row) => row.chain === chain).length;
+    if (kpiRows !== 1) problems.push(`${chain} needs one KPI row, and has ${kpiRows}`);
   }
+  problems.push(...futureTimeProblems(manifest));
   for (const name of CHECK_NAMES) {
     const found = manifest.checks.filter((check) => check.name === name);
     if (found.length !== 1) problems.push(`check ${name} appears ${found.length} times`);
@@ -123,15 +141,21 @@ export function isSample(manifest: DatasetFiles["manifest"], placement: Placemen
   return placement.hasFixtureFile || placement.underWeb || ZERO_COMMIT.test(manifest.git_commit);
 }
 
-// Fresh means all three kinds of time are within the limit. Null when one is missing, so a dataset
-// with no reconciliation can't be fresh.
+// Fresh means all three kinds of time are within the limit, and none is ahead of the clock. Null
+// when one is missing, so a dataset with no reconciliation can't be fresh.
 export function freshnessClock(manifest: DatasetFiles["manifest"]): FreshnessClock {
   const generatedAt = manifest.generated_at;
   const finishedAt = manifest.reconciliation?.finished_at;
-  if (!finishedAt) return { generatedAt, freshUntil: null };
-  const times = [generatedAt, finishedAt, ...Object.values(manifest.coverage.last_transfer_at)];
-  const oldest = Math.min(...times.map((time) => Date.parse(time)));
-  return { generatedAt, freshUntil: new Date(oldest + FRESHNESS_LIMIT_MS).toISOString() };
+  if (!finishedAt) return { generatedAt, latestAt: null, freshUntil: null };
+  const others = [finishedAt, ...Object.values(manifest.coverage.last_transfer_at)].map((time) =>
+    Date.parse(time),
+  );
+  const oldest = Math.min(Date.parse(generatedAt), ...others);
+  return {
+    generatedAt,
+    latestAt: new Date(Math.max(...others)).toISOString(),
+    freshUntil: new Date(oldest + FRESHNESS_LIMIT_MS).toISOString(),
+  };
 }
 
 function countsLine({ manifest }: DatasetFiles): string | null {

@@ -344,6 +344,59 @@ describe("release grade, on files already in memory", () => {
   });
 });
 
+describe("KPI rows, on files already in memory", () => {
+  const files = () => loadDatasetFiles(at(releaseGrade())).files;
+
+  it("names a missing row", () => {
+    const loaded = files();
+    loaded.summary.kpis = loaded.summary.kpis.filter((row) => row.chain !== "solana");
+    expect(releaseProblems(loaded)).toContain("solana needs one KPI row, and has 0");
+  });
+
+  it("names a duplicated row", () => {
+    const loaded = files();
+    loaded.summary.kpis.push(loaded.summary.kpis[0]);
+    expect(releaseProblems(loaded)).toContain("tempo needs one KPI row, and has 2");
+  });
+});
+
+describe("a time in the future", () => {
+  const FAR = "2099-01-01T00:00:00Z";
+  const cases: [string, (manifest: Json, time: string) => void][] = [
+    ["reconciliation.finished_at", (data, time) => (data.reconciliation.finished_at = time)],
+    ["a chain's last_transfer_at", (data, time) => (data.coverage.last_transfer_at.base = time)],
+  ];
+
+  it.each(cases)("%s reads stale, and never as reconciled", (_name, place) => {
+    const dir = edited("manifest.json", (data) => place(data, FAR));
+    const state = stateOf(dir, GENERATED + HOUR);
+    expect(state.freshness).toBe("stale");
+    expect(state.kind).toBe("preview");
+    expect(state.trustLine.fresh).toBe("Not reconciled");
+    expect(state.releaseProblems.join()).toContain("later than generated_at");
+  });
+
+  it.each(cases)("%s reads stale on the reader's clock too", (_name, place) => {
+    const data = readJson(releaseGrade(), "manifest.json");
+    place(data, FAR);
+    expect(isFreshAt(freshnessClock(data), GENERATED + HOUR)).toBe(false);
+  });
+
+  it.each(cases)("%s a little ahead is clock skew, and stays fresh", (_name, place) => {
+    const dir = edited("manifest.json", (data) => place(data, "2026-11-04T06:04:00Z"));
+    const state = stateOf(dir, GENERATED);
+    expect(state.freshness).toBe("fresh");
+    expect(state.kind).toBe("real");
+  });
+
+  it.each(cases)("%s past the skew is stale", (_name, place) => {
+    const dir = edited("manifest.json", (data) => place(data, "2026-11-04T06:06:00Z"));
+    const state = stateOf(dir, GENERATED);
+    expect(state.freshness).toBe("stale");
+    expect(state.kind).toBe("preview");
+  });
+});
+
 describe("the as-of line", () => {
   it("is never blank on a fresh dataset with no as-of days", () => {
     const { files, placement } = loadDatasetFiles(at(releaseGrade()));

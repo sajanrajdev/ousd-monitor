@@ -147,6 +147,42 @@ describe("a real dataset", () => {
   });
 });
 
+describe("the stale note on every page", () => {
+  function stale() {
+    const dir = releaseGrade();
+    editJson(dir, "manifest.json", (manifest) => {
+      manifest.stale = true;
+      manifest.stale_since = "2026-11-04T07:00:00Z";
+      manifest.stale_reason = "a check failed";
+    });
+    vi.stubEnv("OUSD_DATASET_DIR", dir);
+  }
+
+  it("comes from the layout, so the methodology page and 404 have it", () => {
+    stale();
+    const document = layoutDocument();
+    const note = document.querySelector("[data-stale-note]")!;
+    expect(note.textContent).toContain("A newer run did not pass its checks.");
+    expect(note.textContent).toContain("Data from 4 Nov 2026, 06:00 UTC.");
+    expect(note.textContent).not.toContain("a check failed");
+    expect(document.documentElement.dataset.freshness).toBe("stale");
+    const header = document.querySelector("header")!;
+    expect(header.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("is in the page on a fresh dataset too, for the clock to reveal", () => {
+    vi.stubEnv("OUSD_DATASET_DIR", "fixtures/dataset/complete");
+    const note = layoutDocument().querySelector("[data-stale-note]")!;
+    expect(note.textContent).toContain("Nothing newer has reached this page");
+  });
+
+  it("is hidden while fresh without giving up its space, and on the main page's own line", () => {
+    const css = readFileSync("app/globals.css", "utf8");
+    expect(css).toContain('html[data-freshness="fresh"] .freshness-text__stale');
+    expect(css).toMatch(/body:has\(\[data-section="verdict"\]\) \.stale-note\s*\{\s*display: none/);
+  });
+});
+
 describe("a preview dataset", () => {
   function preview() {
     const dir = copySample("partial");

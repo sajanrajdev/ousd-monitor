@@ -34,6 +34,8 @@ const SCHEMA_DIR = "../pipeline/ousd/schemas";
 const DEFAULT_DIR = "../data/published/latest";
 const SAMPLE_DIR = "fixtures/dataset/complete";
 const MAX_ERRORS_SHOWN = 5;
+const DAY_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
+const TIME_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
 export class DatasetError extends Error {
   constructor(file: string, field: string, rule: string) {
@@ -63,7 +65,11 @@ export function locateDataset(
   webRoot = process.cwd(),
 ): DatasetLocation {
   const chosen = env.OUSD_DATASET_DIR;
-  if (chosen) return { dir: resolve(webRoot, chosen), origin: "chosen" };
+  if (chosen !== undefined) {
+    // Set but empty is a mistake, not a request for the default path.
+    if (!chosen.trim()) throw new DatasetError("OUSD_DATASET_DIR", "value", "is set but empty");
+    return { dir: resolve(webRoot, chosen), origin: "chosen" };
+  }
   const published = resolve(webRoot, DEFAULT_DIR);
   if (lstatSync(published, { throwIfNoEntry: false }))
     return { dir: published, origin: "published" };
@@ -182,25 +188,69 @@ function checkSums(files: DatasetFiles): void {
   });
 }
 
-// A pattern can't tell Feb 30 from a real day, and Date.parse rolls it on to March, so the time has
-// to come back unchanged. A time that doesn't can't be called fresh.
+// A pattern can't tell Feb 30 from a real day, and Date.parse rolls it on to March, so a time has to
+// come back unchanged. Walks every value, so a new date field can't be missed.
 function isRealTime(time: string): boolean {
   const parsed = new Date(time);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().replace(".000Z", "Z") === time;
 }
 
-function checkTimes(manifest: DatasetFiles["manifest"]): void {
-  const times: [string, string | undefined][] = [
-    ["/generated_at", manifest.generated_at],
-    ["/reconciliation/finished_at", manifest.reconciliation?.finished_at],
-    ...Object.entries(manifest.coverage.last_transfer_at).map(([chain, time]): [string, string] => [
-      `/coverage/last_transfer_at/${chain}`,
-      time,
-    ]),
-  ];
-  for (const [field, time] of times) {
-    if (time !== undefined && !isRealTime(time)) {
-      throw new DatasetError(MANIFEST, field, "isn't a real time");
+function checkDates(name: string, value: unknown, field = ""): void {
+  if (typeof value === "string") {
+    if (TIME_SHAPE.test(value) && !isRealTime(value)) {
+      throw new DatasetError(name, field, "isn't a real time");
+    }
+    if (DAY_SHAPE.test(value) && !isRealTime(`${value}T00:00:00Z`)) {
+      throw new DatasetError(name, field, "isn't a real day");
+    }
+  } else if (value !== null && typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) checkDates(name, item, `${field}/${key}`);
+  }
+}
+
+function countBy<Row>(rows: Row[], key: (row: Row) => string): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const row of rows) counts.set(key(row), (counts.get(key(row)) ?? 0) + 1);
+  return counts;
+}
+
+// The schemas can't say a value is unique across rows, and a repeated row would count a chain twice.
+function checkOneRowEach({
+  manifest,
+  summary,
+  chain_roles,
+  journey,
+  activity,
+}: DatasetFiles): void {
+  const included = manifest.coverage.chains_included as string[];
+  const kpis = countBy(summary.kpis, (row) => row.chain);
+  for (const chain of included) {
+    const rows = kpis.get(chain) ?? 0;
+    if (rows !== 1) {
+      throw new DatasetError("summary.json", "/kpis", `${chain} is included, and has ${rows} rows`);
+    }
+  }
+  for (const chain of kpis.keys()) {
+    if (!included.includes(chain)) {
+      throw new DatasetError("summary.json", "/kpis", `${chain} isn't in chains_included`);
+    }
+  }
+  for (const [chain, rows] of countBy(chain_roles.data, (row) => row.chain)) {
+    if (rows > 1) throw new DatasetError("chain_roles.json", "/data", `${chain} has ${rows} rows`);
+  }
+  for (const [name, data] of [
+    ["journey.json", journey.data],
+    ["activity.json", activity.data],
+  ] as const) {
+    const counted = countBy<{ chain: string; day: string }>(
+      data,
+      (row) => `${row.chain} ${row.day}`,
+    );
+    for (const [key, rows] of counted) {
+      if (rows > 1) {
+        const [chain, day] = key.split(" ");
+        throw new DatasetError(name, "/data", `${chain} has ${rows} rows on ${day}`);
+      }
     }
   }
 }
@@ -236,7 +286,7 @@ export function loadDatasetFiles(
   }
   checkListedFiles(manifest);
   validate(MANIFEST, "manifest", manifest, webRoot);
-  checkTimes(manifest);
+  checkDates(MANIFEST, manifest);
 
   const payloads = new Map<string, unknown>();
   for (const name of LISTED_FILES) {
@@ -253,6 +303,7 @@ export function loadDatasetFiles(
   }
   for (const [name, schema] of Object.entries(JSON_FILES)) {
     validate(name, schema, payloads.get(name), webRoot);
+    checkDates(name, payloads.get(name));
   }
 
   const files = {
@@ -270,6 +321,7 @@ export function loadDatasetFiles(
     }
   }
   checkSums(files);
+  checkOneRowEach(files);
   return { files, placement: placementOf(location, webRoot) };
 }
 

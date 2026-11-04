@@ -1,7 +1,12 @@
 import { render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { describe, expect, it } from "vitest";
-import { ChartCard, type ChartCardProps } from "@/components/chart-card";
+import {
+  ChartCard,
+  TableCard,
+  type ChartCardProps,
+  type TableCardProps,
+} from "@/components/chart-card";
 import { formatCompactUsd, formatUtcDate, formatUtcDateTime } from "@/components/chart-theme";
 import { HairlineTable } from "@/components/hairline-table";
 
@@ -132,5 +137,61 @@ describe("chart theme", () => {
 
   it("returns something that isn't a date unchanged", () => {
     expect(formatUtcDate("not a date")).toBe("not a date");
+  });
+});
+
+describe("a card's note", () => {
+  const tableProps: TableCardProps = { ...props };
+
+  it("on a chart card, is readable and outside the hidden graphic", () => {
+    render(
+      <main>
+        <ChartCard {...props} note={<p>A chain with no label reads as zero here.</p>} />
+      </main>,
+    );
+    const note = screen.getByText("A chain with no label reads as zero here.");
+    expect(note.closest("[aria-hidden]")).toBeNull();
+    expect(note.closest(".chart-card__note")).not.toBeNull();
+    expect(note.closest("details")).toBeNull();
+  });
+
+  it("on a table card, is readable", () => {
+    render(
+      <main>
+        <TableCard {...tableProps} note="We don't ingest swaps, so this can't show trading." />
+      </main>,
+    );
+    const note = screen.getByText("We don't ingest swaps, so this can't show trading.");
+    expect(note.closest("[aria-hidden]")).toBeNull();
+    expect(note.closest(".chart-card__note")).not.toBeNull();
+  });
+
+  it("can hold a link", () => {
+    render(
+      <main>
+        <TableCard {...tableProps} note={<a href="/methodology/#velocity">How velocity works</a>} />
+      </main>,
+    );
+    expect(screen.getByRole("link", { name: "How velocity works" })).toBeTruthy();
+  });
+
+  it("leaves no empty slot when there's no note", () => {
+    const { container } = render(
+      <main>
+        <ChartCard {...props} />
+        <TableCard {...tableProps} />
+      </main>,
+    );
+    expect(container.querySelector(".chart-card__note")).toBeNull();
+  });
+
+  it("has no axe violations", async () => {
+    const { container } = render(
+      <main>
+        <ChartCard {...props} note="A note." />
+      </main>,
+    );
+    const results = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    expect(results.violations).toEqual([]);
   });
 });

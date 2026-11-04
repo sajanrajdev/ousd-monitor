@@ -1,4 +1,13 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -118,22 +127,41 @@ describe("hex colour scan", () => {
   });
 });
 
+// Build output is left out wherever it sits. A leftover web/out mustn't fail the next check.
+function assetsUnder(start: string): string[] {
+  const skipped = new Set(["node_modules", ".next", "out", ".build", ".shots", ".release"]);
+  const found: string[] = [];
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      if (skipped.has(name)) continue;
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else if (/\.(svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot)$/i.test(name)) {
+        found.push(path.slice(start.length));
+      }
+    }
+  };
+  walk(start);
+  return found;
+}
+
 describe("assets", () => {
   it("has no image, font or SVG file under web/ other than the Fontsource packages", () => {
-    const skipped = new Set(["node_modules", ".next", ".build", ".shots", ".release"]);
-    const found: string[] = [];
-    const walk = (dir: string) => {
-      for (const name of readdirSync(dir)) {
-        if (skipped.has(name)) continue;
-        const path = join(dir, name);
-        if (statSync(path).isDirectory()) walk(path);
-        else if (/\.(svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot)$/i.test(name)) {
-          found.push(path.slice(root.length));
-        }
-      }
-    };
-    walk(root);
-    expect(found).toEqual([]);
+    expect(assetsUnder(root)).toEqual([]);
+  });
+
+  it("isn't caught out by a leftover web/out, and still finds a real asset", () => {
+    const planted = mkdtempSync(join(tmpdir(), "ousd-assets-"));
+    try {
+      mkdirSync(join(planted, "out/_next/static/media"), { recursive: true });
+      writeFileSync(join(planted, "out/_next/static/media/font.woff2"), "x");
+      expect(assetsUnder(planted)).toEqual([]);
+      mkdirSync(join(planted, "public"));
+      writeFileSync(join(planted, "public/logo.png"), "x");
+      expect(assetsUnder(planted)).toEqual([join("/public", "logo.png")]);
+    } finally {
+      rmSync(planted, { recursive: true, force: true });
+    }
   });
 
   it("draws our mark inline, with no Open Standard artwork", () => {

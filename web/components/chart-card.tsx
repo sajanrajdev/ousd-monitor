@@ -19,6 +19,9 @@ export type ChartCardProps = {
   summary: string;
   table: HairlineTableProps;
   children: ReactNode;
+  // Words a reader needs beside the chart or table, such as a caveat with a link. Read by everyone:
+  // the graphic is hidden from assistive tech, and the summary is a plain string.
+  note?: ReactNode;
   level?: 2 | 3;
 };
 
@@ -46,6 +49,10 @@ function CardHead({
       <StatusChip kind={chip} frameWord={frameWord} />
     </div>
   );
+}
+
+function CardNote({ note }: { note: ReactNode }) {
+  return note ? <div className="chart-card__note mt-3">{note}</div> : null;
 }
 
 function CardMeta({
@@ -82,6 +89,7 @@ export function ChartCard({
   summary,
   table,
   children,
+  note,
   level = 2,
 }: ChartCardProps) {
   const headingId = useId();
@@ -104,6 +112,7 @@ export function ChartCard({
           This chart needs JavaScript. The table below has the same data.
         </p>
       </noscript>
+      <CardNote note={note} />
       <div className="mt-4">
         <Accordion title="Table of the same data">
           <HairlineTable {...table} />
@@ -123,6 +132,7 @@ export function TableCard({
   frameWord,
   summary,
   table,
+  note,
   level = 2,
 }: TableCardProps) {
   const headingId = useId();
@@ -139,6 +149,7 @@ export function TableCard({
       <div className="mt-4">
         <HairlineTable {...table} />
       </div>
+      <CardNote note={note} />
       <CardMeta source={source} asOf={asOf} definitionHref={definitionHref} frameWord={frameWord} />
     </section>
   );

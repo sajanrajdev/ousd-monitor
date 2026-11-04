@@ -17,20 +17,29 @@ const LINE = "Independent. Not affiliated with Open Standard or Bridge.";
 const VERSION = "20261104T060000Z";
 const quiet = () => {};
 
+const STALE_NOTE =
+  "Data from 4 Nov 2026, 06:00 UTC. Nothing newer has reached this page, so it may be out of date.";
+const STALE_TRUST =
+  "Last reconciled 4 Nov 2026, 05:30 UTC. Nothing newer has reached this page, so it may be out of date.";
+
+// What a build of the release-grade copy writes, long past its 36 hours.
 function realPage(body: string) {
-  return `<!doctype html><html data-dataset-kind="real" data-dataset-version="${VERSION}"><head><title>Open USD Monitor</title></head><body>
-    <header><p>${LINE}</p></header>${body}
+  return `<!doctype html><html data-dataset-kind="real" data-dataset-version="${VERSION}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
+    <header><p>${LINE}</p></header><p data-stale-note>${STALE_NOTE}</p>${body}
     <footer><p>${LINE}</p><p>Not financial advice.</p></footer></body></html>`;
 }
 
+const REAL_MAIN = `<main><section data-section="verdict"><p>${STALE_NOTE}</p></section>
+  <section data-section="trust-strip">${STALE_TRUST}</section></main>`;
+
 function goodRealBuild(_webRoot: string, target: string) {
-  plantFile(target, "index.html", realPage("<main>Fine</main>"));
+  plantFile(target, "index.html", realPage(REAL_MAIN));
   plantFile(target, "methodology/index.html", realPage("<main>Fine</main>"));
 }
 
 function badRealBuild(_webRoot: string, target: string) {
   goodRealBuild(_webRoot, target);
-  plantFile(target, "index.html", realPage("<main>Held at Coinbase</main>"));
+  plantFile(target, "index.html", realPage(`${REAL_MAIN}<p>Held at Coinbase</p>`));
 }
 
 // A release root that already has a last good version, to see whether it moves.
@@ -216,6 +225,21 @@ describe("make web-release", () => {
   });
 });
 
+describe("make web-release on KPI rows", () => {
+  it.each([
+    ["missing", (kpis: { chain: string }[]) => kpis.filter((row) => row.chain !== "solana")],
+    ["duplicated", (kpis: { chain: string }[]) => [...kpis, kpis[0]]],
+  ])("a %s row is refused, and latest doesn't move", (_name, change) => {
+    const root = releaseRootWithLastGood();
+    const dir = releaseGrade();
+    editJson(dir, "summary.json", (payload) => {
+      payload.kpis = change(payload.kpis);
+    });
+    expect(() => buildRelease(releaseOptions(dir, root))).toThrow(/summary\.json: \/kpis/);
+    expect(readlinkSync(join(root, "latest"))).toBe("previous");
+  });
+});
+
 describe("a real command line", () => {
   const SCRIPT = [
     "--experimental-strip-types",
@@ -251,6 +275,13 @@ describe("a real command line", () => {
     expect(result.stderr).toContain("Dataset refused: summary.json");
     expect(result.stderr).toContain("/verdict/state");
     expect(result.stderr).not.toContain(dir);
+  });
+
+  it("an empty OUSD_DATASET_DIR is refused, not read as unset", () => {
+    const result = run(["test-empty"], "");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Dataset refused: OUSD_DATASET_DIR");
+    expect(existsSync(join(webRoot, ".build", "test-empty"))).toBe(false);
   });
 
   it("--release refuses the sample, with no off switch", () => {

@@ -312,6 +312,22 @@ html[data-frame] body::after {
   font-weight: 650;
 }
 
+.chart-card__note {
+  font-size: var(--text-small);
+}
+
+.stale-note {
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: 0.75rem var(--page-margin) 0;
+  font-size: var(--text-small);
+  font-weight: 550;
+}
+
+body:has([data-section="verdict"]) .stale-note {
+  display: none;
+}
+
 /* Fresh and stale text share one cell, so the taller sets the height and nothing shifts. */
 .freshness-text {
   display: inline-grid;

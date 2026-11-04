@@ -14,19 +14,26 @@ function inTenths(tenths: bigint, suffix: string): string {
   return `$${tenths / 10n}${fraction === 0n ? "" : `.${fraction}`}${suffix}`;
 }
 
+// To tenths of a unit of `size` dollars, half up.
+function roundedTenths(baseUnits: bigint, size: bigint): bigint {
+  const unit = size * UNIT;
+  return (baseUnits * 10n + unit / 2n) / unit;
+}
+
+// Rounds once, from the exact amount, so $1,449,999.6 reads $1.4M. A unit that rounds to 1000 gives
+// way to the next. The pipeline's format_dollars rounds to dollars first, so at such an amount the
+// verdict's own text can read a tenth higher.
 function compactDollars(baseUnits: bigint): string {
-  // The same steps as the pipeline's format_dollars, so a figure here and in the verdict's own
-  // text can't round apart. Half up, and a unit that rounds to 1000 gives way to the next.
   const dollars = (baseUnits + UNIT / 2n) / UNIT;
   if (dollars < 1_000n) return `$${dollars}`;
   for (const [size, suffix] of [
     [1_000n, "K"],
     [1_000_000n, "M"],
   ] as const) {
-    const tenths = (dollars * 10n + size / 2n) / size;
+    const tenths = roundedTenths(baseUnits, size);
     if (tenths < 10_000n) return inTenths(tenths, suffix);
   }
-  return inTenths((dollars * 10n + 500_000_000n) / 1_000_000_000n, "B");
+  return inTenths(roundedTenths(baseUnits, 1_000_000_000n), "B");
 }
 
 function signed(value: bigint, format: (magnitude: bigint) => string): string {

@@ -112,7 +112,7 @@ export function allChainJourney(rows: JourneyRow[]): AllChainJourney | null {
   return { ...amounts, chains: newest.map((row) => row.chain), asOf };
 }
 
-// Sums the named fields only for days every included chain has with a value, so a series never dips
+// Sums the named fields of the named chains, only for days every one of them has with a value, so a series never dips
 // where one chain's history starts late or ends early. `chains` is passed rather than read from the
 // rows, so a chain with no rows at all gives an empty series and not a false one.
 export function allChainSeries<
@@ -120,7 +120,9 @@ export function allChainSeries<
   Field extends keyof Row & string,
 >(rows: Row[], chains: ChainName[], fields: readonly Field[]) {
   const byDay = new Map<string, Row[]>();
-  for (const row of rows) byDay.set(row.day, [...(byDay.get(row.day) ?? []), row]);
+  for (const row of rows) {
+    if (chains.includes(row.chain)) byDay.set(row.day, [...(byDay.get(row.day) ?? []), row]);
+  }
   const series: ({ day: string } & Record<Field, string>)[] = [];
   for (const day of [...byDay.keys()].sort()) {
     const dayRows = byDay.get(day)!;

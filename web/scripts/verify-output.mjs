@@ -58,7 +58,7 @@ function checkEveryPage(page, document, text, problems) {
   if (!/not financial advice/i.test(text)) problems.push(`${page}: no "not financial advice"`);
 }
 
-function checkStateOnPage(page, document, text, expected, problems) {
+function checkStateOnPage(page, document, expected, problems) {
   const root = document.documentElement;
   if (root.dataset.datasetKind !== expected.kind) {
     problems.push(
@@ -87,14 +87,48 @@ function checkStateOnPage(page, document, text, expected, problems) {
       problems.push(`${page}: a card has no "${word}" beside its as-of time`);
     }
   }
-  if (text.includes("Our reading")) problems.push(`${page}: "Our reading" on non-real data`);
 }
 
-function checkMainFrame(page, document, text, expected, problems) {
+// Every page says when its data is out of date. The note is there while fresh too, for the clock.
+function checkFreshnessOnPage(page, document, expected, problems) {
+  const shown = document.documentElement.dataset.freshness;
+  if (shown !== "fresh" && shown !== "stale") {
+    problems.push(`${page}: no freshness on the page root`);
+  } else if (expected.freshness === "stale" && shown !== "stale") {
+    problems.push(`${page}: page root says fresh, dataset is stale`);
+  }
+  const note = document.querySelector("[data-stale-note]")?.textContent ?? "";
+  if (!note.includes(expected.asOfLine.stale)) problems.push(`${page}: no stale note`);
+}
+
+function checkMainFreshness(page, document, expected, problems) {
+  const shownFresh = document.documentElement.dataset.freshness === "fresh";
+  const verdict = document.querySelector('[data-section="verdict"]')?.textContent ?? "";
+  const trust = document.querySelector('[data-section="trust-strip"]')?.textContent ?? "";
+  if (!verdict.includes(expected.asOfLine.stale)) {
+    problems.push(`${page}: the verdict block has no stale text`);
+  }
+  if (shownFresh && expected.asOfLine.fresh && !verdict.includes(expected.asOfLine.fresh)) {
+    problems.push(`${page}: the verdict block has no fresh text`);
+  }
+  // On sample or preview data the strip's own check, below, covers both.
+  if (expected.frameWord) return;
+  if (!trust.includes(expected.trustLine.stale)) {
+    problems.push(`${page}: the trust strip has no stale text`);
+  }
+  if (shownFresh && expected.trustLine.fresh && !trust.includes(expected.trustLine.fresh)) {
+    problems.push(`${page}: the trust strip has no fresh text`);
+  }
+}
+
+// Only the verdict's chip. The words "Our reading" are fine in an accordion's heading, or in the
+// methodology page's table of what each chip means.
+function checkMainFrame(page, document, expected, problems) {
   const word = expected.frameWord;
   if (!word) return;
-  if (!text.includes(`${word}, not a finding`)) {
-    problems.push(`${page}: no "${word}, not a finding"`);
+  const chip = document.querySelector('[data-section="verdict"] .status-chip[data-kind="opinion"]');
+  if (chip?.textContent.trim() !== `${word}, not a finding`) {
+    problems.push(`${page}: the verdict chip doesn't say "${word}, not a finding"`);
   }
   if (!document.querySelector('[data-section="kpi-row"]')?.textContent.includes(word)) {
     problems.push(`${page}: no "${word}" in the KPI row`);
@@ -196,6 +230,8 @@ function checkEveryFile(path, content, expected, problems) {
   if (content.includes("_RPC_URL")) problems.push(`${path}: holds an RPC variable's name`);
   if (expected.frameWord && content.includes(FRESH_SENTENCE)) {
     problems.push(`${path}: holds "${FRESH_SENTENCE}" on non-real data`);
+  } else if (expected.freshness === "stale" && content.includes(FRESH_SENTENCE)) {
+    problems.push(`${path}: holds "${FRESH_SENTENCE}" on stale data`);
   }
   if (path.endsWith(".css") && CSS_REQUEST.test(content)) {
     problems.push(`${path}: a request to another host from CSS`);
@@ -218,7 +254,8 @@ export function verifyOutput(outDir, expected) {
     const nodes = visibleTextNodes(document);
     const text = nodes.map((node) => node.data).join(" ");
     checkEveryPage(page, document, text, problems);
-    checkStateOnPage(page, document, text, expected, problems);
+    checkStateOnPage(page, document, expected, problems);
+    checkFreshnessOnPage(page, document, expected, problems);
     checkCards(page, document, problems);
     checkLinksAndRequests(page, document, problems);
     if (page === "methodology/index.html") {
@@ -231,7 +268,10 @@ export function verifyOutput(outDir, expected) {
       checkAddresses(page, [html, text], new Set(), problems);
       checkBlockedNames(page, `${html}\n${text}`, expected.blockedNames, problems);
     }
-    if (page === "index.html") checkMainFrame(page, document, text, expected, problems);
+    if (page === "index.html") {
+      checkMainFrame(page, document, expected, problems);
+      checkMainFreshness(page, document, expected, problems);
+    }
   }
   for (const path of files) {
     if (BINARY_EXTENSIONS.has(extname(path))) continue;
@@ -253,11 +293,14 @@ export function expectedFromDataset(location, webRoot = process.cwd(), now = Dat
 }
 
 export function expectedFromFiles(files, placement, webRoot = process.cwd(), now = Date.now()) {
-  const { kind, frameWord } = deriveState(files, placement, now);
+  const { kind, frameWord, freshness, asOfLine, trustLine } = deriveState(files, placement, now);
   const { manifest } = files;
   return {
     kind,
     frameWord,
+    freshness,
+    asOfLine,
+    trustLine,
     version: manifest.dataset_version,
     pipelineStrings: [
       ...manifest.checks.map((check) => check.detail),

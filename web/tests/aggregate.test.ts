@@ -137,6 +137,20 @@ describe("time series", () => {
     ]);
   });
 
+  it("sums only the chains it's given", () => {
+    const series = allChainSeries(rows, ["tempo"], ["total_supply"]);
+    expect(series).toEqual([
+      { day: "2026-11-01", total_supply: "10" },
+      { day: "2026-11-02", total_supply: "20" },
+      { day: "2026-11-03", total_supply: "30" },
+    ]);
+  });
+
+  it("isn't dropped by a null on a chain outside the ones it's given", () => {
+    const held = rows.map((row) => (row.chain === "base" ? { ...row, top10_value: null } : row));
+    expect(allChainSeries(held, ["tempo"], ["top10_value"])).toHaveLength(3);
+  });
+
   it("is empty when an included chain has no rows at all", () => {
     expect(allChainSeries(rows, ["tempo", "solana"], ["total_supply"])).toEqual([]);
   });

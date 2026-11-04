@@ -48,10 +48,11 @@ export function buildSite({
   webRoot = WEB_DIR,
   log = console.log,
   build = nextBuild,
+  now = Date.now,
 }) {
   const { files, placement } = loadDatasetFiles(location, webRoot);
-  const dataset = datasetFrom(files, placement);
-  const expected = expectedFromFiles(files, placement, webRoot);
+  const dataset = datasetFrom(files, placement, now());
+  const expected = expectedFromFiles(files, placement, webRoot, now());
   logWarnings(dataset, log);
   const target = join(webRoot, ".build", name);
   mkdirSync(join(webRoot, ".build"), { recursive: true });
@@ -88,8 +89,8 @@ export function buildRelease({
   // One read, before Next's, for the gate and the check. Pages built from a dataset swapped in since
   // then show another version or kind, and fail against this rather than agreeing with the swap.
   const { files, placement } = loadDatasetFiles(location, webRoot);
-  const dataset = datasetFrom(files, placement);
-  const expected = expectedFromFiles(files, placement, webRoot);
+  const dataset = datasetFrom(files, placement, now());
+  const expected = expectedFromFiles(files, placement, webRoot, now());
   logWarnings(dataset, log);
   refuseUnlessReleasable(dataset, env);
   mkdirSync(releaseRoot, { recursive: true });
@@ -118,11 +119,11 @@ export function buildRelease({
 
 function main() {
   const [argument] = process.argv.slice(2);
-  const location = locateDataset(process.env, WEB_DIR);
-  if (location.origin === "sample-fallback" && existsSync(location.dir)) {
-    console.log("No published dataset was found, so this build uses the sample.");
-  }
   try {
+    const location = locateDataset(process.env, WEB_DIR);
+    if (location.origin === "sample-fallback" && existsSync(location.dir)) {
+      console.log("No published dataset was found, so this build uses the sample.");
+    }
     if (argument === "--release") {
       buildRelease({ location });
     } else {

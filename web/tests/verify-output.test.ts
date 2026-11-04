@@ -12,6 +12,10 @@ const CARD = `<section class="chart-card" data-frame="Sample"><h2>T</h2>
   <p class="chart-card__meta">Source: S · As of <time datetime="2026-11-03">3 Nov</time>
   · <strong>Sample</strong> · <a href="/methodology/#velocity">Definition</a></p></section>`;
 
+const STALE_NOTE = "Data from 4 Nov. Nothing newer has reached this page.";
+const STALE_TRUST = "Last reconciled 4 Nov. Nothing newer has reached this page.";
+const FRESH_TRUST = "Supply reconciled on all 4 chains as of 4 Nov 2026, 05:30 UTC";
+
 const sampleExpected = {
   kind: "sample",
   frameWord: "Sample",
@@ -22,25 +26,42 @@ const sampleExpected = {
   ],
   blockedNames: BLOCKED,
   tokenContracts: TOKEN_CONTRACTS,
+  freshness: "stale",
+  asOfLine: { fresh: null, stale: STALE_NOTE },
+  trustLine: { fresh: "Not reconciled", stale: "Not reconciled" },
 };
 
-const realExpected = { ...sampleExpected, kind: "real", frameWord: null };
+const realExpected = {
+  ...sampleExpected,
+  kind: "real",
+  frameWord: null,
+  trustLine: { fresh: null, stale: STALE_TRUST },
+};
+
+const freshRealExpected = {
+  ...realExpected,
+  freshness: "fresh",
+  asOfLine: { fresh: "Data as of 3 Nov 2026 UTC.", stale: STALE_NOTE },
+  trustLine: { fresh: FRESH_TRUST, stale: STALE_TRUST },
+};
 
 function page(
   body: string,
-  attrs = 'data-dataset-kind="sample" data-dataset-version="20261104T060000Z" data-frame="Sample"',
+  attrs = 'data-dataset-kind="sample" data-dataset-version="20261104T060000Z" data-frame="Sample" data-freshness="stale"',
   title = "[Sample] Open USD Monitor",
   head = '<meta name="robots" content="noindex, nofollow"/>',
 ) {
   return `<!doctype html><html ${attrs}><head><title>${title}</title>${head}</head><body>
     <header><p>${LINE}</p></header>
     <aside data-dataset-banner>Sample data. Nothing here is real.</aside>
+    <p data-stale-note>${STALE_NOTE}</p>
     ${body}
     <footer><p>${LINE}</p><p>Not financial advice.</p>
     <a href="https://example.com/r" rel="noopener noreferrer">Reports</a></footer></body></html>`;
 }
 
-const MAIN = `<main><section data-section="verdict"><span>Sample, not a finding</span></section>
+const MAIN = `<main><section data-section="verdict">
+  <span class="status-chip" data-kind="opinion">Sample, not a finding</span><p>${STALE_NOTE}</p></section>
   <section data-section="kpi-row"><strong>Sample</strong></section>
   <section data-section="trust-strip">Not reconciled</section>${CARD}</main>`;
 
@@ -60,7 +81,12 @@ function mainWith(body: string) {
   return site({ main: page(`${MAIN}${body}`) });
 }
 
-const realAttrs = 'data-dataset-kind="real" data-dataset-version="20261104T060000Z"';
+const realAttrs =
+  'data-dataset-kind="real" data-dataset-version="20261104T060000Z" data-freshness="stale"';
+const REAL_MAIN = `<main><section data-section="verdict"><p>${STALE_NOTE}</p></section>
+  <section data-section="trust-strip">${STALE_TRUST}</section></main>`;
+const FRESH_MAIN = `<main><section data-section="verdict"><p>Data as of 3 Nov 2026 UTC.</p><p>${STALE_NOTE}</p></section>
+  <section data-section="trust-strip">${FRESH_TRUST} ${STALE_TRUST}</section></main>`;
 
 function realPage(body: string) {
   return page(body, realAttrs, "Open USD Monitor", "").replace(
@@ -74,12 +100,19 @@ describe("verifyOutput", () => {
     expect(verifyOutput(site(), sampleExpected)).toEqual([]);
   });
 
-  it("passes a good real site", () => {
+  it("passes a good real site, stale", () => {
     const dir = site({
-      main: realPage("<main>Supply reconciled on all 4 chains as of 4 Nov 2026</main>"),
+      main: realPage(REAL_MAIN),
       methodology: realPage("<main>Methodology</main>"),
     });
     expect(verifyOutput(dir, realExpected)).toEqual([]);
+  });
+
+  it("passes a good real site, fresh", () => {
+    const fresh = (body: string) =>
+      realPage(body).replace('data-freshness="stale"', 'data-freshness="fresh"');
+    const dir = site({ main: fresh(FRESH_MAIN), methodology: fresh("<main>Methodology</main>") });
+    expect(verifyOutput(dir, freshRealExpected)).toEqual([]);
   });
 
   it("fails when a page is missing", () => {
@@ -113,7 +146,7 @@ describe("verifyOutput", () => {
       ["no noindex", (html: string) => html.replace("noindex, nofollow", ""), "no noindex"],
       [
         "no root frame",
-        (html: string) => html.replace(' data-frame="Sample"><head>', "><head>"),
+        (html: string) => html.replace(' data-frame="Sample" data-freshness', " data-freshness"),
         "no Sample frame on the page root",
       ],
       [
@@ -141,7 +174,7 @@ describe("verifyOutput", () => {
       [
         "no opinion swap",
         (html: string) => html.replace("Sample, not a finding", "Our reading"),
-        '"Our reading" on non-real data',
+        'the verdict chip doesn\'t say "Sample, not a finding"',
       ],
       [
         "no word in the KPI row",
@@ -171,7 +204,7 @@ describe("verifyOutput", () => {
 
     it("real output has no frame", () => {
       const dir = site({
-        main: realPage("<main><aside data-dataset-banner>x</aside></main>"),
+        main: realPage(`${REAL_MAIN}<aside data-dataset-banner>x</aside>`),
         methodology: realPage("<main>Methodology</main>"),
       });
       expect(verifyOutput(dir, realExpected)).toContain(
@@ -434,6 +467,112 @@ describe("verifyOutput", () => {
   });
 });
 
+describe('"Our reading" outside the verdict chip', () => {
+  it("is fine in the verdict's accordion heading, on a framed page", () => {
+    const heading = `<main><section data-section="verdict">
+      <span class="status-chip" data-kind="opinion">Sample, not a finding</span>
+      <p>${STALE_NOTE}</p><h3>Our reading</h3></section>
+      <section data-section="kpi-row"><strong>Sample</strong></section>
+      <section data-section="trust-strip">Not reconciled</section></main>`;
+    expect(verifyOutput(site({ main: page(heading) }), sampleExpected)).toEqual([]);
+  });
+
+  it("is fine in the methodology page's chip table, on a framed page", () => {
+    const table = page(
+      "<table><tr><td>Our reading</td><td>An opinion about the facts</td></tr></table>",
+    );
+    expect(verifyOutput(site({ methodology: table }), sampleExpected)).toEqual([]);
+  });
+
+  it("fails when the verdict has no chip at all", () => {
+    const html = page(MAIN).replace(
+      '<span class="status-chip" data-kind="opinion">Sample, not a finding</span>',
+      "<span>Sample, not a finding</span>",
+    );
+    expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
+      'index.html: the verdict chip doesn\'t say "Sample, not a finding"',
+    );
+  });
+});
+
+describe("freshness in the output", () => {
+  const withoutNote = (html: string) => html.replace(`<p data-stale-note>${STALE_NOTE}</p>`, "");
+
+  it("fails when the page root reads fresh on a stale dataset", () => {
+    const html = page(MAIN).replace('data-freshness="stale"', 'data-freshness="fresh"');
+    expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
+      "index.html: page root says fresh, dataset is stale",
+    );
+  });
+
+  it("fails with no freshness on the page root", () => {
+    const html = page(MAIN).replace(' data-freshness="stale"', "");
+    expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
+      "index.html: no freshness on the page root",
+    );
+  });
+
+  it("fails when the stale note is dropped, on any page", () => {
+    const methodology = withoutNote(page("<main>M</main>"));
+    expect(verifyOutput(site({ methodology }), sampleExpected)).toContain(
+      "methodology/index.html: no stale note",
+    );
+    const notFound = site({ extra: [["404.html", withoutNote(page("<p>Not found</p>"))]] });
+    expect(verifyOutput(notFound, sampleExpected)).toContain("404.html: no stale note");
+  });
+
+  it("fails when the verdict block drops its stale text", () => {
+    const html = page(MAIN.replace(`<p>${STALE_NOTE}</p></section>`, "</section>"));
+    expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
+      "index.html: the verdict block has no stale text",
+    );
+  });
+
+  it("fails when the trust strip drops its stale text, on real data", () => {
+    const html = realPage(REAL_MAIN.replace(STALE_TRUST, "Reconciled"));
+    const dir = site({ main: html, methodology: realPage("<main>M</main>") });
+    expect(verifyOutput(dir, realExpected)).toContain(
+      "index.html: the trust strip has no stale text",
+    );
+  });
+
+  it("fails when a fresh page drops the fresh sentence", () => {
+    const fresh = (body: string) =>
+      realPage(body).replace('data-freshness="stale"', 'data-freshness="fresh"');
+    const dir = site({
+      main: fresh(FRESH_MAIN.replace(FRESH_TRUST, "")),
+      methodology: fresh("<main>M</main>"),
+    });
+    expect(verifyOutput(dir, freshRealExpected)).toContain(
+      "index.html: the trust strip has no fresh text",
+    );
+  });
+
+  it("fails on the reconciled sentence on a stale real dataset", () => {
+    const dir = site({
+      main: realPage(REAL_MAIN),
+      methodology: realPage("<main>M</main>"),
+      extra: [["index.txt", `{"a":"${FRESH_TRUST}"}`]],
+    });
+    expect(verifyOutput(dir, realExpected)).toContain(
+      'index.txt: holds "Supply reconciled on all 4 chains" on stale data',
+    );
+  });
+
+  it("takes the words and the state from the dataset", () => {
+    const dir = releaseGrade();
+    editJson(dir, "manifest.json", (manifest) => {
+      manifest.stale = true;
+      manifest.stale_since = "2026-11-04T07:00:00Z";
+      manifest.stale_reason = "a check failed";
+    });
+    const expected = expectedFromDataset(at(dir));
+    expect(expected.freshness).toBe("stale");
+    expect(expected.asOfLine.stale).toContain("A newer run did not pass its checks.");
+    expect(expected.trustLine.fresh).toBeNull();
+  });
+});
+
 describe("the Preview frame", () => {
   const preview = { ...sampleExpected, kind: "preview", frameWord: "Preview" };
 
@@ -441,7 +580,9 @@ describe("the Preview frame", () => {
     const problems = verifyOutput(site(), preview);
     expect(problems).toContain("index.html: page root says sample, dataset is preview");
     expect(problems).toContain("index.html: no [Preview] in the title");
-    expect(problems).toContain('index.html: no "Preview, not a finding"');
+    expect(problems).toContain(
+      'index.html: the verdict chip doesn\'t say "Preview, not a finding"',
+    );
   });
 
   it("passes a good preview site", () => {

@@ -2,7 +2,11 @@ import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FreshnessText, FreshnessWatch } from "@/components/freshness";
 
-const clock = { generatedAt: "2026-11-04T06:00:00Z", freshUntil: "2026-11-05T18:00:00Z" };
+const clock = {
+  generatedAt: "2026-11-04T06:00:00Z",
+  latestAt: "2026-11-04T05:30:00Z",
+  freshUntil: "2026-11-05T18:00:00Z",
+};
 const root = document.documentElement;
 
 describe("the freshness watch", () => {
@@ -57,6 +61,30 @@ describe("the freshness watch", () => {
     vi.setSystemTime("2026-11-04T05:00:00Z");
     render(<FreshnessWatch clock={clock} />);
     expect(root.dataset.freshness).toBe("stale");
+  });
+});
+
+describe("a reconciliation or transfer time ahead of the reader's clock", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    root.dataset.freshness = "fresh";
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete root.dataset.freshness;
+  });
+
+  it("is stale past the skew", () => {
+    vi.setSystemTime("2026-11-04T07:00:00Z");
+    render(<FreshnessWatch clock={{ ...clock, latestAt: "2099-01-01T00:00:00Z" }} />);
+    expect(root.dataset.freshness).toBe("stale");
+  });
+
+  it("stays fresh within the skew", () => {
+    vi.setSystemTime("2026-11-04T07:00:00Z");
+    render(<FreshnessWatch clock={{ ...clock, latestAt: "2026-11-04T07:04:00Z" }} />);
+    expect(root.dataset.freshness).toBe("fresh");
   });
 });
 

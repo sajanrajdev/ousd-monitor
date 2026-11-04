@@ -30,13 +30,22 @@ describe("amounts", () => {
     expect(formatCompact(dollars("12050000000"))).toBe("$12.1B");
   });
 
+  it("rounds once, from the exact amount", () => {
+    expect(formatCompact("1449999600000")).toBe("$1.4M");
+    expect(formatCompact("1450000000000")).toBe("$1.5M");
+    expect(formatCompact("1449999600")).toBe("$1.4K");
+    expect(formatCompact("1449999999600000")).toBe("$1.4B");
+    expect(formatCompact("999400000")).toBe("$999");
+    expect(formatCompact("999600000")).toBe("$1K");
+  });
+
   it("gives way to the next unit rather than printing 1000", () => {
     expect(formatCompact(dollars("999960"))).toBe("$1M");
     expect(formatCompact(dollars("999960000"))).toBe("$1B");
     expect(formatCompact(dollars("999"))).toBe("$999");
   });
 
-  it("agrees with the pipeline's format_dollars on rounding a sub-dollar amount", () => {
+  it("rounds a sub-dollar amount half up", () => {
     expect(formatCompact("1500000")).toBe("$2");
     expect(formatCompact("1499999")).toBe("$1");
   });

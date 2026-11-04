@@ -78,6 +78,57 @@ describe("where the data comes from", () => {
   });
 });
 
+describe("an empty OUSD_DATASET_DIR", () => {
+  it.each(["", "   "])("is set and wrong, not unset: %j", (value) => {
+    expect(() => locateDataset({ OUSD_DATASET_DIR: value })).toThrow(
+      "OUSD_DATASET_DIR: value: is set but empty",
+    );
+  });
+});
+
+describe("one row per chain", () => {
+  it("refuses a chain with no KPI row", () => {
+    const message = editedFailure("summary.json", (payload) => {
+      payload.kpis = payload.kpis.filter((row: Json) => row.chain !== "solana");
+    });
+    expect(message).toBe("summary.json: /kpis: solana is included, and has 0 rows");
+  });
+
+  it("refuses a duplicated KPI row", () => {
+    const message = editedFailure("summary.json", (payload) => {
+      payload.kpis.push(payload.kpis[0]);
+    });
+    expect(message).toBe("summary.json: /kpis: tempo is included, and has 2 rows");
+  });
+
+  it("refuses a KPI row for a chain that isn't included", () => {
+    const message = editedFailure(
+      "summary.json",
+      (payload) => {
+        payload.kpis.push({ ...payload.kpis[0], chain: "base" });
+      },
+      "partial",
+    );
+    expect(message).toBe("summary.json: /kpis: base isn't in chains_included");
+  });
+
+  it("refuses a duplicated chain role", () => {
+    const message = editedFailure("chain_roles.json", (payload) => {
+      payload.data.push(payload.data[0]);
+    });
+    expect(message).toBe("chain_roles.json: /data: base has 2 rows");
+  });
+
+  it.each(["journey.json", "activity.json"])("refuses a duplicated day in %s", (file) => {
+    const message = editedFailure(file, (payload) => {
+      payload.data.push(payload.data[0]);
+    });
+    expect(message).toMatch(
+      new RegExp(`^${file}: /data: base has 2 rows on \\d{4}-\\d{2}-\\d{2}$`),
+    );
+  });
+});
+
 describe("the published path", () => {
   function published() {
     const root = tempDir();
@@ -262,6 +313,24 @@ describe("a bad dataset fails the load, naming the file and field", () => {
       manifest.generated_at = "2026-02-30T00:00:00Z";
     });
     expect(message).toBe("manifest.json: /generated_at: isn't a real time");
+  });
+
+  it.each([
+    ["journey.json", "/data/0/day", (p: Json) => (p.data[0].day = "2026-02-30")],
+    ["activity.json", "/data/0/day", (p: Json) => (p.data[0].day = "2026-04-31")],
+    ["summary.json", "/kpis/0/day", (p: Json) => (p.kpis[0].day = "2026-02-30")],
+    ["summary.json", "/verdict/as_of/base", (p: Json) => (p.verdict.as_of.base = "2026-02-30")],
+    ["chain_roles.json", "/data/0/as_of_day", (p: Json) => (p.data[0].as_of_day = "2026-02-30")],
+    ["labels.json", "/data/0/date_checked", (p: Json) => (p.data[0].date_checked = "2026-02-30")],
+  ])("a day that doesn't exist in %s, at %s", (file, field, change) => {
+    expect(editedFailure(file, change)).toBe(`${file}: ${field}: isn't a real day`);
+  });
+
+  it("a time that doesn't exist in another file", () => {
+    const message = editedFailure("reconciliation.json", (payload) => {
+      payload.data[0].checked_at = "2026-02-30T00:00:00Z";
+    });
+    expect(message).toBe("reconciliation.json: /data/0/checked_at: isn't a real time");
   });
 
   it("invalid JSON, without quoting any of it", () => {
