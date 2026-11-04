@@ -10,7 +10,7 @@ dependencies = ["duckdb>=1.1", "httpx>=0.27"]
 ousd = "ousd.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["mypy>=2.4", "pytest>=8", "ruff>=0.6"]
 
 [build-system]
 requires = ["hatchling"]
@@ -29,3 +29,17 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["pipeline", "tests"]
+# Lets a single-file run find conftest, and ousd from source rather than the installed copy.
+mypy_path = ["pipeline", "tests"]
+# Most tests have no annotations, and mypy skips the bodies of such functions by default.
+check_untyped_defs = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = "ousd.*"
+disallow_untyped_defs = true
+warn_return_any = true

@@ -1,17 +1,22 @@
+from collections.abc import Iterator
+
 import pytest
 from conftest import ALICE, BOB, FakeRpc, make_chain, rows
 from ousd.decode import ZERO_ADDRESS, Transfer
 from ousd.ingest import ReorgError, sync_chain
+from ousd.sources import BlockscoutClient
 
 
-class FakeHistory:
+class FakeHistory(BlockscoutClient):
     """Stands in for Blockscout: old rows, with no block hash, one page per call."""
 
     def __init__(self, transfers: list[Transfer]) -> None:
         self.transfers = transfers
         self.ranges: list[tuple[int, int]] = []
 
-    def pages(self, token, from_block, to_block):
+    def pages(
+        self, token: str, from_block: int, to_block: int
+    ) -> Iterator[tuple[list[Transfer], int]]:
         self.ranges.append((from_block, to_block))
         yield [t for t in self.transfers if from_block <= t.block_number <= to_block], to_block
 
@@ -73,7 +78,7 @@ def test_log_a_lagging_node_missed_is_healed_by_the_lookback(store):
     assert [row[0] for row in rows(store)] == [119]
 
 
-def test_interrupted_backfill_resumes_without_duplicates(store):
+def test_interrupted_backfill_resumes_without_duplicates(store, monkeypatch):
     chain = make_chain()
     rpc = FakeRpc(tip=130)
     rpc.add_transfer(101, 1)
@@ -87,12 +92,12 @@ def test_interrupted_backfill_resumes_without_duplicates(store):
             raise ConnectionError("provider went away")
         return real_transfers(token, low, high)
 
-    rpc.transfers = fail_on_third_range
+    monkeypatch.setattr(rpc, "transfers", fail_on_third_range)
     with pytest.raises(ConnectionError):
         sync_chain(chain, rpc, store)
     assert store.synced_through("testnet") == 119
 
-    rpc.transfers = real_transfers
+    monkeypatch.setattr(rpc, "transfers", real_transfers)
     sync_chain(chain, rpc, store)
 
     assert [row[0] for row in rows(store)] == [101, 125]
@@ -191,7 +196,7 @@ def test_reorg_deeper_than_the_lookback_stops_instead_of_guessing(store):
     assert rows(store) == before
 
 
-def test_block_changing_during_a_sync_aborts_that_range(store):
+def test_block_changing_during_a_sync_aborts_that_range(store, monkeypatch):
     rpc = FakeRpc(tip=120)
     rpc.add_transfer(119, 1)
     real_transfers = rpc.transfers
@@ -201,7 +206,7 @@ def test_block_changing_during_a_sync_aborts_that_range(store):
         rpc.add_transfer(119, 2)
         return real_transfers(token, low, high)
 
-    rpc.transfers = reorg_mid_sync
+    monkeypatch.setattr(rpc, "transfers", reorg_mid_sync)
     with pytest.raises(ReorgError, match="changed during sync"):
         sync_chain(make_chain(start_block=115), rpc, store)
     assert rows(store) == []
@@ -227,7 +232,7 @@ def test_mint_and_burn_addresses_round_trip(store):
 
 
 @pytest.mark.parametrize("new_fork_value", [9, None])
-def test_reorg_between_two_ranges_never_stores_a_mix_of_forks(store, new_fork_value):
+def test_reorg_between_two_ranges_never_stores_a_mix_of_forks(store, new_fork_value, monkeypatch):
     # The hash window (102 to 109) spans two log ranges, and the fork lands between them.
     chain = make_chain(max_log_range=5, reorg_lookback=8)
     rpc = FakeRpc(tip=109, finality_lag=8)
@@ -236,13 +241,13 @@ def test_reorg_between_two_ranges_never_stores_a_mix_of_forks(store, new_fork_va
 
     def reorg_after_first_range(token, low, high):
         result = real_transfers(token, low, high)
-        rpc.transfers = real_transfers
+        monkeypatch.setattr(rpc, "transfers", real_transfers)
         rpc.reorg(from_block=103)
         if new_fork_value is not None:
             rpc.add_transfer(103, new_fork_value)
         return result
 
-    rpc.transfers = reorg_after_first_range
+    monkeypatch.setattr(rpc, "transfers", reorg_after_first_range)
     with pytest.raises(ReorgError, match="does not extend"):
         sync_chain(chain, rpc, store)
 
@@ -266,7 +271,7 @@ def test_history_stops_at_finality_even_if_the_tail_is_short(store):
     assert [(row[0], row[2]) for row in rows(store)] == [(120, rpc.hashes[120])]
 
 
-def test_sync_ends_near_the_tip_after_a_long_history_backfill(store):
+def test_sync_ends_near_the_tip_after_a_long_history_backfill(store, monkeypatch):
     chain = make_chain(rpc_tail_blocks=10)
     rpc = FakeRpc(tip=150)
     history = FakeHistory([])
@@ -276,7 +281,7 @@ def test_sync_ends_near_the_tip_after_a_long_history_backfill(store):
         yield from real_pages(token, low, high)
         rpc.extend(170)  # The chain moved on while history was rate limited.
 
-    history.pages = slow_pages
+    monkeypatch.setattr(history, "pages", slow_pages)
     result = sync_chain(chain, rpc, store, history)
 
     assert history.ranges == [(100, 140)]

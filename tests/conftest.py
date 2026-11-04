@@ -1,12 +1,13 @@
 """Shared test doubles. Nothing in this suite touches the network."""
 
+import dataclasses
 import hashlib
 import socket
 
 import pytest
 from ousd.chains import Chain
 from ousd.decode import ZERO_ADDRESS, Transfer
-from ousd.sources import Block
+from ousd.sources import Block, RpcClient
 from ousd.store import Store
 
 ALICE = "0x" + "a" * 40
@@ -22,20 +23,24 @@ def no_network(monkeypatch):
 
 
 def make_chain(**overrides) -> Chain:
-    settings = {
-        "name": "testnet",
-        "chain_id": 1,
-        "token": "0x" + "c" * 40,
-        "rpc_url": "http://rpc.invalid",
-        "start_block": 100,
-        "max_log_range": 10,
-        "reorg_lookback": 5,
-    }
-    return Chain(**(settings | overrides))
+    chain = Chain(
+        name="testnet",
+        chain_id=1,
+        token="0x" + "c" * 40,
+        rpc_url="http://rpc.invalid",
+        start_block=100,
+        max_log_range=10,
+        reorg_lookback=5,
+    )
+    return dataclasses.replace(chain, **overrides)
 
 
-class FakeRpc:
-    """An in-memory chain with the same surface ingest uses on RpcClient."""
+class FakeRpc(RpcClient):
+    """An in-memory chain with the same surface ingest uses on RpcClient.
+
+    Subclassing lets mypy hold these signatures to the real ones. It never opens a connection:
+    RpcClient.__init__ isn't called, so anything not overridden here fails loudly.
+    """
 
     def __init__(self, tip: int, finality_lag: int = 2, fork: str = "a") -> None:
         self.finality_lag = finality_lag
