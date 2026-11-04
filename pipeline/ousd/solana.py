@@ -25,7 +25,7 @@ from ousd.chains import DECIMALS
 from ousd.decode import ZERO_ADDRESS, Transfer
 from ousd.http import HttpError, PoliteClient
 from ousd.ingest import SyncResult
-from ousd.reconcile import ChainReconciliation
+from ousd.reconcile import ChainReconciliation, Unchecked
 from ousd.sources import _parse
 from ousd.store import Store, StoreConflict
 
@@ -587,17 +587,6 @@ def _refuse_rekey(
                 f"{chain.name}: {tx_hash} is stored at {sorted(positions)} but now decodes to "
                 f"{sorted(new[tx_hash])}. The transaction index moved"
             )
-
-
-@dataclass(frozen=True)
-class Unchecked:
-    """Solana couldn't be checked. Nothing is proven wrong, and nothing is proven right.
-
-    Never a pass, and never written to `reconciliations`. Unit 1.4 moves it to `reconcile.py`.
-    """
-
-    chain: str
-    reason: str
 
 
 class BalanceReading(NamedTuple):
