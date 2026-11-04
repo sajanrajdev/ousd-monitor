@@ -5,3 +5,5 @@ out/
 .shots/
 next-env.d.ts
 pnpm-lock.yaml
+fixtures/
+lib/dataset/types.generated.ts

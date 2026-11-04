@@ -1,0 +1,3 @@
+preview,chain,as_of_day,total_supply,supply_share_bps,placed_share_of_chain_bps,minted_30d,burned_30d,dex_flow_30d,lending_flow_30d,clean_30d,clean_everyday_30d,clean_everyday_share_bps,dex_flow_share_bps,leading_for
+"LOCAL PREVIEW, NOT FOR RELEASE",ethereum,2026-11-03,12000000000000000,9375,7500,9750000000000000,150000000000000,900000000000000,600000000000000,3150000000000000,150000000000000,7692,9375,supply;issuance;everyday;dex_flow;lending_flow
+"LOCAL PREVIEW, NOT FOR RELEASE",tempo,2026-11-03,800000000000000,625,5000,670000000000000,30000000000000,60000000000000,30000000000000,135000000000000,45000000000000,2307,625,

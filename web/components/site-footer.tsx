@@ -8,14 +8,18 @@ export function SiteFooter({ repoUrl = REPO_URL }: { repoUrl?: string }) {
         <p>Not financial advice.</p>
         <p>
           Not an attestation. For the issuer&rsquo;s own figures, see{" "}
-          <a href={BRIDGE_REPORTS_URL} className="underline underline-offset-4">
+          <a
+            href={BRIDGE_REPORTS_URL}
+            rel="noopener noreferrer"
+            className="underline underline-offset-4"
+          >
             Bridge&rsquo;s reports
           </a>
           .
         </p>
         {repoUrl ? (
           <p>
-            <a href={repoUrl} className="underline underline-offset-4">
+            <a href={repoUrl} rel="noopener noreferrer" className="underline underline-offset-4">
               Source code on GitHub
             </a>
           </p>

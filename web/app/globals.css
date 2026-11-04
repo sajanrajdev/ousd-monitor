@@ -216,6 +216,7 @@ h2 {
   }
 
   .hairline-table,
+  .hairline-table caption,
   .hairline-table tbody,
   .hairline-table tr {
     display: block;
@@ -238,4 +239,89 @@ h2 {
     padding: 0.5rem 0;
     border-bottom: 1px solid var(--color-border);
   }
+}
+
+.page-main {
+  display: grid;
+  gap: var(--section-space);
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: 2rem var(--page-margin) 0;
+}
+
+/* The verdict, KPI row and trust strip read as one block, above the fold on a desktop. */
+.first-screen {
+  display: grid;
+  gap: 2rem;
+}
+
+/* The non-real frame. It comes from the data, on every page and every card, and can't be turned
+   off. The banner sits in the flow under the sticky header, so it scrolls away. */
+.dataset-banner {
+  background: var(--surface-inverse);
+  color: var(--color-banner-text);
+  font-size: var(--text-small);
+}
+
+.dataset-banner__inner {
+  display: grid;
+  gap: 0.25rem;
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: 0.75rem var(--page-margin);
+}
+
+/* At least the viewport's height, so the edge runs the full screen on a short page too. */
+html[data-frame] body {
+  position: relative;
+  min-height: 100vh;
+}
+
+html[data-frame] body::before,
+html[data-frame] body::after,
+.chart-card[data-frame]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  background: repeating-linear-gradient(45deg, var(--color-maroon) 0 3px, transparent 3px 7px);
+  pointer-events: none;
+}
+
+html[data-frame] body::before {
+  left: 0;
+  z-index: 20;
+}
+
+html[data-frame] body::after {
+  right: 0;
+  z-index: 20;
+}
+
+.chart-card[data-frame] {
+  position: relative;
+  overflow: hidden;
+}
+
+.chart-card[data-frame]::before {
+  left: 0;
+}
+
+.chart-card__frame-word {
+  font-weight: 650;
+}
+
+/* Fresh and stale text share one cell, so the taller sets the height and nothing shifts. */
+.freshness-text {
+  display: inline-grid;
+}
+
+.freshness-text > * {
+  grid-area: 1 / 1;
+}
+
+html[data-freshness="fresh"] .freshness-text__stale,
+html[data-freshness="stale"] .freshness-text__fresh {
+  visibility: hidden;
 }

@@ -7,11 +7,12 @@
     "node": "^22.12 || ^24"
   },
   "scripts": {
-    "build": "NEXT_TELEMETRY_DISABLED=1 next build",
+    "build": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/build-site.mjs",
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint --max-warnings=0 .",
+    "release": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/build-site.mjs --release",
     "shots": "node scripts/shots.mjs",
     "test": "vitest run",
     "types": "NEXT_TELEMETRY_DISABLED=1 next typegen && tsc --noEmit"

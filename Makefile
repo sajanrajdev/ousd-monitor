@@ -1,6 +1,7 @@
 .PHONY: check lint types test build models sync reconcile publish preview run dagster-dev \
 	py-lint py-types py-test py-build \
-	web-tools web-install web-lint web-types web-test web-build web-browser web-shots
+	web-tools web-install web-lint web-types web-test web-samples web-build web-release web-browser \
+	web-shots
 
 # Load .env when it exists, so a keyed provider can replace the public defaults.
 ENV_FILE := $(if $(wildcard .env),--env-file .env)
@@ -9,7 +10,7 @@ ENV_FILE := $(if $(wildcard .env),--env-file .env)
 # skip: without the right Node they fail, because a check that passes silently is worse.
 HAS_WEB := $(wildcard web/package.json)
 
-check: py-lint py-types py-test $(if $(HAS_WEB),web-lint web-types web-test web-build)
+check: py-lint py-types py-test $(if $(HAS_WEB),web-lint web-types web-test web-samples)
 
 lint: py-lint $(if $(HAS_WEB),web-lint)
 
@@ -98,13 +99,23 @@ web-types: web-install
 web-test: web-install
 	$(PNPM) run test
 
+# Both samples, as CI has no data/. Each is built and verified under web/.build/.
+web-samples: web-install
+	OUSD_DATASET_DIR=fixtures/dataset/complete $(PNPM) run build complete
+	OUSD_DATASET_DIR=fixtures/dataset/partial $(PNPM) run build partial
+
+# From OUSD_DATASET_DIR, or else data/published/latest, or else the sample, and the page says which.
 web-build: web-install
 	$(PNPM) run build
+
+# Refuses anything that isn't release grade. web/.release/latest moves only after a verified build.
+web-release: web-install
+	$(PNPM) run release
 
 # An explicit download, and the only one a local screenshot run needs beyond the packages.
 web-browser: web-install
 	$(PNPM) exec playwright install chromium
 
 # Local only. Never called by check.
-web-shots: web-build
+web-shots: web-samples
 	$(PNPM) run shots

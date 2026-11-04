@@ -73,19 +73,34 @@ Each one is listed with its alternatives and cost of change in the PR that adds 
 
 ## Assumptions that may move
 
-`pipeline/ousd/schemas/` wasn't on `origin/dev` when this was written. This plan was aligned with unit 2.8's unmerged work as read on 2026-11-04. **Once merged, its schema files win over this plan and over `docs/plans/2026-11-03-001-insight-models-plan.md`,** which has already moved on several points below. This plan assumes:
+Checked against the merged `pipeline/ousd/schemas/` and `pipeline/ousd/publish.py` by unit 3.1c, on 2026-11-04. **The schema files win over this plan and over `docs/plans/2026-11-03-001-insight-models-plan.md`.**
 
-- JSON Schema draft 2020-12. The loader imports `ajv/dist/2020`. One schema per JSON file: `manifest`, `summary`, `journey`, `activity`, `chain_roles`, `reconciliation`, `labels`. `journey.csv`, `activity.csv` and `chain_roles.csv` are hash-checked, not schema-checked. These ten files are the expected set.
+Held as written:
+
+- JSON Schema draft 2020-12. The loader imports `ajv/dist/2020`. One schema per JSON file: `manifest`, `summary`, `journey`, `activity`, `chain_roles`, `reconciliation`, `labels`. `journey.csv`, `activity.csv` and `chain_roles.csv` are hash-checked, not schema-checked. These ten files are the expected set: `manifest.files` lists the other nine.
 - `data/published/latest` holds real output. Previews go to a separate `preview-not-for-release` folder with its own `latest-preview` pointer, so the default path can't land on one.
 - Every JSON file has `preview`. `dataset_version` starts `preview-` for a preview.
 - `manifest` adds `stale`, `stale_since`, `stale_reason`, `reconciliation`, `warnings`, `coverage.last_transfer_at`, `coverage.chains_without_issuer_row` and `definitions.velocity`. Check status is `passed` or `skipped` only, so a failed check can't be in a published manifest.
 - The seven check names: `chain_supply`, `cross_chain_supply`, `sampled_balances`, `dbt_tests`, `volume_waterfall`, `reconciliation_gate`, `freshness`.
-- `summary` has `notice`, `verdict`, `known_limits` and `kpis`. `verdict` has `state`, `scope`, `as_of`, `text`, `facts`, `estimates` and `opinions`. States are `mostly_placed`, `moving`, `mixed` and `no_clear_statement`.
-- `labels` has rows without addresses (`chain`, `entity`, `category`, `source_type`, `source_url`, `confidence`, `date_checked`), plus `source_legend` parsed from `labels/README.md`, and `issuer_coverage`.
+- `summary` has `notice`, `verdict`, `known_limits` and `kpis`. `verdict` has `state`, `scope`, `as_of`, `text`, `facts`, `estimates` and `opinions`. States are `mostly_placed`, `moving`, `mixed` and `no_clear_statement`. So 3.2's sentences stand.
+- `labels` has rows without addresses (`chain`, `entity`, `category`, `source_type`, `source_url`, `confidence`, `date_checked`), plus `source_legend` parsed from `labels/README.md`, and `issuer_coverage`. The legend's shape stands, so 3.4 stands on that.
 - `reconciliation` has `latest_run`, and rows with `in_latest_run`. `journey` has `issuer_labeled`.
-- Row fields otherwise follow the marts, with `day_utc` renamed `day`.
+- Row fields otherwise follow the marts, with `day_utc` renamed `day`. Chain roles keep `as_of_day`.
 
-Unit 3.1c starts only after 2.8 merges. It updates this list if anything moved. If verdict states, limits or the legend moved, it also updates 3.2 and 3.4 before the fan-out starts. No other unit reads a raw field name, because 3.1c's typed loader sits in between.
+Moved:
+
+- **A duplicated check can't reach the state step.** The schema gives each of the seven positions its own `const` name, in a fixed order, so a duplicate fails the load in every build. It was listed under "accepted by the schema". 3.1c tests it as a load failure, and still checks each name once in release grade.
+- **`in_latest_run` isn't null on chain rows.** Publish sets it on every row, comparing each row's `run_id` with the latest run. The schema still allows null. Release grade keeps the plan's rule: chain rows by `run_id`, Bridge by `in_latest_run`.
+- **`labels.data` holds named rows only, and `source_type` has no `derived_rule` there.** Unnamed clusters arrive only as `unnamed_clusters` (`rule_reference`, one `rule`, and `counts` by chain and category). For 3.4: "`derived_rule` rows" means those counts, the rule text comes from that one field, and a non-`https` source can't reach the page, because the schema requires `https://` with no query or fragment. `labels` also has `chains_without_issuer_row`, a copy of the manifest's.
+- **`journey` has no `circulating_supply`.** It's in `activity` and `kpis`, as total minus issuer inventory minus placed. For 3.3a: take the step line's circulating series from `activity`, whose days run from Day 0, so limit it to `journey_first_day`.
+- **`issuer_labeled` is on `kpis` too,** and in `issuer_coverage`, where it's null for a chain with no journey rows. A chain can be `issuer_labeled` true through route wallets alone and still have no `issuer` row.
+- **`activity`'s KPI columns can be null on a row,** on a day that ends with no supply. Its volume columns never are.
+- **`summary.notice` is the independence line, a `const`.** `manifest.notice` is the preview notice, and is null on real data.
+- **`manifest.stale` can't be true on a preview.** The schema forbids it, so a preview only goes stale by the clock.
+- **`verdict.text` starts "Local preview, not a finding." on a preview, or whenever a check is skipped,** and `facts` is empty there, with the figures under `estimates`. In `no_clear_statement` all three lists are empty, in any dataset. For 3.2: the partial sample shows this, and any empty group hides, not only `opinions`.
+- **The legend names a real entity.** `reading_a_label` is copied from `labels/README.md` and mentions the 0x Settler labels, so even the samples carry that name. For 3.4: wrap the rendered legend in an element with `data-source-legend`, which `verify-output` allows alongside `data-labels-table`, or the methodology check will fail on it. Everything else a sample names is invented.
+
+No verdict state, limit id or legend field moved, so 3.2 and 3.4 start as planned. No other unit reads a raw field name, because 3.1c's typed loader sits in between.
 
 **A gap in the schema:** the brainstorm asks for Bridge's small-ticket issuance as its own line beside the waterfall, and dataset v1 has no field for it. Because the verdict says supply sits still, leaving this out silently would be one-sided. So view B and the methodology page both state, as a dated fact from the brainstorm, that issuer flows exclude this activity, that it was 4.07M in 2,441 transfers to 237 recipients in the week of October 26, against 3.13M of Tempo everyday volume, and that its cause is unproven. Showing it live needs a mart column and a schema change, so that's deferred.
 

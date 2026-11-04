@@ -10,8 +10,14 @@ const WEB_DIR = fileURLToPath(new URL("..", import.meta.url));
 const OUTPUT_DIR = join(WEB_DIR, ".shots");
 const WIDTHS = [320, 390, 768, 1056, 1440];
 const HEIGHT = 900;
-const STATES = [{ name: "placeholder", dir: join(WEB_DIR, "out") }];
-const PAGES = [{ name: "home", path: "/" }];
+const STATES = ["complete", "partial"].map((name) => ({
+  name,
+  dir: join(WEB_DIR, ".build", name),
+}));
+const PAGES = [
+  { name: "home", path: "/" },
+  { name: "methodology", path: "/methodology/" },
+];
 const CONTENT_TYPES = {
   ".css": "text/css",
   ".html": "text/html",
@@ -65,8 +71,15 @@ try {
         await tab.goto(origin + page.path, { waitUntil: "networkidle" });
         const name = `${page.name}-${state.name}-${width}.png`;
         await tab.screenshot({ path: join(OUTPUT_DIR, name), fullPage: true });
-        await tab.close();
         console.log(`.shots/${name}`);
+        // One card cropped alone, as it has to read as not real without the page around it.
+        const card = tab.locator(".chart-card").first();
+        if ((await card.count()) > 0) {
+          const cardName = `card-${state.name}-${width}.png`;
+          await card.screenshot({ path: join(OUTPUT_DIR, cardName) });
+          console.log(`.shots/${cardName}`);
+        }
+        await tab.close();
       }
     }
     server.close();

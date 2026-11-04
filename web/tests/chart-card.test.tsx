@@ -23,6 +23,7 @@ const props: ChartCardProps = {
   source: "Sample data",
   asOf: "2026-11-04T14:05:00Z",
   definitionHref: "/methodology#supply",
+  frameWord: null,
   summary: "Ethereum holds 600 million and Base holds 400 million.",
   table,
   children: <svg data-testid="graphic" />,

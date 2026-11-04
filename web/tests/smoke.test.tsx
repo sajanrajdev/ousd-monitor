@@ -8,10 +8,8 @@ describe("the test setup", () => {
   it("renders a component in the DOM", () => {
     render(<Home />);
 
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Open USD Monitor");
-    expect(
-      screen.getByText("Independent. Not affiliated with Open Standard or Bridge."),
-    ).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Not enough data yet");
+    expect(screen.getByText(/Is that turning into money that moves\?/)).toBeTruthy();
   });
 
   it("refuses the network", () => {
