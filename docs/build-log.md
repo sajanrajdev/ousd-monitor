@@ -21,7 +21,25 @@ Honest notes on what went wrong and what the data taught us. Newest phase last.
 
 **A paging test that was wrong.** One test asserted that a full page in a single block returned nothing. That case actually raises an error, as intended. The test was rewritten to cover what its name promised: a page ending exactly on a block boundary.
 
-**One unexplained stall.** The very first Ethereum run stopped writing after about 2 minutes and sat idle for about 27 minutes until it was killed. Its output was buffered through `tail`, so there is no log of why. It may have been a slow read that never reached the per-read timeout. It has not recurred. There is no overall deadline per request, so it could happen again.
+**One unexplained stall, still unproven.** The very first Ethereum run stopped writing after about 2 minutes and sat idle for about 27 minutes until it was killed. Its output was buffered through `tail`, so there is no log of why, and the cause can't now be established. There are two candidates. One is a slow read, since the 60 second timeout only limits the gap between bytes. The other is a rate limit wait: 27 minutes is inside Blockscout's 22 to 36 minute reset, and the earliest committed client could already wait up to 30 minutes on a 429. Its warning would have sat in the same buffer. Both are now closed off. Each attempt has a 120 second deadline, tested against a real trickling socket, and every pause of 5 seconds or more logs its length. A silent gap now means a real hang. Don't pipe a long run through `tail`.
+
+**A review of this code found bugs the tests had missed.** Each now has a test.
+
+- **A reorg between two log ranges broke repair.** Repair assumes a stored hash commits to its ancestors, but hashes were stored one at a time with no link between them. When a fork landed between two ranges, the newest hash still matched, so repair saw nothing wrong. On the old code, if the new fork had a transfer in that block, every later sync failed with "changed during sync; rerun", forever. If it had none, a transfer that no longer existed stayed stored with no error. A new block must now extend the stored block below it.
+- **Healing missed logs depended on timing.** The re-read only covered blocks near the current tip. Tempo's window is 16 blocks, so a log missed by a lagging node was lost for good unless the next run started within seconds. If it wasn't a mint or burn, reconciliation would never notice. Each run now re-reads the newest blocks below the cursor.
+- **A short Blockscout page ended the range.** If the server's limit were ever below 1,000, everything after the first page would have been skipped and marked complete. A range now ends only on a response with nothing past its first block, at the cost of one extra request. Pages out of order or out of range now raise an error.
+- **Blockscout could serve unfinalized blocks.** With finality stalled deeper than the 2,000 block tail, rows with no hash could land above finality. History now stops at finality.
+- **A conflicting row was silently dropped.** `ON CONFLICT DO NOTHING` also hid a different row at the same position. It now raises. This adds about 15 ms per 20,000 rows at 2M stored rows.
+- **Smaller ones.** A Bridge total given as a JSON number or with too many decimals was silently truncated, and now raises. Nothing checked `chain_id`, so a mispasted RPC URL looked like a quiet chain. Logs from another contract weren't rejected locally. Provider URLs reached logs, errors and `repr(Chain)`. A rate limit hint outlived its response and could repeat a long wait after an unrelated failure. A node lagging behind every stored block got advice to rebuild the database, which costs hours. `--chain tempo` listed Ethereum as neither checked nor missing. A sync after a long backfill finished hours behind the tip, too old for reconciliation on public nodes.
+
+**More commits that failed the check.** Three commits in this review (`793eae1`, `5214ec1`, `1c75e51`) went in with one test failing, because the command was `make check | tail && git commit`, and a pipeline's exit status is `tail`'s. This is the same mistake as the earlier lint failure. The test had pinned the old request sequence, and the next commit updated it. Those three don't pass on their own. Run the check without a pipe when a commit depends on it.
+
+**Decisions from the review.**
+
+- The key stays chain, block and log index, though `docs/architecture.md` says chain, transaction and log index. They identify the same rows on one EVM chain, and changing it means rebuilding a table in a live database for no gain on these two chains. Revisit with Solana.
+- `make reconcile` can still exit 0 with chains unchecked, and the README says so. Deciding what counts as a full pass belongs to the cross-chain reconciliation unit, and nothing publishes before that.
+
+**Known gaps.** A Blockscout index that lags more than the 2,000 block tail would return "No logs found" for blocks that have logs, and the cursor would pass them. Reconciliation catches this for mints and burns, not ordinary transfers, so the sampled balance check must stay blocking. Whether Blockscout and RPC report the same `logIndex` for a block hasn't been checked. If they differ, a re-read across the boundary would store duplicates at new positions.
 
 ### What we learned
 
