@@ -1,7 +1,7 @@
 """Clients for the upstream data sources: JSON-RPC, Blockscout and Bridge."""
 
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from decimal import Decimal, localcontext
 from typing import Any, NamedTuple
@@ -63,6 +63,31 @@ class BridgeSnapshot(NamedTuple):
 class RpcError(RuntimeError):
     """The node answered with a JSON-RPC error."""
 
+    def __init__(self, message: str, too_many_results: bool = False) -> None:
+        super().__init__(message)
+        self.too_many_results = too_many_results
+
+
+# What reading a provider's data raises when a field is missing, mistyped or not a number.
+_MALFORMED = (ValueError, KeyError, TypeError, AttributeError, IndexError, ArithmeticError)
+# Longest stretch of a provider's reply kept in an error, after scrubbing. A whole log has to fit,
+# because its tx hash, block and data come after the topics.
+_DETAIL_LIMIT = 2000
+
+
+def _parse[T](http: PoliteClient, url: str, what: str, read: Callable[[], T]) -> T:
+    """Run read() over provider data. A failure becomes a ValueError with the URL scrubbed.
+
+    Python's own messages quote the offending value, and a provider may have put the key there.
+    The new error is raised after the handler has exited, so it has no cause or context.
+    """
+    failure = ""
+    try:
+        return read()
+    except _MALFORMED as exc:
+        failure = repr(exc)
+    raise ValueError(http.scrub(f"malformed {what}: {failure}", url)[:_DETAIL_LIMIT])
+
 
 class RpcClient:
     def __init__(self, http: PoliteClient, url: str) -> None:
@@ -72,22 +97,34 @@ class RpcClient:
     def _call(self, method: str, params: list[Any]) -> Any:
         payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         body = self._http.request_json("POST", self._url, json=payload)
-        if "error" in body:
-            raise RpcError(f"{method} {params}: {body['error']}")
-        return body["result"]
+        if self._parse(f"{method} response", lambda: "error" in body):
+            error = self._parse(f"{method} response", lambda: body["error"])
+            # Decided on the raw text: scrubbing rewrites it when a host or path is a word in it.
+            capped = TOO_MANY_RESULTS in str(error)
+            raise RpcError(self._http.scrub(f"{method} {params}: {error}", self._url), capped)
+        return self._parse(f"{method} response", lambda: body["result"])
+
+    def _parse[T](self, what: str, read: Callable[[], T]) -> T:
+        return _parse(self._http, self._url, what, read)
 
     def chain_id(self) -> int:
-        return int(self._call("eth_chainId", []), 16)
+        result = self._call("eth_chainId", [])
+        return self._parse("eth_chainId result", lambda: int(result, 16))
 
     def tip(self) -> int:
-        return int(self._call("eth_blockNumber", []), 16)
+        result = self._call("eth_blockNumber", [])
+        return self._parse("eth_blockNumber result", lambda: int(result, 16))
 
     def finalized(self) -> int:
-        return int(self._call("eth_getBlockByNumber", ["finalized", False])["number"], 16)
+        block = self._call("eth_getBlockByNumber", ["finalized", False])
+        return self._parse("finalized block", lambda: int(block["number"], 16))
 
     def block(self, number: int) -> Block | None:
         block = self._call("eth_getBlockByNumber", [hex(number), False])
-        return Block(block["hash"].lower(), block["parentHash"].lower()) if block else None
+        return self._parse(
+            f"block {number}",
+            lambda: Block(block["hash"].lower(), block["parentHash"].lower()) if block else None,
+        )
 
     def transfers(self, token: str, from_block: int, to_block: int) -> list[Transfer]:
         query = {
@@ -99,13 +136,16 @@ class RpcClient:
         try:
             logs = self._call("eth_getLogs", [query])
         except RpcError as exc:
-            if TOO_MANY_RESULTS not in str(exc) or from_block == to_block:
+            if not exc.too_many_results or from_block == to_block:
                 raise
             middle = (from_block + to_block) // 2
             return self.transfers(token, from_block, middle) + self.transfers(
                 token, middle + 1, to_block
             )
-        return [decode_rpc_log(entry, token) for entry in logs if not entry.get("removed")]
+        return self._parse(
+            "eth_getLogs result",
+            lambda: [decode_rpc_log(entry, token) for entry in logs if not entry.get("removed")],
+        )
 
     def total_supply(self, token: str, block: int | str) -> int:
         """Read totalSupply() at a block number, or at a block hash (EIP-1898).
@@ -113,7 +153,8 @@ class RpcClient:
         A hash pins the read to one fork, so it cannot land on a competing block.
         """
         at = hex(block) if isinstance(block, int) else {"blockHash": block}
-        return int(self._call("eth_call", [{"to": token, "data": TOTAL_SUPPLY_SELECTOR}, at]), 16)
+        result = self._call("eth_call", [{"to": token, "data": TOTAL_SUPPLY_SELECTOR}, at])
+        return self._parse("totalSupply result", lambda: int(result, 16))
 
     def balance_of(self, token: str, address: str, block: int | str) -> int:
         """Read balanceOf(address) at a block number, or at a block hash (EIP-1898)."""
@@ -121,13 +162,14 @@ class RpcClient:
             raise ValueError(f"not an address: {address!r}")
         data = BALANCE_OF_SELECTOR + address[2:].lower().rjust(64, "0")
         at = hex(block) if isinstance(block, int) else {"blockHash": block}
-        return int(self._call("eth_call", [{"to": token, "data": data}, at]), 16)
+        result = self._call("eth_call", [{"to": token, "data": data}, at])
+        return self._parse("balanceOf result", lambda: int(result, 16))
 
     def block_timestamp(self, number: int) -> int:
         block = self._call("eth_getBlockByNumber", [hex(number), False])
         if not block:
             raise RpcError(f"block {number} not found")
-        return int(block["timestamp"], 16)
+        return self._parse(f"block {number}", lambda: int(block["timestamp"], 16))
 
     def transaction_receipt(self, tx_hash: str, token: str) -> TransactionProof | None:
         """The token's Transfer logs in one transaction, or None if the node doesn't know it."""
@@ -135,7 +177,8 @@ class RpcClient:
         receipt = self._call("eth_getTransactionReceipt", [tx_hash])
         if receipt is None:
             return None
-        try:
+
+        def read() -> TransactionProof:
             if receipt["transactionHash"].lower() != tx_hash:
                 raise ValueError(f"receipt for {receipt['transactionHash']}, asked for {tx_hash}")
             status = receipt.get("status")
@@ -154,8 +197,8 @@ class RpcClient:
                 None if status is None else int(status, 16) == 1,
                 transfers,
             )
-        except (KeyError, TypeError, AttributeError) as exc:
-            raise ValueError(f"malformed receipt for {tx_hash}: {exc!r}") from exc
+
+        return self._parse(f"receipt for {tx_hash}", read)
 
 
 def _check_tx_hash(tx_hash: str) -> None:
@@ -201,11 +244,31 @@ class BlockscoutClient:
             "topic0": TRANSFER_TOPIC,
         }
         body = self._http.request_json("GET", self._url, params=params)
-        if body["status"] != "1":
-            if body["message"].startswith("No logs found"):
+        if self._parse("response", lambda: body["status"]) != "1":
+            if self._parse("response", lambda: body["message"].startswith("No logs found")):
                 return []
-            raise RuntimeError(f"Blockscout error for {params}: {body}")
-        return [decode_blockscout_log(entry, token) for entry in body["result"]]
+            raise RuntimeError(
+                self._http.scrub(f"Blockscout error for {params}: {body}", self._url)[
+                    :_DETAIL_LIMIT
+                ]
+            )
+        return self._parse(
+            "logs result", lambda: [decode_blockscout_log(entry, token) for entry in body["result"]]
+        )
+
+    def _parse[T](self, what: str, read: Callable[[], T]) -> T:
+        return _parse(self._http, self._url, what, read)
+
+    def _logs_url(self, tx_hash: str) -> httpx.URL:
+        invalid = False
+        try:
+            base = httpx.URL(self._url)
+            return base.copy_with(path=f"{base.path.rstrip('/')}/v2/transactions/{tx_hash}/logs")
+        except httpx.InvalidURL:
+            # Its text can quote part of the URL. Raised below, outside the handler.
+            invalid = True
+        assert invalid
+        raise ValueError("invalid Blockscout URL")
 
     def pages(
         self, token: str, from_block: int, to_block: int
@@ -239,15 +302,15 @@ class BlockscoutClient:
         That endpoint reports no status, so the success flag is None.
         """
         _check_tx_hash(tx_hash)
-        base = httpx.URL(self._url)
-        first = base.copy_with(path=f"{base.path.rstrip('/')}/v2/transactions/{tx_hash}/logs")
+        first = self._logs_url(tx_hash)
         url = first
         transfers: list[ProofTransfer] = []
         block_numbers: set[int] = set()
         seen: set[tuple[tuple[str, str], ...]] = set()
         for _ in range(MAX_LOG_PAGES):
             body = self._http.request_json("GET", str(url))
-            try:
+
+            def read_page(body: Any = body) -> tuple[tuple[str, str], ...] | None:
                 for item in body["items"]:
                     if item["transaction_hash"].lower() != tx_hash:
                         raise ValueError(f"log of {item['transaction_hash']}, asked for {tx_hash}")
@@ -263,10 +326,12 @@ class BlockscoutClient:
                         transfers.append(transfer)
                 cursor = body["next_page_params"]
                 if cursor is None:
-                    break
-                query = tuple(sorted((str(key), str(value)) for key, value in cursor.items()))
-            except (KeyError, TypeError, AttributeError) as exc:
-                raise ValueError(f"malformed Blockscout logs for {tx_hash}: {exc!r}") from exc
+                    return None
+                return tuple(sorted((str(key), str(value)) for key, value in cursor.items()))
+
+            query = self._parse(f"logs for {tx_hash}", read_page)
+            if query is None:
+                break
             if not query or query in seen:
                 raise ValueError(f"Blockscout logs for {tx_hash} repeat a page cursor")
             seen.add(query)

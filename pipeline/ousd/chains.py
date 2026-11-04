@@ -1,7 +1,7 @@
 """Per-chain configuration. Base and Solana are added here once their keys exist."""
 
 import os
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 DECIMALS = 6
@@ -10,6 +10,19 @@ DEFAULT_BRIDGE_URL = "https://transparency.bridge.xyz/v0/stablecoins/ousd"
 
 # Every chain that makes up Bridge's total, whether or not it is ingested yet.
 REQUIRED_CHAINS = ("tempo", "ethereum", "base", "solana")
+
+
+# Chains with no public endpoint: the run stops unless the variable holds a provider URL.
+KEYED_RPC_ENV = {"base": "BASE_RPC_URL", "solana": "SOLANA_RPC_URL"}
+
+
+def missing_rpc_keys(names: Iterable[str], env: Mapping[str, str]) -> list[str]:
+    """Variables the named chains need that are unset, empty or blank."""
+    return [
+        variable
+        for name in names
+        if (variable := KEYED_RPC_ENV.get(name)) and not env.get(variable, "").strip()
+    ]
 
 
 @dataclass(frozen=True)
