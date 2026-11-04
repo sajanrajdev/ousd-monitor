@@ -59,7 +59,10 @@ class FakeSolanaRpc(SolanaRpc):
         self.supply = SlotReading(head, 0)
         self.snapshot = BalanceSnapshot(head, {})
         self.times: dict[int, int] = {}
+        # Supply reads answered in turn before falling back to `supply`.
+        self.supply_queue: list[SlotReading] = []
         # Faults. A count is how many times the call fails before it works.
+        self.read_errors: dict[str, Exception] = {}
         self.min_context_failures = 0
         self.min_context_error: dict[str, Any] = load("error_min_context_slot")["error"]
         self.null_for: dict[str, int] = {}
@@ -81,8 +84,13 @@ class FakeSolanaRpc(SolanaRpc):
         self.calls.append("genesis")
         return self.genesis
 
+    def _read(self, call: str) -> None:
+        self.calls.append(call)
+        if call in self.read_errors:
+            raise self.read_errors[call]
+
     def finalized_slot(self) -> int:
-        self.calls.append("slot")
+        self._read("slot")
         return self.head
 
     def signatures(
@@ -117,9 +125,11 @@ class FakeSolanaRpc(SolanaRpc):
         return self.times[slot]
 
     def token_supply(self, mint: str) -> SlotReading:
-        self.calls.append("supply")
-        return self.supply
+        assert mint == OUSD_MINT
+        self._read("supply")
+        return self.supply_queue.pop(0) if self.supply_queue else self.supply
 
     def token_accounts(self, mint: str) -> BalanceSnapshot:
-        self.calls.append("accounts")
+        assert mint == OUSD_MINT
+        self._read("accounts")
         return self.snapshot
