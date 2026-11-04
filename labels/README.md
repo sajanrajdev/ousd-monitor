@@ -31,6 +31,6 @@ Every label has exactly one source type. It tells you what kind of evidence the 
 | `onchain_metadata` | The chain itself records it, such as a verified contract name and its creator | Open the link and read the contract details |
 | `derived_rule` | No source names it. It is an unnamed cluster, found by a written rule applied to the chain's own data | Read the rule at the link, then apply it to the address's transfers |
 
-**Reading a label:** a named label always has a web source you can open. A `derived_rule` label never has a name, because it describes what a wallet does, not who holds it. `confidence` is `medium` when the source leaves a gap, such as a vault page that shows no curator. Tell us if a source no longer supports a label.
+**Reading a label:** a named label always has a web source you can open. A `derived_rule` label never has a name, because it describes what a wallet does, not who holds it. `confidence` is `medium` when the source leaves a gap, such as a vault page that shows no curator, or research that prints only a shortened address. Vault names come from the vault's creator, not from any company the name may suggest, so a name alone doesn't say who runs a vault. Tell us if a source no longer supports a label.
 
 The site and methodology page carry this legend, so keep this section readable on its own.

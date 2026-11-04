@@ -229,7 +229,8 @@ from read_csv('{{ var("labels_path") }}', header = true, all_varchar = true)
 
 | chain | address | entity | category | source_type | confidence |
 |---|---|---|---|---|---|
-| tempo, ethereum, base | `0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8` | Bridge | issuer | explorer_tag on Ethereum; published_research on Tempo and Base | high |
+| ethereum | `0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8` | Bridge | issuer | explorer_tag | high |
+| tempo, base | `0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8` | Bridge | issuer | published_research | medium, until a source gives the full address on these chains |
 | tempo, ethereum | `0x4508a7021dfb7a1afe5ff60169c1778c303389fb` |  | issuer_route | derived_rule | medium |
 | tempo, ethereum | `0x8458377a025da58e9cb547c979d5002c822a05cb` |  | issuer_route | derived_rule | medium |
 | tempo, ethereum | `0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e` |  | issuer_route | derived_rule | medium |
@@ -244,7 +245,7 @@ from read_csv('{{ var("labels_path") }}', header = true, all_varchar = true)
 | ethereum | `0x000000000004444c5dc75cb358380d2e3de08a90` | Uniswap v4 PoolManager | dex | project_docs | high |
 | base | `0x498581ff718922c3f8e6a244956af099b2652b2b` | Uniswap v4 PoolManager | dex | project_docs | high |
 | tempo | `0x0d136e26b4d9e4836fc5cb202baeb49cb6f5df48` | Sentora OUSD Main | lending | project_docs | high |
-| tempo | `0xb86b3ccce82f6cb767c45afb9fb032ae5fde3592` | Tempo Earn | lending | project_docs | medium |
+| tempo | `0xb86b3ccce82f6cb767c45afb9fb032ae5fde3592` | Tempo Earn (Morpho vault) | lending | project_docs | medium |
 | ethereum | `0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43` | Coinbase | exchange | explorer_tag | high |
 
 **Further rows:** any public contract, entity or address may be added when a public source ties the name to the address. Neutral wording only, never a private individual, and an ambiguous source means leave it out.
