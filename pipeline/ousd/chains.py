@@ -41,7 +41,9 @@ def load_chains(env: Mapping[str, str] = os.environ) -> dict[str, Chain]:
             token="0x20c0000000000000000000006a37da5c996874be",
             rpc_url=env.get("TEMPO_RPC_URL", "https://rpc.tempo.xyz"),
             start_block=15_844_819,
-            max_log_range=100_000,
+            # The RPC allows 100,000, but Cloudflare often returns 502 once a response nears
+            # 5 MB. At 20,000 blocks responses stay near 3 MB. See docs/build-log.md.
+            max_log_range=20_000,
             # Tempo's finalized block equals its tip, so this is only a safety margin.
             reorg_lookback=16,
         ),
