@@ -143,7 +143,19 @@ inner join {{ ref('stg_transfers') }} as t on t.chain = s.chain
 group by s.chain, s.synced_through
 ```
 
-`stg_labels` is in unit 2.3. `bridge_comparisons` is created by unit 2.8. Until then, add its `CREATE TABLE IF NOT EXISTS` to `store.py` in this unit, since the source must exist for `mart_reconciliation`. The statement is in unit 2.8.
+`stg_labels` is in unit 2.3. `bridge_comparisons` is created by unit 1.4, with a nullable `run_id` added. Until it lands, add this `CREATE TABLE IF NOT EXISTS` to `store.py` in this unit, since the source must exist for `mart_reconciliation`. Unit 1.4's `ALTER TABLE ... ADD COLUMN IF NOT EXISTS run_id` upgrades it whichever lands first.
+
+```sql
+CREATE TABLE IF NOT EXISTS bridge_comparisons (
+    checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    chains_included VARCHAR NOT NULL,
+    chains_missing VARCHAR NOT NULL,
+    chains_total HUGEINT NOT NULL,
+    bridge_total HUGEINT NOT NULL,
+    tolerance HUGEINT NOT NULL,
+    passed BOOLEAN NOT NULL
+);
+```
 
 `_staging.yml` declares column tests:
 - `stg_transfers`: `not_null` on `chain`, `block_number`, `log_index`, `block_timestamp`, `day_utc`, `tx_hash`, `from_address`, `to_address`, `value`. **Not** on `block_hash`, because Blockscout rows have none (all 27,919 Ethereum rows today). `accepted_values` on `chain`: `tempo`, `ethereum`, `base`, `solana`.
@@ -235,7 +247,7 @@ from read_csv('{{ var("labels_path") }}', header = true, all_varchar = true)
 
 **Do not add** Wintermute, Coinbase Prime, the Coinbase custody addresses or any other wallet that lacks a source tying the name to the address. See the brainstorm.
 
-**When Base and Solana land, in the same change as units 1.2 and 1.3:**
+**When Base and Solana land, in the same change as units 2.3, 2.4 and 2.5:**
 - Add the Base and Solana redemption route with rows found by rule: wallets on the fixed path from the hub into burns.
 - Add Solana's mint recipient as an `issuer` row only if a source names the address. If not, use `issuer_route`, so its balance is still inventory.
 - Add Orca's pool, with a source.
@@ -897,24 +909,15 @@ where rn = 1
 
 ## Unit 2.8: checks, publish step and dataset schema
 
-**Delivers:** the six blocking checks as plain functions, and a publish step that refuses to run unless they all passed. Works without Dagster.
+**Delivers:** the seven blocking checks as plain functions, and a publish step that refuses to run unless they all passed. Works without Dagster.
 
 **Paths**
 - Create `pipeline/ousd/checks.py`, `pipeline/ousd/publish.py`, `pipeline/ousd/verdict.py`, `pipeline/ousd/schemas/*.schema.json`, `tests/test_checks.py`, `tests/test_publish.py`, `tests/test_verdict.py`.
-- Modify `pipeline/ousd/store.py` (two tables), `pipeline/ousd/sources.py` (`balance_of`), `pipeline/ousd/cli.py` (`check`, `publish`), `pipeline/ousd/chains.py` (`EXPECTED_CHAINS`), `pyproject.toml` (`jsonschema>=4`; package the schema files).
+- Modify `pipeline/ousd/store.py` (`check_results`), `pipeline/ousd/cli.py` (`check`, `publish`), `pyproject.toml` (`jsonschema>=4`; package the schema files).
 
-**Raw table additions, in `store.py`'s `SCHEMA`**
+**Raw table addition, in `store.py`'s `SCHEMA`.** `balance_of` and the `bridge_comparisons` statement aren't added here: unit 1.4 adds them first (`RpcClient.balance_of` and the table), and unit 2.2 can keep its `CREATE TABLE IF NOT EXISTS`.
 
 ```sql
-CREATE TABLE IF NOT EXISTS bridge_comparisons (
-    checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    chains_included VARCHAR NOT NULL,
-    chains_missing VARCHAR NOT NULL,
-    chains_total HUGEINT NOT NULL,
-    bridge_total HUGEINT NOT NULL,
-    tolerance HUGEINT NOT NULL,
-    passed BOOLEAN NOT NULL
-);
 CREATE TABLE IF NOT EXISTS check_results (
     run_id VARCHAR NOT NULL,
     check_name VARCHAR NOT NULL,
@@ -930,31 +933,25 @@ CREATE TABLE IF NOT EXISTS check_results (
 
 | Name | Passes when | Numbers |
 |---|---|---|
-| `chain_supply` | The newest `reconciliations` row for each expected chain has `matched = true`, and its block equals `sync_state.synced_through`, read in the same run | Exact |
-| `cross_chain_supply` | All four chains present, and the sum of `totalSupply` at the tip is within tolerance of Bridge. Up to 3 attempts 10 minutes apart; any pass counts. Writes `bridge_comparisons` | Tolerance is the larger of 0.25% of Bridge's total and 2,000,000 OUSD |
-| `sampled_balances` | For each chain, the running balance from `int_wallet_events` equals `balanceOf` at `synced_through`, for the top 20 wallets by balance plus 30 chosen by a generator seeded with the run date | Exact. |
+| `chain_supply` | The newest `reconciliation_checks` row of `chain_supply` for each required chain has passed, and its block equals `sync_state.synced_through`, read in the same run | Exact |
+| `cross_chain_supply` | All four chains present, and the newest finished run's `bridge` result passed. It doesn't re-read Bridge or retry, because the tip-read rule and its tolerance would be weaker than, and could disagree with, the one recorded | Exact. The recorded `bridge_comparisons` row has tolerance 0 |
+| `sampled_balances` | For each chain, the running balance from `int_wallet_events` equals the `balance_samples` row from that run, at the same block, with no network. This still catches a dbt error, which unit 1.4's own check can't, and needs no second sample | Exact. |
 | `dbt_tests` | `dbt build` exited 0. Dagster's dbt asset passes this, and the CLI reads `dbt/target/run_results.json` | Any failure blocks |
 | `volume_waterfall` | Sum of parts equals headline for every chain and day, read from the mart | Exact. Separately from the dbt test, so it's named in the manifest |
+| `reconciliation_gate` | `Store.latest_reconciliation()` meets the gate rule: the newest finished run has `scope = 'full'` and `status = 'pass'`, and each chain's cursor, pin hash and transfer count still equal what that run recorded. Its own blocking check, because the checks above can pass on `reconciliations.matched` while the run is `fail` or `unchecked`, for example with a group that isn't real | Exact |
 | `freshness` | For each chain, newest transfer within 36 hours, and newest reconciliation within 36 hours | 36 hours, for a daily schedule with room for one retry |
 
-**Why these tolerance numbers:** across Tempo and Ethereum since October 5, hourly net issuance had a median of $121, a 95th percentile of $1.0M, a 99th percentile of $10.0M and a maximum of $40.4M. A live read on 2026-11-04 differed from Bridge by $1,134. So a tight tolerance with retries catches real gaps and rides out a burst. **It's a starting value, so review it after a week of runs.**
+**Where the earlier tolerance came from.** Unit 1.4 replaced it with an exact match, so no amount is allowed now. The measurements stay as a record of how far Bridge's figure moves: across Tempo and Ethereum since October 5, hourly net issuance had a median of $121, a 95th percentile of $1.0M, a 99th percentile of $10.0M and a maximum of $40.4M. A live read on 2026-11-04 differed from Bridge by $1,134.
 
 **The sampled balance check must stay blocking.** The build log records that a lagging Blockscout index can silently skip transfers, and reconciliation only catches that for mints and burns.
 
 **Non-blocking warnings**, in the manifest: day-over-day change above 25% in total, placed or circulating, or above 100% in 7-day everyday volume.
 
-**Partial coverage.** `EXPECTED_CHAINS = ("tempo", "ethereum", "base", "solana")`. With a chain missing, `cross_chain_supply` is `failed` and publish refuses. With `--allow-partial` on the CLI (or `OUSD_ALLOW_PARTIAL=1`), it is `skipped` instead, the other checks run for the chains present, and the manifest says `coverage.complete: false`. This is a local preview for Phase 3 development, **never for a public release**.
+**Partial coverage.** The expected chains are `REQUIRED_CHAINS` in `chains.py`, so there is one list. With a chain missing, `cross_chain_supply` and `reconciliation_gate` are `failed` and publish refuses. With `--allow-partial` on the CLI (or `OUSD_ALLOW_PARTIAL=1`), they are `skipped` instead, the other checks run for the chains present, and the manifest says `coverage.complete: false`. This is a local preview for Phase 3 development, **never for a public release**.
 
 **Interfaces**
 
 ```python
-# sources.py
-class RpcClient:
-    def balance_of(
-        self, token: str, address: str, block: int | str
-    ) -> int: ...  # selector 0x70a08231
-
-
 # checks.py
 @dataclass(frozen=True)
 class CheckResult:
@@ -985,7 +982,7 @@ def publish(
     allow_partial: bool = False,
     now: datetime | None = None,
 ) -> Path:
-    """Read check_results for run_id and refuse unless all six are present and acceptable.
+    """Read check_results for run_id and refuse unless all seven are present and acceptable.
     Write a new dated folder, validate it against the schemas, then repoint `latest`.
     Return the new folder. Never touches `latest` on failure."""
 
@@ -1097,10 +1094,11 @@ Version 1. The Phase 3 site depends on this, and validates it at build. Any brea
 The `mostly_placed` template follows the candidate in the brainstorm: "On {chains}, which hold about {share}% of OUSD, {placed}% of supply has sat still for at least {N} days in wallets of $1M or more, and transfers under $1M moved {everyday} in the last week, {pct}% of supply." Share of OUSD comes from Bridge's total. The 5% threshold is a judgment, and the maintainer reviews all template wording before release.
 
 **Test scenarios (pytest), checks**
+- **Gate:** with `reconciliations` matched but the newest run `fail` or `unchecked` (for example, a same-looking group that isn't real), `reconciliation_gate` fails and publish refuses. A `pass` whose cursor, pin hash or transfer count has since changed also fails. **This must land before any publish code runs on real data.**
 - Each check passes on good data and fails on one tampered value, including a one base unit mismatch for `chain_supply` and `sampled_balances`.
 - `chain_supply` fails if the newest reconciliation is older than `synced_through`.
-- `cross_chain_supply`: within tolerance passes; just outside fails; fails then passes on a retry (fake clock, no real sleeping); a missing chain fails, or is `skipped` with `allow_partial`.
-- `sampled_balances`: a seeded sample is stable for one date. Uses a fake RPC.
+- `cross_chain_supply`: a recorded `pass` passes; `fail` and `unchecked` fail; it makes no Bridge request and never retries; a missing chain fails, or is `skipped` with `allow_partial`.
+- `sampled_balances`: compares against `balance_samples` with no RPC. A tampered model balance by one base unit fails.
 - `freshness`: 35h59m passes, 36h01m fails, on a fake clock.
 - `run_checks` writes one `check_results` row per check. A rerun with the same `run_id` replaces rows.
 - Warnings never block.
@@ -1137,11 +1135,11 @@ Assets, in dependency order:
 | Asset | Calls | Notes |
 |---|---|---|
 | `raw_transfers` | `sync_chain` per chain | Closes `Store` before returning |
-| `chain_reconciliations` | `reconcile_chain` per chain | Runs right after sync, since public nodes only serve recent state |
+| `chain_reconciliations` | `run_reconciliation`, not `reconcile_chain` per chain | Runs right after sync, since public nodes only serve recent state. Raises when `RunResult` isn't `pass`, since a programmatic caller gets no exit code |
 | `dbt_marts` | `dbt build --project-dir dbt --profiles-dir dbt` via `subprocess` | Non-zero exit fails the asset |
 | `published_dataset` | `ousd.publish.publish(context.run_id, ...)` | Refuses by itself if checks didn't pass |
 
-Blocking checks, `@asset_check(asset=dbt_marts, blocking=True)`, one for each of the six names, each calling its function in `checks.py` and writing to `check_results` with `context.run_id`. `published_dataset` depends on `dbt_marts`, so a failed blocking check stops it. `publish` checks `check_results` itself as well, so there are **two independent gates**.
+Blocking checks, `@asset_check(asset=dbt_marts, blocking=True)`, one for each of the seven names, each calling its function in `checks.py` and writing to `check_results` with `context.run_id`. `published_dataset` depends on `dbt_marts`, so a failed blocking check stops it. `publish` checks `check_results` itself as well, so there are **two independent gates**.
 
 - **Job:** `ousd_daily`, `define_asset_job` selecting all assets, with `executor_def=in_process_executor`. **In-process is required,** because DuckDB allows one writer per file and parallel steps would collide.
 - **Schedule:** `ScheduleDefinition(job=..., cron_schedule="0 6 * * *", execution_timezone="UTC")`.
@@ -1155,7 +1153,7 @@ Blocking checks, `@asset_check(asset=dbt_marts, blocking=True)`, one for each of
 **Decision: dbt as one asset.** `dagster-dbt` gives a lineage view per model, but it needs a manifest at load time and more moving parts. dbt already has lineage. Switching later is contained to this file.
 
 **Test scenarios (pytest).** All use `materialize` or `job.execute_in_process` with fakes and no network.
-- `definitions.py` loads, with the job, schedule and six checks, all blocking.
+- `definitions.py` loads, with the job, schedule and seven checks, all blocking.
 - **Happy path:** with fake chain sources and a small fixture, the job runs end to end and `latest` exists.
 - **A failed blocking check** (make `volume_waterfall` return failed): the run reports failure, `published_dataset` doesn't materialize, and `latest` is unchanged. **This test is the done-when for the phase.**
 - **dbt test failure:** a fixture with a negative-balance wallet makes `dbt_marts` fail, and nothing downstream runs.
@@ -1190,6 +1188,6 @@ Blocking checks, `@asset_check(asset=dbt_marts, blocking=True)`, one for each of
 |---|---|
 | dbt can't attach `ousd.duckdb` because something holds the write lock | Fails loudly. Close `Store` before dbt. A sync run outside Dagster will block it, so don't run both |
 | Marts grow slowly as wallets and days multiply | `int_wallet_days` is wallets times days. Today it's small and the whole build takes seconds. If it passes a minute, make it incremental. Not before |
-| Solana shape breaks netting or balances | Its contract is in Prerequisites. Add the tests above with Solana-shaped rows in unit 1.3 |
+| Solana shape breaks netting or balances | Its contract is in Prerequisites. Add the tests above with Solana-shaped rows in units 2.3, 2.4 and 2.5 |
 | A label error changes a published number | Labels are reviewed, and each label is one row. `labels_sha256` in the manifest traces which version was used |
-| `transfers` rows differ across a Blockscout and RPC boundary | Recorded in the build log. `assert_unique_transfer_key` won't catch duplicates at new positions, but `sampled_balances` will catch their effect |
+| `transfers` rows differ across a Blockscout and RPC boundary | Recorded in the build log. `assert_unique_transfer_key` won't catch duplicates at new positions, and `sampled_balances` catches their effect only partly, as a looping duplicate nets to zero. Unit 1.4's U3 and U6 cover that case |
