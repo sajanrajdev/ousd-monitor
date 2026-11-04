@@ -71,33 +71,36 @@ export function WeeklyBars({ weeks, history }: { weeks: Week[]; history: string 
   const values = weeks.map((week) => toChartNumber(week.everyday) ?? 0);
   const max = Math.max(...values, 1);
   return (
-    <figure className="m-0 p-4">
-      <div className="flex items-end gap-2" style={{ height: "10rem" }}>
-        {weeks.map((week, index) => (
-          <div key={week.from} className="flex h-full min-w-0 flex-1 flex-col justify-end">
-            <span className="text-center tabular-nums" style={{ fontSize: "var(--text-meta)" }}>
-              {formatCompact(week.everyday)}
+    <>
+      <GrowArea />
+      <figure data-flow className="m-0 p-4">
+        <div className="flex items-end gap-2" style={{ height: "10rem" }}>
+          {weeks.map((week, index) => (
+            <div key={week.from} className="flex h-full min-w-0 flex-1 flex-col justify-end">
+              <span className="text-center tabular-nums" style={{ fontSize: "var(--text-meta)" }}>
+                {formatCompact(week.everyday)}
+              </span>
+              <span
+                className="block w-full"
+                style={{
+                  height: `${Math.max((values[index] / max) * 100, values[index] > 0 ? 1 : 0)}%`,
+                  background: "var(--meaning-active)",
+                }}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="mt-1 flex gap-2" style={{ fontSize: "var(--text-meta)" }}>
+          {weeks.map((week) => (
+            <span key={week.from} className="min-w-0 flex-1 text-center">
+              {formatUtcDate(week.to).replace(/ UTC$/, "")}
             </span>
-            <span
-              className="block w-full"
-              style={{
-                height: `${Math.max((values[index] / max) * 100, values[index] > 0 ? 1 : 0)}%`,
-                background: "var(--meaning-active)",
-              }}
-            />
-          </div>
-        ))}
-      </div>
-      <div className="mt-1 flex gap-2" style={{ fontSize: "var(--text-meta)" }}>
-        {weeks.map((week) => (
-          <span key={week.from} className="min-w-0 flex-1 text-center">
-            {formatUtcDate(week.to).replace(/ UTC$/, "")}
-          </span>
-        ))}
-      </div>
-      <figcaption className="mt-2" style={{ fontSize: "var(--text-meta)" }}>
-        Weeks end on the date shown, in UTC. {history}.
-      </figcaption>
-    </figure>
+          ))}
+        </div>
+        <figcaption className="mt-2" style={{ fontSize: "var(--text-meta)" }}>
+          Weeks end on the date shown, in UTC. {history}.
+        </figcaption>
+      </figure>
+    </>
   );
 }

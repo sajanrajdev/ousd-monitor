@@ -27,6 +27,7 @@ function ChainCell({ chain }: { chain: ChainRoleRow["chain"] }) {
           height: "0.75rem",
           flex: "none",
           background: SERIES_COLORS[REQUIRED_CHAINS.indexOf(chain)],
+          border: "1px solid var(--color-maroon)",
         }}
       />
       {CHAIN_NAMES[chain]}

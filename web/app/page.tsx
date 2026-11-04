@@ -11,7 +11,7 @@ export default function Home() {
   const { manifest, summary, state } = dataset;
   const { verdict, kpis } = summary;
   return (
-    <main className="page-main">
+    <main id="main-content" className="page-main">
       <div className="first-screen">
         <VerdictBlock verdict={verdict} kpis={kpis} state={state} />
         <KpiRow kpis={kpis} state={state} />

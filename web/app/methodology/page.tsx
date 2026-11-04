@@ -80,7 +80,7 @@ export default function Methodology() {
   const dataset = getDataset();
   const chunks: Chunk[] = loadMethodology();
   return (
-    <main className="page-main">
+    <main id="main-content" className="page-main">
       <div className="max-w-5xl">
         <h1 style={{ fontSize: "var(--text-display)" }}>Methodology</h1>
         <div className="mt-6">

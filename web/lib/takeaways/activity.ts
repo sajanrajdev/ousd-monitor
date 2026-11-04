@@ -1,7 +1,9 @@
 import { floorBps } from "../aggregate.ts";
 import type { ActivityRow, ChainName, KpiRow } from "../dataset/rows.ts";
-import { CHAIN_NAMES } from "../definitions.ts";
+import { CHAIN_NAMES, DAY_ZERO } from "../definitions.ts";
 import { formatBps, formatCompact, formatUtcDate, UNKNOWN_TEXT } from "../format.ts";
+
+const fromDayZero = (rows: ActivityRow[]) => rows.filter((row) => row.day >= DAY_ZERO);
 
 // The mart's order. The last two are what is left: large transfers are split out, not removed.
 export const REMOVAL_FIELDS = [
@@ -46,7 +48,8 @@ function total(rows: ActivityRow[], field: AmountField): bigint {
 // Day 0 through each chain's newest day, summed over the rows given. Null when there is no headline
 // to measure against, or when the parts don't add back up to it: a number that fails the volume
 // check isn't published.
-export function waterfall(rows: ActivityRow[]): Waterfall | null {
+export function waterfall(allRows: ActivityRow[]): Waterfall | null {
+  const rows = fromDayZero(allRows);
   const headline = total(rows, "headline_value");
   if (rows.length === 0 || headline <= 0n) return null;
   const steps: WaterfallStep[] = [
@@ -114,7 +117,8 @@ export type PerChainPeriod = {
 
 const CHAIN_ORDER = Object.keys(CHAIN_NAMES) as ChainName[];
 
-export function perChain(rows: ActivityRow[]): PerChainPeriod[] {
+export function perChain(allRows: ActivityRow[]): PerChainPeriod[] {
+  const rows = fromDayZero(allRows);
   return CHAIN_ORDER.flatMap((chain) => {
     const mine = rows.filter((row) => row.chain === chain);
     if (mine.length === 0) return [];
@@ -124,7 +128,7 @@ export function perChain(rows: ActivityRow[]): PerChainPeriod[] {
 }
 
 export function historyDays(rows: ActivityRow[]): number {
-  return new Set(rows.map((row) => row.day)).size;
+  return new Set(fromDayZero(rows).map((row) => row.day)).size;
 }
 
 export function historyLabel(rows: ActivityRow[]): string {
@@ -140,7 +144,8 @@ export type Week = { from: string; to: string; everyday: string };
 // Seven-day blocks counted from the first day in the data. A block counts only once every chain
 // has reached its last day, so a chain that is a day behind never makes a week look smaller. A
 // chain that hadn't started yet adds nothing, as it did nothing.
-export function weeklyEveryday(rows: ActivityRow[]): Week[] {
+export function weeklyEveryday(allRows: ActivityRow[]): Week[] {
+  const rows = fromDayZero(allRows);
   if (rows.length === 0) return [];
   const first = Math.min(...rows.map((row) => dayNumber(row.day)));
   const reached = Math.min(...perChain(rows).map((chain) => dayNumber(chain.to)));

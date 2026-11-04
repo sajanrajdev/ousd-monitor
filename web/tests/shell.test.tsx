@@ -19,6 +19,9 @@ describe("the site shell", () => {
     const footer = screen.getByRole("contentinfo");
     expect(within(header).getByText(INDEPENDENCE_LINE)).toBeTruthy();
     expect(within(footer).getByText(INDEPENDENCE_LINE)).toBeTruthy();
+    expect(
+      within(header).getByRole("link", { name: "Skip to main content" }).getAttribute("href"),
+    ).toBe("#main-content");
   });
 
   it("says in the footer that it is not financial advice and not an attestation", () => {

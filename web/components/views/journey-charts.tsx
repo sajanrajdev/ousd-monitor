@@ -119,7 +119,7 @@ function Bar({ row }: { row: BarRow }) {
           · {row.day}
         </span>
       </p>
-      <div className="mt-1 flex min-h-10 w-full overflow-hidden rounded-[var(--radius-control)] border border-[var(--color-border)]">
+      <div className="mt-1 flex min-h-10 w-full overflow-hidden rounded-[var(--radius-control)] border border-[var(--color-maroon)]">
         {parts
           .filter((p) => BigInt(p.amount) > 0n)
           .map(({ part, bps, amount }) => {
@@ -129,7 +129,7 @@ function Bar({ row }: { row: BarRow }) {
                 key={part}
                 data-part={part}
                 title={`${style.label}: ${formatCompact(amount)}`}
-                className="min-w-px overflow-hidden px-1 text-[length:var(--text-meta)] leading-tight break-words"
+                className="min-w-px overflow-hidden border-r border-[var(--color-maroon)] px-1 text-[length:var(--text-meta)] leading-tight break-words last:border-r-0"
                 style={{
                   flexBasis: `${bps / 100}%`,
                   flexGrow: 0,
@@ -138,7 +138,6 @@ function Bar({ row }: { row: BarRow }) {
                     ? `${style.image}, ${style.background}`
                     : style.background,
                   color: style.color,
-                  boxShadow: "inset -1px 0 0 var(--surface-card)",
                 }}
               >
                 {bps >= LABEL_MIN_BPS ? `${style.label} ${formatBps(bps)}` : null}
@@ -195,7 +194,7 @@ export function BarLegend() {
         <li key={part} className="flex items-center gap-1">
           <span
             aria-hidden="true"
-            className="inline-block h-3 w-3 border border-[var(--color-border)]"
+            className="inline-block h-3 w-3 border border-[var(--color-maroon)]"
             style={{
               background: PART_STYLES[part].image
                 ? `${PART_STYLES[part].image}, ${PART_STYLES[part].background}`

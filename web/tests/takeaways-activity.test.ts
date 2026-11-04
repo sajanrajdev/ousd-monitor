@@ -7,6 +7,7 @@ import {
   barPosition,
   historyDays,
   historyLabel,
+  perChain,
   velocityTakeaway,
   waterfall,
   waterfallAmount,
@@ -171,5 +172,18 @@ describe("weekly everyday volume", () => {
       .filter((row) => row.day <= "2026-10-06")
       .reduce((sum, row) => sum + BigInt(row.clean_everyday), 0n);
     expect(BigInt(weeks[0].everyday)).toBe(first);
+  });
+
+  it("ignores pre-Day-0 rows in waterfall, perChain, historyDays and weeklyEveryday", () => {
+    const preDayZero = zeroRow({
+      day: "2026-04-24",
+      headline_value: "999000000000000",
+      clean_everyday: "999000000000000",
+    });
+    const withPre = [preDayZero, ...activity];
+    expect(waterfall(withPre)).toEqual(waterfall(activity));
+    expect(perChain(withPre)).toEqual(perChain(activity));
+    expect(historyDays(withPre)).toBe(historyDays(activity));
+    expect(weeklyEveryday(withPre)).toEqual(weeklyEveryday(activity));
   });
 });

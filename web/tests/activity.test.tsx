@@ -139,6 +139,20 @@ describe("the real activity view", () => {
     expect(container.textContent).toContain("7 days of history: a direction, not a trend");
   });
 
+  it("starts the waterfall and weekly bars at Day 0 even when earlier test rows exist", () => {
+    const { container } = mount((props) => {
+      props.activity.unshift({
+        ...props.activity[0],
+        day: "2026-04-24",
+        headline_value: "999000000000000",
+        clean_everyday: "999000000000000",
+      });
+    });
+    expect(container.textContent).not.toContain("24 Apr 2026");
+    expect(container.textContent).toContain("30 Sept 2026");
+    expect(container.querySelectorAll("[data-flow]")).toHaveLength(2);
+  });
+
   it("has no all-chain wallet total and never says trading volume", () => {
     const { container } = mount();
     const text = container.textContent!;
