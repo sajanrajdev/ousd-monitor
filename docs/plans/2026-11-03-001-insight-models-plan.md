@@ -252,10 +252,10 @@ from read_csv('{{ var("labels_path") }}', header = true, all_varchar = true)
 
 **Do not add** Wintermute, Coinbase Prime, the Coinbase custody addresses or any other wallet that lacks a source tying the name to the address. See the brainstorm. A wallet the explorer itself tags is different: the tag is the source.
 
-**When Base and Solana land, in the same change as units 2.3, 2.4 and 2.5:**
-- Add the Base and Solana redemption route with rows found by rule: wallets on the fixed path from the hub into burns.
-- Add Solana's mint recipient as an `issuer` row only if a source names the address. If not, use `issuer_route`, so its balance is still inventory.
-- Add Orca's pool, with a source.
+**Base and Solana rows:**
+- The Base and Solana redemption route has rows found by rule: wallets on the fixed path from the hub into burns. Ethereum's `0x597758c063efa82c86c3e22d6ac40b8f432fd810` is on that path too.
+- Solana's mint recipient is an `issuer` row only if a source names the address. None does yet, so it is `issuer_route`, and its balance is still inventory.
+- Orca's pool has a source. Third-party routers, cross-chain relayers and their solvers are `system`, because they pass money through without holding it as a venue. Bridge, the issuer, stays `issuer`.
 
 `labels/README.md` states the rule: a public source must tie the name to the address, matching behavior is not enough, and a label change is a reviewed change. It also holds the source legend: each source type, what it means and how a reader can check it, written so the site and methodology page can reuse it. Unit 3.4 carries it to the site.
 
