@@ -93,21 +93,38 @@ class BlockscoutClient:
     ) -> Iterator[tuple[list[Transfer], int]]:
         """Yield (transfers, complete_through_block) until to_block is covered.
 
-        A full page may stop part way through its last block, so that block is dropped and
-        requested again as the start of the next page. No row is lost or returned twice.
+        A page may stop part way through its last block, so that block is dropped and requested
+        again as the start of the next page. No row is lost or returned twice.
+
+        Only a response with nothing past its first block finishes the range. A short page is
+        not proof, because it would silently skip the rest if the server's limit ever shrank.
+        That costs one extra request per range.
         """
         start = from_block
         while True:
             rows = self._page(token, start, to_block)
-            if len(rows) < BLOCKSCOUT_PAGE_SIZE:
+            _check_page_order(rows, start, to_block)
+            last_block = rows[-1].block_number if rows else start
+            if last_block == start:
+                if len(rows) >= BLOCKSCOUT_PAGE_SIZE:
+                    # Paging by block cannot get past this, and truncating would lose rows.
+                    raise RuntimeError(f"block {start} alone fills a Blockscout page")
                 yield rows, to_block
                 return
-            last_block = max(row.block_number for row in rows)
-            if last_block == start:
-                # Paging by block cannot get past this, and truncating would lose rows.
-                raise RuntimeError(f"block {start} alone fills a Blockscout page")
             yield [row for row in rows if row.block_number < last_block], last_block - 1
             start = last_block
+
+
+def _check_page_order(rows: list[Transfer], from_block: int, to_block: int) -> None:
+    """Paging is only safe if each page is the lowest rows of the range, in block order."""
+    blocks = [row.block_number for row in rows]
+    if blocks != sorted(blocks) or (
+        blocks and not from_block <= blocks[0] <= blocks[-1] <= to_block
+    ):
+        raise RuntimeError(
+            f"Blockscout page for blocks {from_block} to {to_block} is out of order or out of "
+            f"range: it spans {blocks[0]} to {blocks[-1]}"
+        )
 
 
 def bridge_total_base_units(http: PoliteClient, url: str) -> int:

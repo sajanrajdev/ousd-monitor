@@ -98,6 +98,46 @@ def test_exactly_full_page_ending_at_the_last_row_requests_once_more():
     assert checkpoints == [1, 2]
 
 
+def test_page_limit_smaller_than_expected_still_loses_nothing():
+    rows = [blockscout_row(block, i) for block in (1, 2, 3) for i in range(300)]
+    fake = FakeBlockscout(rows, page_size=500)
+
+    transfers, checkpoints = collect(fake, 1, 10)
+
+    positions = [(t.block_number, t.log_index) for t in transfers]
+    assert len(positions) == 900
+    assert len(set(positions)) == 900
+    assert checkpoints == [1, 2, 10]
+
+
+def test_rows_in_several_blocks_cost_one_request_to_confirm_the_end():
+    fake = FakeBlockscout([blockscout_row(1, 0), blockscout_row(4, 0)])
+
+    transfers, checkpoints = collect(fake, 1, 10)
+
+    assert [t.block_number for t in transfers] == [1, 4]
+    assert checkpoints == [3, 10]
+    assert fake.requests == [(1, 10), (4, 10)]
+
+
+@pytest.mark.parametrize(
+    "served",
+    [
+        [blockscout_row(5, 0), blockscout_row(4, 0)],  # Newest first.
+        [blockscout_row(11, 0)],  # Above the requested range.
+        [blockscout_row(0, 0)],  # Below it.
+    ],
+)
+def test_a_page_that_breaks_the_paging_assumptions_fails_loudly(served):
+    def handler(request):
+        return httpx.Response(200, json={"status": "1", "message": "OK", "result": served})
+
+    client = BlockscoutClient(http_with(handler), "http://blockscout.invalid/api")
+
+    with pytest.raises(RuntimeError, match="out of order or out of range"):
+        list(client.pages(TOKEN, 1, 10))
+
+
 def test_single_block_filling_a_page_fails_loudly():
     rows = [blockscout_row(7, i) for i in range(1000)]
     client = BlockscoutClient(http_with(FakeBlockscout(rows)), "http://blockscout.invalid/api")
