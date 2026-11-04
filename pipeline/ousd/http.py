@@ -17,6 +17,8 @@ MAX_SERVER_WAIT = 3600.0
 # Longest one attempt may run. The read timeout only limits the gap between bytes, so without
 # this a server trickling data could hold a request open indefinitely.
 REQUEST_DEADLINE = 120.0
+# Pauses at least this long are logged, so a quiet process means a hang and not a wait.
+VISIBLE_WAIT = 5.0
 
 
 def _server_wait(response: httpx.Response) -> float:
@@ -71,6 +73,8 @@ class PoliteClient:
                 delay = max(self._backoff * 2 ** (attempt - 1), server_wait)
                 log.warning("retrying %s in %.0fs: %s", url, delay, failure)
                 self._sleep(delay)
+            # A hint only applies to the response that gave it, not to later failures.
+            server_wait = 0.0
             self._throttle()
             try:
                 response, body = self._fetch(method, url, **kwargs)
@@ -105,6 +109,8 @@ class PoliteClient:
     def _throttle(self) -> None:
         wait = max(self._pause_next, self._last_request + self._min_interval - self._clock())
         self._pause_next = 0.0
+        if wait >= VISIBLE_WAIT:
+            log.warning("rate limit window spent, pausing %.0fs", wait)
         if wait > 0:
             self._sleep(wait)
         self._last_request = self._clock()

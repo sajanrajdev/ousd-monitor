@@ -1,3 +1,4 @@
+import logging
 import socket
 
 import httpx
@@ -60,6 +61,55 @@ def test_pauses_before_the_next_request_when_a_success_spends_the_window():
 
     client.request_json("GET", "http://x.invalid")
     assert sleeps == [5.0]
+
+
+def test_a_long_pause_is_logged_and_a_short_one_is_not(caplog):
+    def spends_window(reset_ms: str) -> httpx.Response:
+        headers = {"x-ratelimit-remaining": "0", "x-ratelimit-reset": reset_ms}
+        return httpx.Response(200, json={}, headers=headers)
+
+    client = client_for(
+        [spends_window("4000"), spends_window("90000"), httpx.Response(200, json={})]
+    )
+
+    with caplog.at_level(logging.WARNING):
+        client.request_json("GET", "http://x.invalid")
+        client.request_json("GET", "http://x.invalid")
+        assert caplog.messages == []
+        client.request_json("GET", "http://x.invalid")
+
+    assert caplog.messages == ["rate limit window spent, pausing 90s"]
+
+
+def test_a_rate_limit_hint_does_not_outlive_its_response():
+    sleeps: list[float] = []
+    client = client_for(
+        [
+            httpx.Response(429, headers={"retry-after": "600"}),
+            httpx.ConnectError("boom"),
+            httpx.Response(200, json={}),
+        ],
+        sleeps,
+    )
+
+    client.request_json("GET", "http://x.invalid")
+
+    assert sleeps == [600.0, 2.0]
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [{"x-ratelimit-remaining": "-1", "x-ratelimit-reset": "-1"}, {"retry-after": "-1"}],
+)
+def test_negative_rate_limit_headers_mean_no_information(headers):
+    sleeps: list[float] = []
+    client = client_for(
+        [httpx.Response(429, headers=headers), httpx.Response(200, json={})], sleeps
+    )
+
+    client.request_json("GET", "http://x.invalid")
+
+    assert sleeps == [1.0]
 
 
 def test_retry_after_is_honored_but_capped():
