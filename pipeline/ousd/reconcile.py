@@ -542,11 +542,6 @@ def _judge_bridge(
     if chains_total is not None:
         comparison = BridgeComparison(REQUIRED_CHAINS, (), chains_total, snapshot.total)
         report(BridgeFigures(attempt, snapshot, fetched.fetched_at, comparison))
-    if check.status != "unchecked" and chains_total is not None:
-        # A row for each comparison actually made, so never for an outage or a stale snapshot.
-        store.record_bridge_comparison(
-            run_id, REQUIRED_CHAINS, chains_total, snapshot.total, check.status == "pass"
-        )
     recorder.record(
         "bridge",
         BRIDGE_SUBJECT,
@@ -564,7 +559,32 @@ def _judge_bridge(
             "sum_at_t": None if check.sum_at_t is None else str(check.sum_at_t),
         },
     )
+    # After the check row, so a comparison always has one. A row for each comparison actually made,
+    # so never for an outage or a stale snapshot. A pass is written by _finish_run.
+    if check.status == "fail" and chains_total is not None:
+        store.record_bridge_comparison(run_id, REQUIRED_CHAINS, chains_total, snapshot.total, False)
     return check
+
+
+def _finish_run(
+    store: Store, run_id: str, status: Status, code: int, matched_total: int | None
+) -> None:
+    """End the run, with a passing comparison in the same transaction.
+
+    Unit 2.6 reads the newest comparison whatever its run, so a passing row must not exist before
+    its run has finished. A Bridge pass only happens with every chain passing, so its run passes.
+    """
+    if matched_total is None:
+        store.finish_run(run_id, status, code)
+        return
+    store.db.begin()
+    try:
+        store.record_bridge_comparison(run_id, REQUIRED_CHAINS, matched_total, matched_total, True)
+        store.finish_run(run_id, status, code)
+        store.db.commit()
+    except Exception:
+        store.db.rollback()
+        raise
 
 
 def run_reconciliation(
@@ -604,6 +624,7 @@ def run_reconciliation(
 
     bridge_attempts: list[Status] = []
     compared: set[int] = set()
+    matched_total: int | None = None
     for attempt in range(1, BRIDGE_ATTEMPTS + 1):
         # Before any chain syncs, so every pin is at or after what Bridge has seen. A partial run
         # can't pass whatever Bridge says, so it doesn't ask.
@@ -636,6 +657,7 @@ def run_reconciliation(
         check = _judge_bridge(fetched, attempt, probes, readings, store, run_id, recorder, report)
         bridge_attempts.append(check.status)
         if check.status == "pass":
+            matched_total = check.matched_sum
             break
         if check.status == "fail" and fetched.snapshot:
             compared.add(fetched.snapshot.last_updated)
@@ -645,7 +667,7 @@ def run_reconciliation(
     bridge_final = _bridge_status(bridge_attempts)
     status = overall_status(names, chains, bridge_final)
     code = exit_code(status)
-    store.finish_run(run_id, status, code)
+    _finish_run(store, run_id, status, code, matched_total)
     return RunResult(run_id, scope, status, code, chains, bridge_final, recorder.outcomes)
 
 
