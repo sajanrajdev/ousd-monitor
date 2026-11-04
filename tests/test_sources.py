@@ -222,3 +222,18 @@ def test_bridge_total_converts_a_decimal_string_exactly():
 
     assert total == 872_221_164_606_640
     assert Decimal(total).scaleb(-6) == Decimal("872221164.60664")
+
+
+@pytest.mark.parametrize(
+    ("served", "message"),
+    [
+        ("1.1234567", "finer than one base unit"),
+        (872221164.60664, "should be a decimal string"),
+    ],
+)
+def test_bridge_total_that_cannot_convert_exactly_is_refused(served, message):
+    def handler(request):
+        return httpx.Response(200, json={"total_onchain_amount": served})
+
+    with pytest.raises(ValueError, match=message):
+        bridge_total_base_units(http_with(handler), "http://bridge.invalid")

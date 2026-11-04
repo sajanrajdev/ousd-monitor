@@ -1,7 +1,7 @@
 """Clients for the upstream data sources: JSON-RPC, Blockscout and Bridge."""
 
 from collections.abc import Iterator
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from typing import Any
 
 from ousd.chains import DECIMALS
@@ -128,6 +128,15 @@ def _check_page_order(rows: list[Transfer], from_block: int, to_block: int) -> N
 
 
 def bridge_total_base_units(http: PoliteClient, url: str) -> int:
-    """Bridge's reported on-chain total, converted from a decimal string without floats."""
-    amount = Decimal(http.request_json("GET", url)["total_onchain_amount"])
-    return int(amount.scaleb(DECIMALS))
+    """Bridge's reported on-chain total, converted from a decimal string without floats.
+
+    Anything that can't convert exactly is an error, not a rounded number.
+    """
+    amount = http.request_json("GET", url)["total_onchain_amount"]
+    if not isinstance(amount, str):
+        raise ValueError(f"Bridge total should be a decimal string, got {amount!r}")
+    with localcontext(prec=78):
+        base_units = Decimal(amount).scaleb(DECIMALS)
+    if base_units != base_units.to_integral_value():
+        raise ValueError(f"Bridge total {amount} is finer than one base unit")
+    return int(base_units)
