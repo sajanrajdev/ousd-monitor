@@ -7,7 +7,7 @@ import socket
 import pytest
 from ousd.chains import Chain
 from ousd.decode import ZERO_ADDRESS, Transfer
-from ousd.sources import Block, RpcClient
+from ousd.sources import Block, ProofTransfer, RpcClient, RpcError, TransactionProof
 from ousd.store import Store
 
 ALICE = "0x" + "a" * 40
@@ -101,12 +101,16 @@ class FakeRpc(RpcClient):
             for transfer in self.logs.get(number, [])
         ]
 
+    def _number(self, block: int | str) -> int:
+        if isinstance(block, int):
+            return block
+        numbers = [number for number, value in self.hashes.items() if value == block]
+        if not numbers:
+            raise RuntimeError("unknown block hash")
+        return numbers[0]
+
     def total_supply(self, token: str, block: int | str) -> int:
-        if isinstance(block, str):
-            numbers = [number for number, value in self.hashes.items() if value == block]
-            if not numbers:
-                raise RuntimeError("unknown block hash")
-            block = numbers[0]
+        block = self._number(block)
         supply = 0
         for number, transfers in self.logs.items():
             if number <= block:
@@ -116,6 +120,42 @@ class FakeRpc(RpcClient):
                     if transfer.to_address == ZERO_ADDRESS:
                         supply -= transfer.value
         return supply
+
+    def balance_of(self, token: str, address: str, block: int | str) -> int:
+        block = self._number(block)
+        balance = 0
+        for number, transfers in self.logs.items():
+            if number <= block:
+                for transfer in transfers:
+                    # Mints and burns don't change the zero address's balance on a real token.
+                    if address == ZERO_ADDRESS:
+                        continue
+                    if transfer.to_address == address:
+                        balance += transfer.value
+                    if transfer.from_address == address:
+                        balance -= transfer.value
+        return balance
+
+    def block_timestamp(self, number: int) -> int:
+        if number not in self.hashes:
+            raise RpcError(f"block {number} not found")
+        return 1_000 + number
+
+    def transaction_receipt(self, tx_hash: str, token: str) -> TransactionProof | None:
+        found = [
+            transfer
+            for transfers in self.logs.values()
+            for transfer in transfers
+            if transfer.tx_hash == tx_hash
+        ]
+        if not found:
+            return None
+        return TransactionProof(
+            tx_hash,
+            found[0].block_number,
+            True,
+            [ProofTransfer(t.log_index, t.from_address, t.to_address, t.value) for t in found],
+        )
 
 
 def _block_hash(number: int, fork: str) -> str:
