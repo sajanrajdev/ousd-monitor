@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS reconciliations (
 """
 
 
+class StoreConflict(RuntimeError):
+    """A row disagrees with the row already stored at the same position."""
+
+
 class Store:
     def __init__(self, path: str | Path = ":memory:") -> None:
         if path != ":memory:":
@@ -75,6 +79,7 @@ class Store:
         self.db.begin()
         try:
             if transfers:
+                self._refuse_conflicts(chain, transfers)
                 self._insert_transfers(chain, transfers)
             if block_hashes:
                 self.db.executemany(
@@ -88,6 +93,40 @@ class Store:
         except Exception:
             self.db.rollback()
             raise
+
+    def _refuse_conflicts(self, chain: str, transfers: Sequence[Transfer]) -> None:
+        """Re-reading a row is fine. A different row at the same position is a data problem."""
+        blocks = [t.block_number for t in transfers]
+        stored = {
+            (block_number, log_index): content
+            for block_number, log_index, *content in self.db.execute(
+                """
+                SELECT block_number, log_index, block_hash, block_timestamp, tx_hash,
+                       from_address, to_address, value
+                FROM transfers WHERE chain = ? AND block_number BETWEEN ? AND ?
+                """,
+                [chain, min(blocks), max(blocks)],
+            ).fetchall()
+        }
+        for t in transfers:
+            old = stored.get((t.block_number, t.log_index))
+            if old is None:
+                continue
+            new = [
+                t.block_hash,
+                t.block_timestamp,
+                t.tx_hash,
+                t.from_address,
+                t.to_address,
+                t.value,
+            ]
+            # Blockscout rows have no hash, so a missing hash on either side is not a difference.
+            hashes_agree = old[0] is None or new[0] is None or old[0] == new[0]
+            if not hashes_agree or old[1:] != new[1:]:
+                raise StoreConflict(
+                    f"{chain}: block {t.block_number}, log {t.log_index} is stored as {old} "
+                    f"but was just read as {new}"
+                )
 
     def _insert_transfers(self, chain: str, transfers: Sequence[Transfer]) -> None:
         # One list per column is far faster than executemany. Values travel as text
