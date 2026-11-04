@@ -6,6 +6,7 @@ import socket
 import pytest
 from ousd.chains import Chain
 from ousd.decode import ZERO_ADDRESS, Transfer
+from ousd.sources import Block
 from ousd.store import Store
 
 ALICE = "0x" + "a" * 40
@@ -79,9 +80,11 @@ class FakeRpc:
     def finalized(self) -> int:
         return self.tip() - self.finality_lag
 
-    def block_hash(self, number: int) -> str | None:
+    def block(self, number: int) -> Block | None:
         self.hash_requests += 1
-        return self.hashes.get(number)
+        if number not in self.hashes:
+            return None
+        return Block(self.hashes[number], self.hashes.get(number - 1, "0x0"))
 
     def transfers(self, token: str, from_block: int, to_block: int) -> list[Transfer]:
         return [

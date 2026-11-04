@@ -2,7 +2,7 @@
 
 from collections.abc import Iterator
 from decimal import Decimal, localcontext
-from typing import Any
+from typing import Any, NamedTuple
 
 from ousd.chains import DECIMALS
 from ousd.decode import TRANSFER_TOPIC, Transfer, decode_blockscout_log, decode_rpc_log
@@ -12,6 +12,11 @@ TOTAL_SUPPLY_SELECTOR = "0x18160ddd"
 BLOCKSCOUT_PAGE_SIZE = 1000
 # Tempo refuses a result set over 20,000 logs with this error rather than truncating it.
 TOO_MANY_RESULTS = "exceeds max results"
+
+
+class Block(NamedTuple):
+    hash: str
+    parent_hash: str
 
 
 class RpcError(RuntimeError):
@@ -36,9 +41,9 @@ class RpcClient:
     def finalized(self) -> int:
         return int(self._call("eth_getBlockByNumber", ["finalized", False])["number"], 16)
 
-    def block_hash(self, number: int) -> str | None:
+    def block(self, number: int) -> Block | None:
         block = self._call("eth_getBlockByNumber", [hex(number), False])
-        return block["hash"].lower() if block else None
+        return Block(block["hash"].lower(), block["parentHash"].lower()) if block else None
 
     def transfers(self, token: str, from_block: int, to_block: int) -> list[Transfer]:
         query = {

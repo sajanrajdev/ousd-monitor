@@ -201,6 +201,19 @@ def test_range_over_the_result_cap_is_split_until_it_fits():
     assert [t.block_number for t in transfers] == list(range(1, 9))
 
 
+def test_block_reads_hash_and_parent_and_handles_a_missing_block():
+    block = {"hash": "0xAA", "parentHash": "0xBB", "number": "0x1"}
+    results = iter([block, None])
+
+    def handler(request):
+        return httpx.Response(200, json={"id": 1, "result": next(results)})
+
+    rpc = RpcClient(http_with(handler), "http://rpc.invalid")
+
+    assert rpc.block(1) == ("0xaa", "0xbb")
+    assert rpc.block(2) is None
+
+
 def test_total_supply_pins_to_a_block_hash_or_number():
     params = []
 

@@ -224,3 +224,30 @@ def test_mint_and_burn_addresses_round_trip(store):
     sync_chain(make_chain(), rpc, store)
 
     assert store.minted_and_burned("testnet", 105) == (10, 4)
+
+
+@pytest.mark.parametrize("new_fork_value", [9, None])
+def test_reorg_between_two_ranges_never_stores_a_mix_of_forks(store, new_fork_value):
+    # The hash window (102 to 109) spans two log ranges, and the fork lands between them.
+    chain = make_chain(max_log_range=5, reorg_lookback=8)
+    rpc = FakeRpc(tip=109, finality_lag=8)
+    rpc.add_transfer(103, 1)
+    real_transfers = rpc.transfers
+
+    def reorg_after_first_range(token, low, high):
+        result = real_transfers(token, low, high)
+        rpc.transfers = real_transfers
+        rpc.reorg(from_block=103)
+        if new_fork_value is not None:
+            rpc.add_transfer(103, new_fork_value)
+        return result
+
+    rpc.transfers = reorg_after_first_range
+    with pytest.raises(ReorgError, match="does not extend"):
+        sync_chain(chain, rpc, store)
+
+    result = sync_chain(chain, rpc, store)
+
+    assert result.reorg_fork_block == 102
+    assert [row[5] for row in rows(store)] == ([] if new_fork_value is None else [new_fork_value])
+    assert store.block_hashes("testnet") == {n: rpc.hashes[n] for n in range(102, 110)}

@@ -57,7 +57,8 @@ def _repair_reorg(chain: Chain, rpc: RpcClient, store: Store) -> int | None:
     """
     stored = store.block_hashes(chain.name)
     for number in sorted(stored, reverse=True):
-        if rpc.block_hash(number) == stored[number]:
+        block = rpc.block(number)
+        if block is not None and block.hash == stored[number]:
             if number == max(stored):
                 return None
             log.warning("%s: reorg found, rolling back to block %d", chain.name, number)
@@ -80,11 +81,17 @@ def _ingest_from_rpc(
         new_hashes: dict[int, str] = {}
         for number in range(max(low, window_start), high + 1):
             if number not in known:
-                block_hash = rpc.block_hash(number)
-                if block_hash is None:
+                block = rpc.block(number)
+                if block is None:
                     raise ReorgError(f"{chain.name}: block {number} vanished during sync; rerun")
-                new_hashes[number] = block_hash
-        known |= new_hashes
+                # Repair trusts a block hash to commit to its ancestors, which only holds if
+                # the stored hashes are one chain. So a block must extend the one below it.
+                if number - 1 in known and block.parent_hash != known[number - 1]:
+                    raise ReorgError(
+                        f"{chain.name}: block {number} does not extend stored block "
+                        f"{number - 1}; rerun"
+                    )
+                new_hashes[number] = known[number] = block.hash
 
         transfers = rpc.transfers(chain.token, low, high)
         for transfer in transfers:
