@@ -296,3 +296,30 @@ def test_log_a_lagging_node_missed_is_healed_even_after_the_tip_moves_on(store):
     sync_chain(chain, rpc, store)
 
     assert [row[0] for row in rows(store)] == [119]
+
+
+def test_rpc_serving_another_chain_stops_before_anything_is_written(store):
+    rpc = FakeRpc(tip=120)
+    rpc.add_transfer(105, 1)
+
+    with pytest.raises(RuntimeError, match="serves chain 1, expected 999"):
+        sync_chain(make_chain(chain_id=999), rpc, store)
+
+    assert rows(store) == []
+    assert store.synced_through("testnet") is None
+
+
+def test_node_behind_every_stored_block_does_not_advise_a_rebuild(store):
+    chain = make_chain()
+    rpc = FakeRpc(tip=120)
+    rpc.add_transfer(105, 1)
+    sync_chain(chain, rpc, store)
+    before = rows(store)
+
+    for number in range(111, 121):
+        del rpc.hashes[number]
+
+    with pytest.raises(ReorgError, match="behind every stored block") as failure:
+        sync_chain(chain, rpc, store)
+    assert "fresh database" not in str(failure.value)
+    assert rows(store) == before

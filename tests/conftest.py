@@ -74,6 +74,9 @@ class FakeRpc:
         for number in range(from_block, tip + 1):
             self.hashes[number] = _block_hash(number, fork)
 
+    def chain_id(self) -> int:
+        return 1
+
     def tip(self) -> int:
         return max(self.hashes)
 

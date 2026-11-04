@@ -35,6 +35,9 @@ class RpcClient:
             raise RpcError(f"{method} {params}: {body['error']}")
         return body["result"]
 
+    def chain_id(self) -> int:
+        return int(self._call("eth_chainId", []), 16)
+
     def tip(self) -> int:
         return int(self._call("eth_blockNumber", []), 16)
 

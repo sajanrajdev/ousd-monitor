@@ -27,9 +27,16 @@ class SyncResult:
 def sync_chain(
     chain: Chain, rpc: RpcClient, store: Store, history: BlockscoutClient | None = None
 ) -> SyncResult:
+    # A token address on the wrong chain just returns no logs, which looks like a quiet chain.
+    served = rpc.chain_id()
+    if served != chain.chain_id:
+        raise RuntimeError(
+            f"{chain.name}: the RPC serves chain {served}, expected {chain.chain_id}"
+        )
+
     tip = rpc.tip()
     finalized = rpc.finalized()
-    fork_block = _repair_reorg(chain, rpc, store)
+    fork_block = _repair_reorg(chain, rpc, store, tip)
 
     window_start = _window_start(chain, tip, finalized)
     cursor = store.synced_through(chain.name)
@@ -62,7 +69,7 @@ def _window_start(chain: Chain, tip: int, finalized: int) -> int:
     return max(chain.start_block, min(tip - chain.reorg_lookback, finalized) + 1)
 
 
-def _repair_reorg(chain: Chain, rpc: RpcClient, store: Store) -> int | None:
+def _repair_reorg(chain: Chain, rpc: RpcClient, store: Store, tip: int) -> int | None:
     """Roll back to the newest stored block still on the canonical chain.
 
     A block hash commits to all its ancestors, so walking down stops at the first match.
@@ -77,6 +84,11 @@ def _repair_reorg(chain: Chain, rpc: RpcClient, store: Store) -> int | None:
             log.warning("%s: reorg found, rolling back to block %d", chain.name, number)
             store.rollback_to(chain.name, number)
             return number
+    if stored and tip < min(stored):
+        raise ReorgError(
+            f"{chain.name}: the node's tip {tip} is behind every stored block, from "
+            f"{min(stored)}. Nothing was changed. Rerun once it has caught up."
+        )
     if stored:
         raise ReorgError(
             f"{chain.name}: no stored block from {min(stored)} to {max(stored)} is canonical. "
