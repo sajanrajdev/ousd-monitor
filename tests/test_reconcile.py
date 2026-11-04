@@ -101,6 +101,21 @@ def test_cannot_reconcile_before_sync_or_above_the_cursor(store):
         reconcile_chain(chain, rpc, store, at_block=121)
 
 
+def test_bridge_comparison_counts_any_unchecked_chain_as_missing():
+    comparison = compare_with_bridge([ChainReconciliation("tempo", 1, 100, 10, 90)], 200)
+
+    assert comparison.is_partial
+    assert comparison.chains_missing == ("ethereum", "base", "solana")
+
+
+def test_bridge_comparison_is_full_only_with_every_chain():
+    results = [
+        ChainReconciliation(name, 1, 1, 0, 1) for name in ("tempo", "ethereum", "base", "solana")
+    ]
+
+    assert not compare_with_bridge(results, 4).is_partial
+
+
 def test_bridge_comparison_is_partial_while_chains_are_missing():
     results = [
         ChainReconciliation("tempo", 1, 100, 10, 90),

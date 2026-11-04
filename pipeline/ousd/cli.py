@@ -53,9 +53,11 @@ def _print_reconciliation(result: ChainReconciliation) -> None:
 
 
 def _reconcile(chains: list[Chain], store: Store, at_block: int | None) -> int:
-    results = [reconcile_chain(chain, _rpc_for(chain), store, at_block) for chain in chains]
-    for result in results:
-        _print_reconciliation(result)
+    results = []
+    for chain in chains:
+        # Print as we go, so one chain's failure doesn't hide what the others found.
+        results.append(reconcile_chain(chain, _rpc_for(chain), store, at_block))
+        _print_reconciliation(results[-1])
 
     if at_block is None:
         url = os.environ.get("BRIDGE_API_URL", DEFAULT_BRIDGE_URL)
@@ -95,6 +97,9 @@ def main(argv: list[str] | None = None) -> int:
     if unknown:
         parser.error(f"unknown chain: {', '.join(sorted(unknown))}")
     chains = [available[name] for name in args.chain or available]
+    # Block numbers mean nothing across chains.
+    if args.command == "reconcile" and args.at_block is not None and len(chains) != 1:
+        parser.error("--at-block needs exactly one --chain")
 
     store = Store(os.environ.get("OUSD_DB_PATH", DEFAULT_DB_PATH))
     try:

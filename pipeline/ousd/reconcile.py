@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from ousd.chains import PENDING_CHAINS, Chain
+from ousd.chains import REQUIRED_CHAINS, Chain
 from ousd.sources import RpcClient
 from ousd.store import Store
 
@@ -70,9 +70,11 @@ def reconcile_chain(
 
 
 def compare_with_bridge(results: list[ChainReconciliation], bridge_total: int) -> BridgeComparison:
+    included = tuple(result.chain for result in results)
     return BridgeComparison(
-        chains_included=tuple(result.chain for result in results),
-        chains_missing=PENDING_CHAINS,
+        chains_included=included,
+        # Derived from what was checked, so `--chain tempo` can never read as a full comparison.
+        chains_missing=tuple(chain for chain in REQUIRED_CHAINS if chain not in included),
         chains_total=sum(result.onchain_supply for result in results),
         bridge_total=bridge_total,
     )

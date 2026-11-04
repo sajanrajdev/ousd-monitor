@@ -8,8 +8,8 @@ DECIMALS = 6
 DEFAULT_DB_PATH = "data/ousd.duckdb"
 DEFAULT_BRIDGE_URL = "https://transparency.bridge.xyz/v0/stablecoins/ousd"
 
-# Chains that make up Bridge's total but are not ingested yet.
-PENDING_CHAINS = ("base", "solana")
+# Every chain that makes up Bridge's total, whether or not it is ingested yet.
+REQUIRED_CHAINS = ("tempo", "ethereum", "base", "solana")
 
 
 @dataclass(frozen=True)
