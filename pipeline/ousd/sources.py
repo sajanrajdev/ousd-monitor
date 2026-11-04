@@ -3,7 +3,6 @@
 import re
 from collections.abc import Callable, Iterator
 from datetime import datetime
-from decimal import Decimal, localcontext
 from typing import Any, NamedTuple
 
 import httpx
@@ -363,11 +362,11 @@ def _base_units(amount: object) -> int:
         raise ValueError(f"Bridge total should be a decimal string, got {amount!r}")
     if not BRIDGE_TOTAL.fullmatch(amount):
         raise ValueError(f"Bridge total is not plain decimal digits: {amount!r}")
-    with localcontext(prec=78):
-        base_units = Decimal(amount).scaleb(DECIMALS)
-    if base_units != base_units.to_integral_value():
+    # On the digits, as decimal arithmetic rounds to its precision and would hide a far digit.
+    whole, _, fraction = amount.partition(".")
+    if fraction[DECIMALS:].strip("0"):
         raise ValueError(f"Bridge total {amount} is finer than one base unit")
-    return int(base_units)
+    return int(whole + fraction[:DECIMALS].ljust(DECIMALS, "0"))
 
 
 def _unix_seconds(stamp: object) -> int:

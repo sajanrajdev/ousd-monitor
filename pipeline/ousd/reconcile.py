@@ -1,13 +1,15 @@
 """The key check: do stored events explain the supply each chain reports?"""
 
+import itertools
+import math
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import NamedTuple, Protocol
 
 from ousd.chains import REQUIRED_CHAINS, Chain
 from ousd.http import HttpError
-from ousd.sources import RpcClient, RpcError, TransactionProof
+from ousd.sources import BridgeSnapshot, RpcClient, RpcError, TransactionProof
 from ousd.store import Status, Store, StoreConflict
 
 FULL_SCOPE = "full"
@@ -19,6 +21,21 @@ PIN_ROUNDS = 3
 # Any of these attempts may pass, on Bridge snapshots about 10 minutes apart.
 BRIDGE_ATTEMPTS = 3
 BRIDGE_RETRY_DELAY = 600
+# How far from last_updated a chain may be read. The evidence puts Bridge's read no earlier than
+# about 223 s before it and under 30 s after. 300 s is the earliest edge those offsets support,
+# and 60 s adds a margin. Width costs little, as a pass still needs an exact match.
+BRIDGE_WINDOW_BEFORE = 300
+BRIDGE_WINDOW_AFTER = 60
+# Three update cycles, when the largest age seen was under 15 minutes. A frozen feed would still
+# match history, so a stale one must not count as agreement.
+BRIDGE_MAX_AGE = 1800
+# More ahead of our clock than this, and last_updated can't be believed.
+BRIDGE_MAX_AHEAD = 60
+# Far above what the measured event rates reach, and low enough to finish in about a second.
+BRIDGE_MAX_SUMS = 1_000_000
+# A repeat of a snapshot already compared proves nothing new, so wait for Bridge's next one.
+BRIDGE_SAME_SNAPSHOT_WAIT = 60
+BRIDGE_SAME_SNAPSHOT_TRIES = 5
 # Solana reads only finalized blocks, so it stores no block hashes. Store.latest_reconciliation
 # accepts a missing pin hash for these chains and no others.
 CHAINS_WITHOUT_BLOCK_HASHES = frozenset({"solana"})
@@ -125,7 +142,9 @@ class ChainProbe(Protocol):
         """Sync to the tip, then compare events with the chain's supply at that pin."""
         ...
 
-    def pin_timestamp(self, height: int) -> int: ...
+    def pin_timestamp(self, height: int) -> int:
+        """Unix seconds of this block or slot. A failed read raises ChainUnavailable."""
+        ...
 
     def read_balances(self, addresses: Sequence[str], height: int) -> list[BalanceRead]: ...
 
@@ -150,6 +169,37 @@ class BridgeWait:
     attempt: int
     seconds: int
     resume_at: float  # Unix seconds.
+
+
+@dataclass(frozen=True)
+class BridgeFigures:
+    """What an attempt found against Bridge, for the terminal. The status is on the check row."""
+
+    attempt: int
+    snapshot: BridgeSnapshot
+    fetched_at: float  # Unix seconds.
+    comparison: BridgeComparison
+
+
+@dataclass(frozen=True)
+class BridgeCheck:
+    status: Status
+    reason: str | None = None
+    sum_at_t: int | None = None
+    matched_sum: int | None = None
+    # When each chain's matched value began to hold, as stamped by Store.supply_values, so a chain
+    # with no movement in the window shows the window's start.
+    matched_times: Mapping[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _BridgeFetch:
+    """A fetched snapshot, or the reason an attempt has nothing to compare."""
+
+    snapshot: BridgeSnapshot | None = None
+    fetched_at: float = 0.0
+    reason: str | None = None
+    cause: BaseException | None = None
 
 
 @dataclass(frozen=True)
@@ -262,7 +312,10 @@ class _RunRecorder:
     check and subject across every kind of retry, and `reason` can only be a fixed code."""
 
     def __init__(
-        self, store: Store, run_id: str, report: Callable[[CheckOutcome | BridgeWait], None]
+        self,
+        store: Store,
+        run_id: str,
+        report: Callable[[CheckOutcome | BridgeWait | BridgeFigures], None],
     ) -> None:
         self._store = store
         self._run_id = run_id
@@ -279,12 +332,15 @@ class _RunRecorder:
         *,
         cause: BaseException | None = None,
         reading: ChainReconciliation | None = None,
+        reference: int | None = None,
+        observed: int | None = None,
+        detail: Mapping[str, object] | None = None,
     ) -> CheckOutcome:
         attempt = self._attempts.get((check_name, subject), 0) + 1
         self._attempts[check_name, subject] = attempt
         fixed = reason if reason is None or reason in REASONS else "source_error"
         # The class name only: an exception's message can hold a URL with a key in it.
-        detail = {"error": type(cause).__name__} if cause else {}
+        error = {"error": type(cause).__name__} if cause else {}
         self._store.record_check(
             self._run_id,
             check_name,
@@ -297,9 +353,9 @@ class _RunRecorder:
             if reading
             else None,
             transfer_count=self._store.transfer_count(subject) if reading else None,
-            reference_value=reading.onchain_supply if reading else None,
-            observed_value=reading.event_supply if reading else None,
-            detail=detail,
+            reference_value=reading.onchain_supply if reading else reference,
+            observed_value=reading.event_supply if reading else observed,
+            detail={**(detail or {}), **error},
         )
         outcome = CheckOutcome(check_name, subject, status, fixed, attempt, reading)
         self.outcomes.append(outcome)
@@ -363,12 +419,180 @@ def _check_census(probe: ChainProbe, store: Store, recorder: _RunRecorder) -> St
     return "pass"
 
 
+def bridge_window(last_updated: int, pin_time: int) -> tuple[int, int]:
+    """The times a chain may be taken at. Past the pin, the chain hasn't been checked."""
+    return last_updated - BRIDGE_WINDOW_BEFORE, min(last_updated + BRIDGE_WINDOW_AFTER, pin_time)
+
+
+def check_bridge(
+    snapshot: BridgeSnapshot,
+    fetched_at: float,
+    pins: Mapping[str, int | None],
+    values: Mapping[str, Sequence[tuple[int, int]]],
+) -> BridgeCheck:
+    """Blocking check 2: does Bridge's total equal one value from each chain, added together?
+
+    `pins` holds each chain's pin time, or None if it couldn't be read. `values` holds each
+    chain's Store.supply_values over bridge_window. A pass needs a difference of exactly 0: the
+    only tolerance is in time. `fetched_at` is the fetch time, so a slow run can't make its own
+    snapshot stale.
+    """
+    last_updated = snapshot.last_updated
+    if last_updated - fetched_at > BRIDGE_MAX_AHEAD:
+        return BridgeCheck("unchecked", "bridge_malformed")
+    if fetched_at - last_updated > BRIDGE_MAX_AGE:
+        return BridgeCheck("unchecked", "bridge_stale")
+    for name in REQUIRED_CHAINS:
+        pin_time = pins.get(name)
+        if pin_time is None or pin_time < last_updated or not values.get(name):
+            return BridgeCheck("unchecked", "coverage_gap")
+
+    sum_at_t = sum(
+        [supply for stamp, supply in values[name] if stamp <= last_updated][-1]
+        for name in REQUIRED_CHAINS
+    )
+    # Each chain's distinct values, nearest T first, so a value held twice records the nearer time.
+    choices = [_nearest_first(values[name], last_updated) for name in REQUIRED_CHAINS]
+    # Counted before any sum is built. Distinct values per chain bound the attainable sums.
+    if math.prod(len(chain_values) for chain_values in choices) > BRIDGE_MAX_SUMS:
+        return BridgeCheck("unchecked", "bridge_window_too_busy", sum_at_t)
+    for combination in itertools.product(*choices):
+        if sum(supply for _, supply in combination) == snapshot.total:
+            times = {
+                name: stamp for name, (stamp, _) in zip(REQUIRED_CHAINS, combination, strict=True)
+            }
+            return BridgeCheck("pass", None, sum_at_t, snapshot.total, times)
+    return BridgeCheck("fail", "bridge_mismatch", sum_at_t)
+
+
+def _nearest_first(values: Sequence[tuple[int, int]], last_updated: int) -> list[tuple[int, int]]:
+    nearest: dict[int, int] = {}
+    for stamp, supply in values:
+        held = nearest.get(supply)
+        if held is None or abs(stamp - last_updated) < abs(held - last_updated):
+            nearest[supply] = stamp
+    return sorted(
+        ((stamp, supply) for supply, stamp in nearest.items()),
+        key=lambda value: abs(value[0] - last_updated),
+    )
+
+
+def _fetch_bridge(
+    fetch: Callable[[], BridgeSnapshot],
+    compared: Collection[int],
+    attempt: int,
+    wait: Callable[[int, int], None],
+    clock: Callable[[], float],
+) -> _BridgeFetch:
+    """The snapshot for one attempt, refetched while it repeats one already compared."""
+    refetches = 0
+    while True:
+        try:
+            snapshot = fetch()
+        except HttpError as exc:
+            return _BridgeFetch(reason="bridge_unavailable", cause=exc)
+        except ValueError as exc:
+            return _BridgeFetch(reason="bridge_malformed", cause=exc)
+        fetched_at = clock()
+        if snapshot.last_updated not in compared:
+            return _BridgeFetch(snapshot, fetched_at)
+        if refetches == BRIDGE_SAME_SNAPSHOT_TRIES:
+            return _BridgeFetch(snapshot, fetched_at, "bridge_same_snapshot")
+        refetches += 1
+        wait(attempt, BRIDGE_SAME_SNAPSHOT_WAIT)
+
+
+def _judge_bridge(
+    fetched: _BridgeFetch,
+    attempt: int,
+    probes: Sequence[ChainProbe],
+    readings: Mapping[str, ChainReconciliation],
+    store: Store,
+    run_id: str,
+    recorder: _RunRecorder,
+    report: Callable[[CheckOutcome | BridgeWait | BridgeFigures], None],
+) -> BridgeCheck:
+    """Compare one attempt's snapshot with the events through this attempt's pins, and record it.
+
+    Runs only once every chain has passed, so there is a reading for each probe.
+    """
+    snapshot = fetched.snapshot
+    if snapshot is None or fetched.reason:
+        status = recorder.record(
+            "bridge", BRIDGE_SUBJECT, "unchecked", fetched.reason, cause=fetched.cause
+        ).status
+        return BridgeCheck(status, fetched.reason)
+
+    pins: dict[str, int | None] = {}
+    values: dict[str, list[tuple[int, int]]] = {}
+    for probe in probes:
+        height = readings[probe.name].block_number
+        try:
+            pin_time = probe.pin_timestamp(height)
+        except ChainUnavailable:
+            pins[probe.name] = None
+            continue
+        pins[probe.name] = pin_time
+        if pin_time >= snapshot.last_updated:
+            start, end = bridge_window(snapshot.last_updated, pin_time)
+            values[probe.name] = store.supply_values(probe.name, start, end, height)
+
+    check = check_bridge(snapshot, fetched.fetched_at, pins, values)
+    chains_total = check.sum_at_t if check.matched_sum is None else check.matched_sum
+    if chains_total is not None:
+        comparison = BridgeComparison(REQUIRED_CHAINS, (), chains_total, snapshot.total)
+        report(BridgeFigures(attempt, snapshot, fetched.fetched_at, comparison))
+    recorder.record(
+        "bridge",
+        BRIDGE_SUBJECT,
+        check.status,
+        check.reason,
+        reference=snapshot.total,
+        observed=chains_total,
+        detail={
+            "last_updated": snapshot.last_updated,
+            "window_before": BRIDGE_WINDOW_BEFORE,
+            "window_after": BRIDGE_WINDOW_AFTER,
+            "pin_times": pins,
+            "matched_times": check.matched_times,
+            # Text, as JSON readers often lose exactness above 2**53.
+            "sum_at_t": None if check.sum_at_t is None else str(check.sum_at_t),
+        },
+    )
+    # After the check row, so a comparison always has one. A row for each comparison actually made,
+    # so never for an outage or a stale snapshot. A pass is written by _finish_run.
+    if check.status == "fail" and chains_total is not None:
+        store.record_bridge_comparison(run_id, REQUIRED_CHAINS, chains_total, snapshot.total, False)
+    return check
+
+
+def _finish_run(
+    store: Store, run_id: str, status: Status, code: int, matched_total: int | None
+) -> None:
+    """End the run, with a passing comparison in the same transaction.
+
+    Unit 2.6 reads the newest comparison whatever its run, so a passing row must not exist before
+    its run has finished. A Bridge pass only happens with every chain passing, so its run passes.
+    """
+    if matched_total is None:
+        store.finish_run(run_id, status, code)
+        return
+    store.db.begin()
+    try:
+        store.record_bridge_comparison(run_id, REQUIRED_CHAINS, matched_total, matched_total, True)
+        store.finish_run(run_id, status, code)
+        store.db.commit()
+    except BaseException:  # Ctrl-C too, or this connection stays inside the transaction.
+        store.db.rollback()
+        raise
+
+
 def run_reconciliation(
     probes: Sequence[ChainProbe],
     store: Store,
-    report: Callable[[CheckOutcome | BridgeWait], None],
+    report: Callable[[CheckOutcome | BridgeWait | BridgeFigures], None],
     *,
-    bridge: Callable[[Sequence[ChainReconciliation]], tuple[Status, str | None]] | None = None,
+    bridge: Callable[[], BridgeSnapshot] | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.time,
 ) -> RunResult:
@@ -376,7 +600,8 @@ def run_reconciliation(
 
     `report` hears each outcome as it happens. Only a chain that can't be read, or a store
     conflict, is caught around a chain. Anything else is a bug, so it raises, and the run row
-    stays unfinished so it can't read as a pass.
+    stays unfinished so it can't read as a pass. `bridge` fetches Bridge's snapshot, and raises
+    HttpError or ValueError when it can't.
     """
     names = [probe.name for probe in probes]
     if len(set(names)) != len(names):
@@ -393,39 +618,56 @@ def run_reconciliation(
                 "chain_supply", name, "unchecked", "not_configured"
             ).status
 
+    def wait(attempt: int, seconds: int) -> None:
+        report(BridgeWait(attempt, seconds, clock() + seconds))
+        sleep(seconds)
+
     bridge_attempts: list[Status] = []
+    compared: set[int] = set()
+    matched_total: int | None = None
     for attempt in range(1, BRIDGE_ATTEMPTS + 1):
-        readings: list[ChainReconciliation] = []
+        # Before any chain syncs, so every pin is at or after what Bridge has seen. A partial run
+        # can't pass whatever Bridge says, so it doesn't ask.
+        fetched = None
+        if bridge is not None and scope == FULL_SCOPE:
+            fetched = _fetch_bridge(bridge, compared, attempt, wait, clock)
+
+        readings: dict[str, ChainReconciliation] = {}
         # One chain being unchecked doesn't stop the others, so a failure can't hide what the
         # rest found. A retry repeats every chain, so a final pin never holds unchecked rows.
         for probe in probes:
             supply = _check_supply(probe, store, recorder)
             chains[probe.name] = _worst(supply.status, _check_census(probe, store, recorder))
             if supply.reconciliation:
-                readings.append(supply.reconciliation)
+                readings[probe.name] = supply.reconciliation
 
         if any(status != "pass" for status in chains.values()):
+            if fetched and fetched.snapshot:
+                comparison = compare_with_bridge(list(readings.values()), fetched.snapshot.total)
+                report(BridgeFigures(attempt, fetched.snapshot, fetched.fetched_at, comparison))
             bridge_attempts.append(
                 recorder.record("bridge", BRIDGE_SUBJECT, "unchecked", "chains_not_passed").status
             )
             break
-        if bridge is None:
+        if fetched is None:
             bridge_attempts.append(
                 recorder.record("bridge", BRIDGE_SUBJECT, "unchecked", "not_configured").status
             )
             break
-        status, reason = bridge(readings)
-        bridge_attempts.append(recorder.record("bridge", BRIDGE_SUBJECT, status, reason).status)
-        if status == "pass":
+        check = _judge_bridge(fetched, attempt, probes, readings, store, run_id, recorder, report)
+        bridge_attempts.append(check.status)
+        if check.status == "pass":
+            matched_total = check.matched_sum
             break
+        if check.status == "fail" and fetched.snapshot:
+            compared.add(fetched.snapshot.last_updated)
         if attempt < BRIDGE_ATTEMPTS:
-            report(BridgeWait(attempt, BRIDGE_RETRY_DELAY, clock() + BRIDGE_RETRY_DELAY))
-            sleep(BRIDGE_RETRY_DELAY)
+            wait(attempt, BRIDGE_RETRY_DELAY)
 
     bridge_final = _bridge_status(bridge_attempts)
     status = overall_status(names, chains, bridge_final)
     code = exit_code(status)
-    store.finish_run(run_id, status, code)
+    _finish_run(store, run_id, status, code, matched_total)
     return RunResult(run_id, scope, status, code, chains, bridge_final, recorder.outcomes)
 
 

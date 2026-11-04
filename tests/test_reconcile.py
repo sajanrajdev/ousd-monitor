@@ -1,4 +1,5 @@
 import itertools
+import json
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -9,23 +10,25 @@ from ousd.decode import ZERO_ADDRESS
 from ousd.http import HttpError
 from ousd.ingest import sync_chain
 from ousd.reconcile import (
-    BRIDGE_RETRY_DELAY,
     PIN_ROUNDS,
     REASONS,
+    BridgeFigures,
     BridgeWait,
     ChainReconciliation,
     ChainUnavailable,
     CheckOutcome,
     Unchecked,
+    bridge_window,
     check_at_block,
+    check_bridge,
     compare_with_bridge,
     exit_code,
     overall_status,
     reconcile_chain,
     run_reconciliation,
 )
-from ousd.sources import RpcError
-from ousd.store import Status, StoreConflict
+from ousd.sources import BridgeSnapshot, RpcError
+from ousd.store import Status, Store, StoreConflict
 
 # Above 2**53 on purpose: a float anywhere in the path would break equality.
 LARGE = 2**60 + 1
@@ -311,7 +314,7 @@ class FakeProbe:
         return self.events.count("sync")
 
     def pin_timestamp(self, height: int) -> int:
-        raise NotImplementedError
+        return self.rpc.block_timestamp(height)
 
     def read_balances(self, addresses, height):
         raise NotImplementedError
@@ -324,25 +327,71 @@ def four_probes(store, **steps):
     return [FakeProbe(store, name, steps.get(name, ())) for name in REQUIRED_CHAINS]
 
 
-def bridge_passes(readings):
-    return "pass", None
+# FakeProbe's chains hold LARGE each from block 101, stamped 1_101, and pin at 1_120.
+BRIDGE_T = 1_110
+NOW = 1_200.0
+FOUR_CHAINS = 4 * LARGE
+GOOD = BridgeSnapshot(FOUR_CHAINS, BRIDGE_T)
+# One base unit off, so no value in the window can match.
+BAD = BridgeSnapshot(FOUR_CHAINS + 1, BRIDGE_T)
+STALE = BridgeSnapshot(FOUR_CHAINS, int(NOW) - 1_801)
 
 
-def bridge_results(*results):
-    remaining = list(results)
-    return lambda readings: remaining.pop(0)
+def bridge_passes():
+    return GOOD
+
+
+def bad_at(offset):
+    return BAD._replace(last_updated=BRIDGE_T + offset)
+
+
+def good_at(offset):
+    return GOOD._replace(last_updated=BRIDGE_T + offset)
+
+
+class BridgeFeed:
+    """Each fetch gives the next snapshot, or raises the next error."""
+
+    def __init__(self, *items):
+        self.remaining = list(items)
+
+    def __call__(self):
+        item = self.remaining.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
 
 
 def no_sleep(seconds):
     pass
 
 
-def run_it(store, probes, bridge=bridge_passes, sleep=no_sleep, **kwargs):
+def run_it(store, probes, bridge=bridge_passes, sleep=no_sleep, clock=lambda: NOW):
     reported: list[Any] = []
     result = run_reconciliation(
-        probes, store, reported.append, bridge=bridge, sleep=sleep, **kwargs
+        probes, store, reported.append, bridge=bridge, sleep=sleep, clock=clock
     )
     return result, reported
+
+
+def comparisons(store):
+    return store.db.execute(
+        """
+        SELECT chains_included, chains_missing, chains_total, bridge_total, tolerance, passed
+        FROM bridge_comparisons ORDER BY checked_at
+        """
+    ).fetchall()
+
+
+def bridge_detail(store, attempt=1):
+    row = store.db.execute(
+        """
+        SELECT detail FROM reconciliation_checks
+        WHERE check_name = 'bridge' AND attempt = ?
+        """,
+        [attempt],
+    ).fetchone()
+    return json.loads(row[0])
 
 
 def checks(store, check_name, subject):
@@ -372,20 +421,23 @@ def test_four_passing_chains_and_bridge_exit_zero_and_open_the_gate(store):
     assert latest.usable
     assert latest.chains["tempo"].pin_hash is not None
     assert latest.chains["solana"].pin_hash is None
-    assert len(reported) == len(REQUIRED_CHAINS) + 1
+    outcomes = [item for item in reported if isinstance(item, CheckOutcome)]
+    assert len(outcomes) == len(REQUIRED_CHAINS) + 1
 
 
-def test_the_bridge_check_sees_every_chains_final_reading(store):
+def test_the_bridge_check_reads_every_chain_through_its_final_pin(store, monkeypatch):
     seen = []
+    real = store.supply_values
 
-    def bridge(readings):
-        seen.extend(readings)
-        return "pass", None
+    def spy(chain, start_ts, end_ts, through_block):
+        seen.append((chain, through_block))
+        return real(chain, start_ts, end_ts, through_block)
 
-    run_it(store, four_probes(store), bridge)
+    monkeypatch.setattr(store, "supply_values", spy)
 
-    assert [reading.chain for reading in seen] == list(REQUIRED_CHAINS)
-    assert all(reading.block_number == 120 for reading in seen)
+    run_it(store, four_probes(store, tempo=[PinBehind(1), None]))
+
+    assert seen == [(name, 120) for name in REQUIRED_CHAINS]
 
 
 def test_with_no_bridge_check_four_passing_chains_are_unchecked(store):
@@ -407,7 +459,7 @@ def test_two_probes_for_one_chain_are_refused_before_a_run_starts(store):
     "names", [("tempo",), REQUIRED_CHAINS[:3], ("tempo", "testnet")], ids=["one", "three", "extra"]
 )
 def test_a_matching_subset_is_unchecked_and_never_consults_bridge(store, names):
-    def bridge(readings):
+    def bridge():
         raise AssertionError("a partial run must not reach Bridge")
 
     probes = [FakeProbe(store, name) for name in names]
@@ -423,6 +475,7 @@ def test_a_matching_subset_is_unchecked_and_never_consults_bridge(store, names):
         assert result.chains[name] == "unchecked"
         assert checks(store, "chain_supply", name) == [(1, "unchecked", "not_configured")]
     assert {o.subject for o in reported} >= {*names, *missing, "all"}
+    assert comparisons(store) == []
 
 
 def test_no_probes_at_all_is_unchecked(store):
@@ -633,7 +686,8 @@ def test_a_mismatch_that_heals_passes_with_a_sync_between_the_rows(store):
         (2, "pass", None),
     ]
     assert probes[0].events == ["sync", "read", "sync", "read"]
-    assert [o.status for o in reported if o.subject == "tempo"] == ["fail", "pass"]
+    outcomes = [item for item in reported if isinstance(item, CheckOutcome)]
+    assert [o.status for o in outcomes if o.subject == "tempo"] == ["fail", "pass"]
     assert store.latest_reconciliation().usable
 
 
@@ -732,7 +786,8 @@ def test_a_chain_that_cannot_be_read_does_not_stop_the_others(store):
     assert (result.status, result.exit_code) == ("unchecked", 3)
     assert checks(store, "chain_supply", "ethereum") == [(1, "unchecked", "sync_failed")]
     assert probes[2].syncs() == probes[3].syncs() == 1
-    assert [o.subject for o in reported][:4] == list(REQUIRED_CHAINS)
+    outcomes = [item for item in reported if isinstance(item, CheckOutcome)]
+    assert [o.subject for o in outcomes][:4] == list(REQUIRED_CHAINS)
 
 
 def test_a_store_conflict_is_a_fail(store):
@@ -798,12 +853,9 @@ def test_a_probe_answering_for_another_chain_raises_and_leaves_the_run_unfinishe
     assert store.latest_reconciliation() is None
 
 
-def test_a_bridge_check_that_raises_leaves_the_run_unfinished(store):
-    def bridge(readings):
-        raise HttpError("bridge: HTTP 500")
-
-    with pytest.raises(HttpError):
-        run_it(store, four_probes(store), bridge)
+def test_a_bug_in_the_bridge_fetch_raises_and_leaves_the_run_unfinished(store):
+    with pytest.raises(KeyError):
+        run_it(store, four_probes(store), BridgeFeed(KeyError("total")))
 
     assert runs(store) == [("full", None, None, True)]
     assert store.latest_reconciliation() is None
@@ -908,18 +960,14 @@ def test_exit_zero_and_the_gate_never_disagree(store, steps, bridge):
 
 
 def test_exit_zero_and_the_gate_agree_after_a_bridge_retry(store):
-    results = [("fail", "bridge_mismatch"), ("pass", None)]
-
-    result, _ = run_it(store, four_probes(store), lambda readings: results.pop(0))
+    result, _ = run_it(store, four_probes(store), BridgeFeed(bad_at(0), good_at(1)))
 
     assert result.exit_code == 0
     assert store.latest_reconciliation().usable
 
 
 def test_exit_zero_and_the_gate_agree_when_bridge_never_matches(store):
-    results = [("fail", "bridge_mismatch")] * 3
-
-    result, _ = run_it(store, four_probes(store), lambda readings: results.pop(0))
+    result, _ = run_it(store, four_probes(store), BridgeFeed(bad_at(0), bad_at(1), bad_at(2)))
 
     assert result.exit_code == 1
     assert not store.latest_reconciliation().usable
@@ -1016,17 +1064,17 @@ def test_attempt_rises_across_every_kind_of_retry_and_the_final_pin_is_the_highe
     tempo = probes[0]
     sleeps: list[float] = []
 
-    results = [("fail", "bridge_mismatch"), ("pass", None)]
+    snapshots = [bad_at(0), good_at(1)]
 
-    def bridge(readings):
-        # The next attempt syncs to a newer tip.
+    def bridge():
+        # The attempt after this one syncs to a newer tip.
         tempo.rpc.extend(125)
-        return results.pop(0)
+        return snapshots.pop(0)
 
-    result, reported = run_it(store, probes, bridge, sleep=sleeps.append, clock=lambda: 1_000.0)
+    result, reported = run_it(store, probes, bridge, sleep=sleeps.append)
 
     assert (result.status, result.exit_code) == ("pass", 0)
-    assert sleeps == [BRIDGE_RETRY_DELAY]
+    assert sleeps == [600]
     assert checks(store, "chain_supply", "tempo") == [
         (1, "fail", "supply_mismatch"),
         (2, "unchecked", "pin_behind_cursor"),
@@ -1046,50 +1094,84 @@ def test_attempt_rises_across_every_kind_of_retry_and_the_final_pin_is_the_highe
     assert latest.chains["tempo"].pin_height == 125 == store.synced_through("tempo")
     assert latest.usable
     waits = [item for item in reported if isinstance(item, BridgeWait)]
-    assert waits == [BridgeWait(1, BRIDGE_RETRY_DELAY, 1_000.0 + BRIDGE_RETRY_DELAY)]
+    assert waits == [BridgeWait(1, 600, NOW + 600)]
 
 
 @pytest.mark.parametrize(
-    ("results", "status", "code", "sleeps"),
+    ("snapshots", "status", "code", "rows"),
     [
-        ([("fail", "bridge_mismatch")] * 3, "fail", 1, 2),
-        ([("unchecked", "bridge_stale")] * 3, "unchecked", 3, 2),
         (
-            [
-                ("unchecked", "bridge_stale"),
-                ("fail", "bridge_mismatch"),
-                ("unchecked", "bridge_stale"),
-            ],
+            [bad_at(0), good_at(1)],
+            "pass",
+            0,
+            [(1, "fail", "bridge_mismatch"), (2, "pass", None)],
+        ),
+        (
+            [bad_at(0), bad_at(1), bad_at(2)],
             "fail",
             1,
-            2,
+            [
+                (1, "fail", "bridge_mismatch"),
+                (2, "fail", "bridge_mismatch"),
+                (3, "fail", "bridge_mismatch"),
+            ],
         ),
-        ([("unchecked", "bridge_stale"), ("pass", None)], "pass", 0, 1),
+        (
+            [STALE, STALE, STALE],
+            "unchecked",
+            3,
+            [
+                (1, "unchecked", "bridge_stale"),
+                (2, "unchecked", "bridge_stale"),
+                (3, "unchecked", "bridge_stale"),
+            ],
+        ),
+        (
+            [STALE, bad_at(0), STALE],
+            "fail",
+            1,
+            [
+                (1, "unchecked", "bridge_stale"),
+                (2, "fail", "bridge_mismatch"),
+                (3, "unchecked", "bridge_stale"),
+            ],
+        ),
+        (
+            [STALE, good_at(0)],
+            "pass",
+            0,
+            [(1, "unchecked", "bridge_stale"), (2, "pass", None)],
+        ),
     ],
-    ids=["fail-thrice", "stale-thrice", "one-fail-among-stale", "stale-then-pass"],
+    ids=[
+        "fail-then-pass",
+        "fail-thrice",
+        "stale-thrice",
+        "one-fail-among-stale",
+        "stale-then-pass",
+    ],
 )
 def test_any_bridge_pass_counts_and_one_unmatched_attempt_is_enough_to_fail(
-    store, results, status, code, sleeps
+    store, snapshots, status, code, rows
 ):
     slept: list[float] = []
 
-    result, _ = run_it(store, four_probes(store), bridge_results(*results), sleep=slept.append)
+    result, _ = run_it(store, four_probes(store), BridgeFeed(*snapshots), sleep=slept.append)
 
     assert (result.bridge, result.status, result.exit_code) == (status, status, code)
-    assert len(slept) == sleeps
+    assert slept == [600] * (len(rows) - 1)
+    assert checks(store, "bridge", "all") == rows
 
 
 def test_a_chain_that_stops_passing_on_a_bridge_retry_ends_the_run(store):
     probes = four_probes(store, tempo=[None, ChainUnavailable("sync_failed")])
     slept: list[float] = []
 
-    result, _ = run_it(
-        store, probes, bridge_results(("fail", "bridge_mismatch")), sleep=slept.append
-    )
+    result, _ = run_it(store, probes, BridgeFeed(bad_at(0), good_at(1)), sleep=slept.append)
 
     assert result.chains["tempo"] == "unchecked"
     assert (result.bridge, result.status, result.exit_code) == ("fail", "fail", 1)
-    assert slept == [BRIDGE_RETRY_DELAY]
+    assert slept == [600]
     assert checks(store, "bridge", "all") == [
         (1, "fail", "bridge_mismatch"),
         (2, "unchecked", "chains_not_passed"),
@@ -1171,11 +1253,19 @@ def test_no_key_reaches_the_checks_table_or_the_report(store, step, text):
     assert {reason for (reason,) in reasons} <= REASONS
 
 
-def test_a_free_text_bridge_reason_is_replaced_with_a_code(store):
-    result, _ = run_it(store, four_probes(store), bridge_results(*[("unchecked", KEY)] * 3))
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (HttpError(f"bridge: HTTP 500: {KEY}"), "bridge_unavailable"),
+        (ValueError(KEY), "bridge_malformed"),
+    ],
+    ids=["unavailable", "malformed"],
+)
+def test_no_key_in_a_bridge_error_reaches_the_checks_table(store, error, reason):
+    result, _ = run_it(store, four_probes(store), BridgeFeed(error, error, error))
 
     assert KEY not in stored_check_text(store)
-    assert checks(store, "bridge", "all")[0] == (1, "unchecked", "source_error")
+    assert checks(store, "bridge", "all")[0] == (1, "unchecked", reason)
     assert result.bridge == "unchecked"
 
 
@@ -1188,3 +1278,798 @@ def test_the_detail_names_the_class_of_a_cause_and_nothing_else(store):
         "SELECT detail FROM reconciliation_checks WHERE subject = 'tempo'"
     ).fetchone()[0]
     assert detail == '{"error": "HttpError"}'
+
+
+# The Bridge check. See "The Bridge check" in the reconciliation plan. Its limits are written out
+# as figures in these tests, not by their names, so changing a limit has to fail one.
+
+T = 10_000
+# No chain moves: each holds 10, 20, 30 and 40.
+STILL = {
+    name: [(T - 300, supply)]
+    for name, supply in zip(REQUIRED_CHAINS, (10, 20, 30, 40), strict=True)
+}
+STILL_TOTAL = 100
+PINS: dict[str, int | None] = dict.fromkeys(REQUIRED_CHAINS, T + 60)
+
+
+def judge(total, values=None, fetched_at=T + 5, pins=None, last_updated=T):
+    return check_bridge(
+        BridgeSnapshot(total, last_updated),
+        fetched_at,
+        PINS if pins is None else pins,
+        STILL if values is None else values,
+    )
+
+
+def test_bridge_equal_with_no_movement_passes():
+    check = judge(STILL_TOTAL)
+
+    assert (check.status, check.reason) == ("pass", None)
+    assert check.sum_at_t == check.matched_sum == STILL_TOTAL
+    assert check.matched_times == dict.fromkeys(REQUIRED_CHAINS, T - 300)
+
+
+@pytest.mark.parametrize("off", [1, -1], ids=["above", "below"])
+def test_bridge_one_base_unit_off_with_no_movement_fails(off):
+    check = judge(STILL_TOTAL + off)
+
+    assert (check.status, check.reason) == ("fail", "bridge_mismatch")
+    assert check.sum_at_t == STILL_TOTAL
+    assert check.matched_sum is None
+    assert check.matched_times == {}
+
+
+MINT_AT_T_MINUS_10 = {**STILL, "tempo": [(T - 300, 10), (T - 10, 15)]}
+
+
+@pytest.mark.parametrize("total", [100, 105], ids=["before", "after"])
+def test_bridge_equal_to_either_side_of_a_mint_passes(total):
+    assert judge(total, MINT_AT_T_MINUS_10).status == "pass"
+
+
+def test_bridge_between_the_before_and_after_figures_fails():
+    # A range test would pass this, and that is why the rule isn't one.
+    assert judge(103, MINT_AT_T_MINUS_10).reason == "bridge_mismatch"
+
+
+def test_the_sum_at_t_takes_each_chain_after_its_last_block_at_or_before_t():
+    values = {
+        **STILL,
+        "tempo": [(T - 300, 10), (T, 11), (T + 1, 12)],
+    }
+
+    assert judge(0, values).sum_at_t == 101
+
+
+def test_chains_read_at_different_moments_pass_and_record_each_time():
+    values = {
+        **STILL,
+        "tempo": [(T - 300, 10), (T - 20, 15)],
+        "base": [(T - 300, 30), (T + 20, 37)],
+    }
+
+    # Tempo after its mint, plus Base before its own.
+    check = judge(15 + 20 + 30 + 40, values)
+
+    assert check.status == "pass"
+    assert check.sum_at_t == 105
+    assert check.matched_times == {
+        "tempo": T - 20,
+        "ethereum": T - 300,
+        "base": T - 300,
+        "solana": T - 300,
+    }
+
+
+def test_a_value_held_twice_records_the_time_nearer_t():
+    values = {**STILL, "tempo": [(T - 300, 10), (T - 40, 15), (T - 5, 10)]}
+
+    assert judge(STILL_TOTAL, values).matched_times["tempo"] == T - 5
+
+
+def test_bridge_arithmetic_stays_exact_above_2_to_the_60():
+    values = {name: [(T - 300, LARGE)] for name in REQUIRED_CHAINS}
+
+    assert judge(4 * LARGE, values).status == "pass"
+    assert judge(4 * LARGE + 1, values).reason == "bridge_mismatch"
+    assert judge(4 * LARGE - 1, values).sum_at_t == 4 * LARGE
+
+
+def busy(count):
+    return [(T - 300 + index, index) for index in range(count)]
+
+
+def test_too_many_combinations_are_refused_without_building_them():
+    # 10**16 sums: building them would never finish, so this returning at all is the proof.
+    values = {name: busy(10_000) for name in REQUIRED_CHAINS}
+
+    check = judge(-1, values)
+
+    assert (check.status, check.reason) == ("unchecked", "bridge_window_too_busy")
+
+
+def test_the_limit_on_combinations_is_inclusive():
+    allowed = {**STILL, "tempo": busy(1_000), "ethereum": busy(1_000)}
+    # 101 * 9_901 is 1_000_001, so a limit any higher lets this through.
+    over = {**STILL, "tempo": busy(101), "ethereum": busy(9_901)}
+    # Out of reach, so the whole allowed space is searched.
+    assert judge(10**9, allowed).reason == "bridge_mismatch"
+    assert judge(10**9, over).reason == "bridge_window_too_busy"
+
+
+def test_a_supply_returning_to_a_value_adds_no_combination():
+    bouncing = [(T - 300 + i, i % 2) for i in range(300)]
+
+    check = judge(-1, {name: bouncing for name in REQUIRED_CHAINS})
+
+    assert check.reason == "bridge_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("age", "status", "reason"),
+    [
+        (1_800, "pass", None),
+        (1_801, "unchecked", "bridge_stale"),
+        (-59, "pass", None),
+        (-60, "pass", None),
+        (-61, "unchecked", "bridge_malformed"),
+    ],
+    ids=["30-minutes", "a-second-more", "59s-ahead", "60s-ahead", "61s-ahead"],
+)
+def test_a_snapshots_age_is_taken_at_fetch(age, status, reason):
+    check = judge(STILL_TOTAL, fetched_at=T + age)
+
+    assert (check.status, check.reason) == (status, reason)
+
+
+def test_a_slow_run_does_not_make_its_own_snapshot_stale(store):
+    # The fetch is at NOW. Syncing then takes well past the age limit.
+    times = iter([NOW, NOW + 3_600])
+
+    result, _ = run_it(store, four_probes(store), clock=lambda: next(times))
+
+    assert result.bridge == "pass"
+
+
+@pytest.mark.parametrize(
+    "pin",
+    [T - 1, None],
+    ids=["before-t", "unreadable"],
+)
+def test_a_pin_that_does_not_reach_t_is_a_coverage_gap(pin):
+    check = judge(STILL_TOTAL, pins={**PINS, "base": pin})
+
+    assert (check.status, check.reason) == ("unchecked", "coverage_gap")
+
+
+def test_a_pin_exactly_at_t_is_covered():
+    assert judge(STILL_TOTAL, pins={**PINS, "base": T}).status == "pass"
+
+
+@pytest.mark.parametrize("missing", REQUIRED_CHAINS)
+def test_a_chain_left_out_is_a_coverage_gap_and_never_a_pass(missing):
+    pins = {name: pin for name, pin in PINS.items() if name != missing}
+    values = {name: value for name, value in STILL.items() if name != missing}
+
+    assert judge(STILL_TOTAL, pins=pins).reason == "coverage_gap"
+    assert judge(STILL_TOTAL, values).reason == "coverage_gap"
+    assert judge(STILL_TOTAL, {**STILL, missing: []}).reason == "coverage_gap"
+
+
+def test_the_window_stops_at_the_pin():
+    assert bridge_window(T, T + 1_000) == (T - 300, T + 60)
+    assert bridge_window(T, T + 59) == (
+        T - 300,
+        T + 59,
+    )
+
+
+def test_a_pin_before_the_window_end_limits_what_is_read(store, monkeypatch):
+    seen = []
+    real = store.supply_values
+
+    def spy(chain, start_ts, end_ts, through_block):
+        seen.append((chain, start_ts, end_ts, through_block))
+        return real(chain, start_ts, end_ts, through_block)
+
+    monkeypatch.setattr(store, "supply_values", spy)
+
+    # T + 60 is 1_170, and the pins are at 1_120.
+    run_it(store, four_probes(store))
+
+    assert seen == [(name, BRIDGE_T - 300, 1_120, 120) for name in REQUIRED_CHAINS]
+
+
+WINDOW_T = 1_500
+
+
+@pytest.mark.parametrize(
+    ("mint_at", "total", "status"),
+    [
+        (WINDOW_T - 301, FOUR_CHAINS, "fail"),
+        (WINDOW_T - 301, FOUR_CHAINS + 5, "pass"),
+        (WINDOW_T - 300, FOUR_CHAINS, "pass"),
+        (WINDOW_T - 300, FOUR_CHAINS + 5, "pass"),
+        (WINDOW_T + 60, FOUR_CHAINS, "pass"),
+        (WINDOW_T + 60, FOUR_CHAINS + 5, "pass"),
+        (WINDOW_T + 61, FOUR_CHAINS, "pass"),
+        (WINDOW_T + 61, FOUR_CHAINS + 5, "fail"),
+    ],
+    ids=[
+        "T-301-before",
+        "T-301-after",
+        "T-300-before",
+        "T-300-after",
+        "T+60-before",
+        "T+60-after",
+        "T+61-before",
+        "T+61-after",
+    ],
+)
+def test_window_edges_show_in_which_values_can_match(store, mint_at, total, status):
+    # Tempo mints 5 at mint_at, and every chain's pin is past the window. Block n is stamped
+    # 1_000 + n. Later attempts see their own T, and only the first is under test.
+    probes = four_probes(store)
+    for probe in probes:
+        probe.rpc.extend(600)
+    probes[0].rpc.add_transfer(mint_at - 1_000, 5)
+    snapshots = [BridgeSnapshot(total, WINDOW_T + offset) for offset in range(3)]
+
+    run_it(store, probes, BridgeFeed(*snapshots), clock=lambda: float(WINDOW_T))
+
+    assert checks(store, "bridge", "all")[0][1] == status
+
+
+def test_an_unreadable_pin_time_is_a_coverage_gap_and_writes_no_comparison(store):
+    probes = four_probes(store)
+
+    def refuse(height):
+        raise ChainUnavailable("state_unavailable")
+
+    probes[2].pin_timestamp = refuse
+
+    result, _ = run_it(store, probes, BridgeFeed(good_at(0), good_at(1), good_at(2)))
+
+    assert result.bridge == "unchecked"
+    assert result.exit_code == 3
+    assert checks(store, "bridge", "all")[0] == (1, "unchecked", "coverage_gap")
+    assert comparisons(store) == []
+
+
+def test_a_pin_time_error_a_probe_failed_to_map_leaves_the_run_unfinished(store):
+    probes = four_probes(store)
+
+    def refuse(height):
+        raise RpcError("block not found")
+
+    probes[2].pin_timestamp = refuse
+
+    with pytest.raises(RpcError):
+        run_it(store, probes)
+
+    assert runs(store) == [("full", None, None, True)]
+    assert store.latest_reconciliation() is None
+
+
+def test_a_pin_before_t_in_a_run_is_a_coverage_gap(store):
+    ahead = GOOD._replace(last_updated=1_121)
+
+    result, _ = run_it(store, four_probes(store), BridgeFeed(ahead, ahead, ahead))
+
+    assert result.exit_code == 3
+    assert checks(store, "bridge", "all") == [(n, "unchecked", "coverage_gap") for n in (1, 2, 3)]
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (HttpError("bridge: HTTP 500"), "bridge_unavailable"),
+        (ValueError("bad"), "bridge_malformed"),
+    ],
+    ids=["unavailable", "malformed"],
+)
+def test_a_bridge_that_cannot_be_read_is_unchecked_and_writes_no_comparison(store, error, reason):
+    slept: list[float] = []
+
+    result, _ = run_it(
+        store, four_probes(store), BridgeFeed(error, error, error), sleep=slept.append
+    )
+
+    assert (result.bridge, result.status, result.exit_code) == ("unchecked", "unchecked", 3)
+    assert checks(store, "bridge", "all") == [(n, "unchecked", reason) for n in (1, 2, 3)]
+    assert slept == [600] * 2
+    assert comparisons(store) == []
+    assert not store.latest_reconciliation().usable
+
+
+def test_a_read_error_records_its_class_and_no_message(store):
+    error = HttpError("bridge: HTTP 500")
+
+    run_it(store, four_probes(store), BridgeFeed(error, error, error))
+
+    assert bridge_detail(store) == {"error": "HttpError"}
+
+
+def test_the_snapshot_is_fetched_before_any_chain_syncs_on_every_attempt(store):
+    probes = four_probes(store)
+    syncs_at_fetch = []
+
+    def bridge():
+        syncs_at_fetch.append(sum(probe.syncs() for probe in probes))
+        return bad_at(len(syncs_at_fetch))
+
+    run_it(store, probes, bridge)
+
+    assert syncs_at_fetch == [0, 4, 8]
+
+
+def test_a_repeated_snapshot_is_not_counted_and_is_refetched_after_a_minute(store):
+    slept: list[float] = []
+    feed = BridgeFeed(bad_at(0), bad_at(0), good_at(1))
+
+    result, reported = run_it(store, four_probes(store), feed, sleep=slept.append)
+
+    assert result.status == "pass"
+    assert slept == [600, 60]
+    assert checks(store, "bridge", "all") == [(1, "fail", "bridge_mismatch"), (2, "pass", None)]
+    waits = [item for item in reported if isinstance(item, BridgeWait)]
+    assert [wait.attempt for wait in waits] == [1, 2]
+    assert feed.remaining == []
+
+
+def test_a_fetch_that_fails_while_refetching_is_unchecked_for_that_attempt(store):
+    feed = BridgeFeed(bad_at(0), bad_at(0), HttpError("bridge: HTTP 500"), good_at(1))
+
+    result, _ = run_it(store, four_probes(store), feed)
+
+    assert result.status == "pass"
+    assert checks(store, "bridge", "all") == [
+        (1, "fail", "bridge_mismatch"),
+        (2, "unchecked", "bridge_unavailable"),
+        (3, "pass", None),
+    ]
+
+
+def test_a_snapshot_that_never_changes_ends_as_same_snapshot(store):
+    slept: list[float] = []
+    fetches = []
+
+    def bridge():
+        fetches.append(1)
+        return bad_at(0)
+
+    result, _ = run_it(store, four_probes(store), bridge, sleep=slept.append)
+
+    assert (result.bridge, result.status, result.exit_code) == ("fail", "fail", 1)
+    assert checks(store, "bridge", "all") == [
+        (1, "fail", "bridge_mismatch"),
+        (2, "unchecked", "bridge_same_snapshot"),
+        (3, "unchecked", "bridge_same_snapshot"),
+    ]
+    refetching = [60] * 5
+    assert slept == [600, *refetching, 600, *refetching]
+    # The most a run can wait on Bridge.
+    assert sum(slept) == 1_800
+    assert len(fetches) == 13
+    assert len(comparisons(store)) == 1
+
+
+def test_only_a_compared_snapshot_counts_as_already_seen(store):
+    # Nothing was compared on a coverage gap, and a later pin can cover the same T.
+    ahead = GOOD._replace(last_updated=1_121)
+    slept: list[float] = []
+    probes = four_probes(store)
+
+    def bridge():
+        return ahead
+
+    def extend(seconds):
+        slept.append(seconds)
+        for probe in probes:
+            probe.rpc.extend(130)
+
+    result, _ = run_it(store, probes, bridge, sleep=extend)
+
+    assert result.status == "pass"
+    assert slept == [600]
+    assert checks(store, "bridge", "all") == [(1, "unchecked", "coverage_gap"), (2, "pass", None)]
+
+
+def test_a_retry_compares_against_its_new_pin(store):
+    # This total exists only above the first pin, so a stale reading of the pin can't reach it.
+    probes = four_probes(store)
+    tempo = probes[0]
+    second = BridgeSnapshot(FOUR_CHAINS + 5, 1_125)
+    slept: list[float] = []
+
+    def mint_while_waiting(seconds):
+        slept.append(seconds)
+        for probe in probes:
+            probe.rpc.extend(130)
+        tempo.rpc.add_transfer(123, 5)
+
+    result, _ = run_it(store, probes, BridgeFeed(BAD, second), sleep=mint_while_waiting)
+
+    assert (result.bridge, result.exit_code) == ("pass", 0)
+    assert slept == [600]
+    assert checks(store, "chain_supply", "tempo") == [(1, "pass", None), (2, "pass", None)]
+    latest = store.latest_reconciliation()
+    assert latest.usable
+    assert latest.chains["tempo"].pin_height == 130
+    assert bridge_detail(store, attempt=2)["matched_times"]["tempo"] == 1_123
+
+
+def test_a_mint_lost_between_two_pins_fails_the_run_and_never_exits_zero(store):
+    probes = four_probes(store)
+    tempo = probes[0]
+    real = tempo.rpc.transfers
+
+    def lose_it(seconds):
+        tempo.rpc.extend(130)
+        tempo.rpc.add_transfer(123, 5)
+        tempo.rpc.transfers = lambda token, start, end: [
+            transfer for transfer in real(token, start, end) if transfer.block_number != 123
+        ]
+
+    # The second snapshot would pass, were it not for the check on the new pin.
+    feed = BridgeFeed(BAD, good_at(1))
+
+    result, _ = run_it(store, probes, feed, sleep=lose_it)
+
+    assert result.chains["tempo"] == "fail"
+    assert (result.status, result.exit_code) == ("fail", 1)
+    assert checks(store, "chain_supply", "tempo") == [
+        (1, "pass", None),
+        (2, "fail", "supply_mismatch"),
+        (3, "fail", "supply_mismatch"),
+    ]
+    assert checks(store, "bridge", "all") == [
+        (1, "fail", "bridge_mismatch"),
+        (2, "unchecked", "chains_not_passed"),
+    ]
+    assert not store.latest_reconciliation().usable
+
+
+def test_every_retry_repeats_the_supply_check_through_the_new_tip(store):
+    probes = four_probes(store)
+
+    def advance(seconds):
+        for probe in probes:
+            probe.rpc.extend(probe.rpc.tip() + 5)
+
+    run_it(store, probes, BridgeFeed(BAD, bad_at(1), good_at(2)), sleep=advance)
+
+    assert all(probe.syncs() == 3 for probe in probes)
+    pins = store.db.execute(
+        """
+        SELECT pin_height FROM reconciliation_checks
+        WHERE check_name = 'chain_supply' AND subject = 'base' ORDER BY attempt
+        """
+    ).fetchall()
+    assert pins == [(120,), (125,), (130,)]
+
+
+def test_a_failed_chain_stops_the_retries_and_still_reports_the_difference(store):
+    slept: list[float] = []
+
+    result, reported = run_it(
+        store,
+        four_probes(store, tempo=[Drift(1), Drift(1)]),
+        BridgeFeed(BridgeSnapshot(FOUR_CHAINS + 9, BRIDGE_T)),
+        sleep=slept.append,
+    )
+
+    assert (result.status, result.exit_code) == ("fail", 1)
+    assert result.bridge == "unchecked"
+    assert checks(store, "bridge", "all") == [(1, "unchecked", "chains_not_passed")]
+    assert slept == []
+    assert comparisons(store) == []
+    figures = [item for item in reported if isinstance(item, BridgeFigures)]
+    assert len(figures) == 1
+    # Each chain's totalSupply: tempo reads one high.
+    assert figures[0].comparison.difference == 1 - 9
+
+
+def test_an_unread_chain_is_shown_as_missing_from_the_difference(store):
+    _, reported = run_it(
+        store,
+        four_probes(store, base=[ChainUnavailable("sync_failed")]),
+        BridgeFeed(GOOD),
+    )
+
+    figures = [item for item in reported if isinstance(item, BridgeFigures)]
+    assert figures[0].comparison.chains_missing == ("base",)
+    assert figures[0].comparison.is_partial
+
+
+def test_a_bridge_outage_with_a_failed_chain_reports_no_figures(store):
+    _, reported = run_it(
+        store,
+        four_probes(store, tempo=[Drift(1), Drift(1)]),
+        BridgeFeed(HttpError("bridge: HTTP 500")),
+    )
+
+    assert not [item for item in reported if isinstance(item, BridgeFigures)]
+    assert checks(store, "bridge", "all") == [(1, "unchecked", "chains_not_passed")]
+
+
+def test_a_pass_records_the_matched_sum_with_no_amount_tolerance(store):
+    result, reported = run_it(store, four_probes(store))
+
+    assert comparisons(store) == [
+        ("tempo,ethereum,base,solana", "", FOUR_CHAINS, FOUR_CHAINS, 0, True)
+    ]
+    run_id = store.db.execute("SELECT run_id FROM bridge_comparisons").fetchone()[0]
+    assert run_id == result.run_id
+    assert bridge_detail(store) == {
+        "last_updated": BRIDGE_T,
+        "window_before": 300,
+        "window_after": 60,
+        "pin_times": dict.fromkeys(REQUIRED_CHAINS, 1_120),
+        "matched_times": dict.fromkeys(REQUIRED_CHAINS, 1_101),
+        "sum_at_t": str(FOUR_CHAINS),
+    }
+    figures = [item for item in reported if isinstance(item, BridgeFigures)]
+    assert [(item.attempt, item.snapshot, item.fetched_at) for item in figures] == [(1, GOOD, NOW)]
+    assert figures[0].comparison.difference == 0
+    assert not figures[0].comparison.is_partial
+
+
+def test_a_pass_on_a_value_other_than_t_records_the_matched_sum(store):
+    # Tempo mints at 1_105, before T, and Bridge equals the figure from before that mint.
+    probes = four_probes(store)
+    probes[0].rpc.add_transfer(105, 5)
+
+    result, _ = run_it(store, probes)
+
+    assert result.exit_code == 0
+    assert comparisons(store) == [
+        ("tempo,ethereum,base,solana", "", FOUR_CHAINS, FOUR_CHAINS, 0, True)
+    ]
+    assert bridge_detail(store)["sum_at_t"] == str(FOUR_CHAINS + 5)
+    assert bridge_detail(store)["matched_times"]["tempo"] == 1_101
+
+
+def test_a_fail_records_the_sum_at_t(store):
+    feed = BridgeFeed(bad_at(0), bad_at(1), bad_at(2))
+
+    run_it(store, four_probes(store), feed)
+
+    assert (
+        comparisons(store)
+        == [("tempo,ethereum,base,solana", "", FOUR_CHAINS, FOUR_CHAINS + 1, 0, False)] * 3
+    )
+    row = store.db.execute(
+        """
+        SELECT reference_value, observed_value, pin_height FROM reconciliation_checks
+        WHERE check_name = 'bridge' AND attempt = 1
+        """
+    ).fetchone()
+    assert row == (FOUR_CHAINS + 1, FOUR_CHAINS, None)
+
+
+def test_the_sum_at_t_agrees_with_the_store(store):
+    probes = four_probes(store)
+
+    run_it(store, probes)
+
+    expected = sum(store.supply_at_time(name, BRIDGE_T) for name in REQUIRED_CHAINS)
+    assert bridge_detail(store)["sum_at_t"] == str(expected)
+
+
+@pytest.mark.parametrize(
+    "bridge",
+    [
+        BridgeFeed(*[STALE] * 3),
+        BridgeFeed(*[HttpError("bridge: HTTP 500")] * 3),
+        BridgeFeed(*[ValueError("bad")] * 3),
+    ],
+    ids=["stale", "outage", "malformed"],
+)
+def test_nothing_compared_writes_no_comparison_row(store, bridge):
+    result, _ = run_it(store, four_probes(store), bridge)
+
+    assert result.exit_code == 3
+    assert comparisons(store) == []
+
+
+def test_a_busy_window_in_a_run_is_unchecked_and_writes_no_comparison(store, monkeypatch):
+    monkeypatch.setattr(
+        store,
+        "supply_values",
+        lambda chain, start, end, through: [(start + i, i) for i in range(10_000)],
+    )
+    feed = BridgeFeed(good_at(0), good_at(1), good_at(2))
+
+    result, _ = run_it(store, four_probes(store), feed)
+
+    assert result.exit_code == 3
+    assert checks(store, "bridge", "all")[0] == (1, "unchecked", "bridge_window_too_busy")
+    assert comparisons(store) == []
+
+
+class Crash(BaseException):
+    """The process dying, for the writes outside a transaction this run holds open."""
+
+
+class NoRollback:
+    """A connection whose rollback does nothing, as a process that dies never gets to run one."""
+
+    def __init__(self, db):
+        self._db = db
+
+    def __getattr__(self, name):
+        return getattr(self._db, name)
+
+    def rollback(self):
+        pass
+
+
+def crash_on_bridge_outcome(item):
+    if isinstance(item, CheckOutcome) and item.check_name == "bridge":
+        raise Crash
+
+
+def crashes(store, method):
+    def crash(*args, **kwargs):
+        raise Crash
+
+    setattr(store, method, crash)
+
+
+def run_until_it_crashes(path, arrange, bridge=bridge_passes, report=lambda item: None):
+    """Run into a crash, then reopen the file, which is what the next process would read."""
+    store = Store(path)
+    probes = four_probes(store)
+    arrange(store)
+    with pytest.raises(Crash):
+        run_reconciliation(probes, store, report, bridge=bridge, sleep=no_sleep, clock=lambda: NOW)
+    store.close()
+    reopened = Store(path)
+    passed = reopened.db.execute("SELECT passed FROM bridge_comparisons").fetchall()
+    unfinished = sum(row[3] for row in runs(reopened))
+    bridge_checks = checks(reopened, "bridge", "all")
+    latest = reopened.latest_reconciliation()
+    reopened.close()
+    return passed, unfinished, bridge_checks, latest
+
+
+def test_a_crash_before_the_check_row_leaves_no_passing_comparison(tmp_path):
+    def arrange(store):
+        real = store.record_check
+
+        def crash_on_bridge(run_id, check_name, *args, **kwargs):
+            if check_name == "bridge":
+                raise Crash
+            real(run_id, check_name, *args, **kwargs)
+
+        store.record_check = crash_on_bridge
+
+    passed, unfinished, bridge_checks, latest = run_until_it_crashes(
+        tmp_path / "ousd.duckdb", arrange
+    )
+
+    assert (passed, unfinished, bridge_checks, latest) == ([], 1, [], None)
+
+
+def test_a_crash_after_the_check_row_leaves_no_passing_comparison(tmp_path):
+    passed, unfinished, bridge_checks, latest = run_until_it_crashes(
+        tmp_path / "ousd.duckdb", lambda store: None, report=crash_on_bridge_outcome
+    )
+
+    assert (passed, unfinished, bridge_checks, latest) == ([], 1, [(1, "pass", None)], None)
+
+
+@pytest.mark.parametrize("method", ["record_bridge_comparison", "finish_run"])
+def test_a_passing_comparison_and_the_finished_run_are_written_together(tmp_path, method):
+    def crash_after_the_real_write(store):
+        store.db = NoRollback(store.db)
+        real = getattr(store, method)
+
+        def crash(*args, **kwargs):
+            real(*args, **kwargs)
+            raise Crash
+
+        setattr(store, method, crash)
+
+    passed, unfinished, bridge_checks, latest = run_until_it_crashes(
+        tmp_path / "ousd.duckdb", crash_after_the_real_write
+    )
+
+    assert (passed, unfinished, bridge_checks, latest) == ([], 1, [(1, "pass", None)], None)
+
+
+def test_a_finish_that_fails_takes_the_passing_comparison_with_it(store, monkeypatch):
+    def refuse(run_id, status, code):
+        raise KeyError(run_id)
+
+    monkeypatch.setattr(store, "finish_run", refuse)
+
+    with pytest.raises(KeyError):
+        run_it(store, four_probes(store))
+
+    assert comparisons(store) == []
+    assert runs(store) == [("full", None, None, True)]
+    # The rollback left the connection usable, so the failure can't hide behind a second one.
+    assert store.db.execute("SELECT count(*) FROM bridge_comparisons").fetchone() == (0,)
+
+
+def test_ctrl_c_during_the_finish_leaves_the_connection_clean_for_the_next_run(store):
+    real = store.finish_run
+
+    def interrupt(run_id, status, code):
+        real(run_id, status, code)
+        raise KeyboardInterrupt
+
+    store.finish_run = interrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run_it(store, four_probes(store))
+
+    # This same connection would read its own uncommitted pass, had it not rolled back.
+    assert comparisons(store) == []
+    assert runs(store) == [("full", None, None, True)]
+    assert store.latest_reconciliation() is None
+
+    store.finish_run = real
+    result, _ = run_it(store, four_probes(store))
+
+    assert result.exit_code == 0
+    assert [row[5] for row in comparisons(store)] == [True]
+    assert store.latest_reconciliation().usable
+
+
+def test_a_pass_and_its_comparison_are_still_there_after_the_store_is_closed(tmp_path):
+    path = tmp_path / "ousd.duckdb"
+    store = Store(path)
+    result, _ = run_it(store, four_probes(store))
+    store.close()
+
+    reopened = Store(path)
+    latest = reopened.latest_reconciliation()
+
+    assert result.exit_code == 0
+    assert runs(reopened) == [("full", "pass", 0, False)]
+    assert comparisons(reopened) == [
+        ("tempo,ethereum,base,solana", "", FOUR_CHAINS, FOUR_CHAINS, 0, True)
+    ]
+    assert latest is not None
+    assert latest.usable
+    reopened.close()
+
+
+def test_a_crash_while_waiting_after_a_fail_leaves_only_that_fail(tmp_path):
+    path = tmp_path / "ousd.duckdb"
+    store = Store(path)
+    probes = four_probes(store)
+
+    def die(seconds):
+        raise Crash
+
+    with pytest.raises(Crash):
+        run_reconciliation(
+            probes, store, lambda item: None, bridge=lambda: BAD, sleep=die, clock=lambda: NOW
+        )
+    store.close()
+    reopened = Store(path)
+
+    assert reopened.db.execute("SELECT passed FROM bridge_comparisons").fetchall() == [(False,)]
+    assert checks(reopened, "bridge", "all") == [(1, "fail", "bridge_mismatch")]
+    assert reopened.latest_reconciliation() is None
+    reopened.close()
+
+
+def test_a_failing_comparison_is_never_written_without_its_check_row(tmp_path):
+    passed, unfinished, bridge_checks, latest = run_until_it_crashes(
+        tmp_path / "ousd.duckdb",
+        lambda store: crashes(store, "record_bridge_comparison"),
+        lambda: BAD,
+    )
+
+    assert (passed, unfinished, bridge_checks, latest) == (
+        [],
+        1,
+        [(1, "fail", "bridge_mismatch")],
+        None,
+    )

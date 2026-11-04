@@ -566,3 +566,39 @@ def test_transaction_logs_naming_two_blocks_raises():
 
     with pytest.raises(ValueError, match="name blocks"):
         serving_pages([page]).transaction_logs(TX, OUSD)
+
+
+FAR_PAST_THE_SIXTH_PLACE = "1." + "0" * 100 + "1"
+
+
+@pytest.mark.parametrize(
+    "total",
+    [FAR_PAST_THE_SIXTH_PLACE, "1.0000001", "0.0000009", "1.1234560" + "0" * 100 + "1"],
+    ids=["a-hundred-zeros-in", "seventh-place", "below-one-unit", "after-trailing-zeros"],
+)
+def test_bridge_total_with_a_digit_past_the_sixth_place_is_refused(total):
+    with pytest.raises(ValueError, match="finer than one base unit"):
+        snapshot_from(bridge_body(total_onchain_amount=total))
+    with pytest.raises(ValueError, match="finer than one base unit"):
+        bridge_total_base_units(
+            http_with(lambda r: httpx.Response(200, json={"total_onchain_amount": total})),
+            "http://b.invalid",
+        )
+
+
+@pytest.mark.parametrize(
+    ("total", "base_units"),
+    [
+        ("0", 0),
+        ("007", 7_000_000),
+        ("1", 1_000_000),
+        ("1.5", 1_500_000),
+        ("0.000001", 1),
+        ("872221164.60664", 872_221_164_606_640),
+        ("1.1234560", 1_123_456),
+        ("1." + "0" * 100, 1_000_000),
+        ("999999999999999999.999999", 999_999_999_999_999_999_999_999),
+    ],
+)
+def test_bridge_total_converts_exactly(total, base_units):
+    assert snapshot_from(bridge_body(total_onchain_amount=total)).total == base_units
