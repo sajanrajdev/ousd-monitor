@@ -14,8 +14,8 @@ const LATEST = "latest";
 
 export class Refused extends Error {}
 
-// Everything real is in .next's cache or out/, and the output is moved rather than configured: a
-// custom distDir makes Next edit tsconfig.json on every build.
+// Next writes out/, and the output is moved from there, so next.config.ts is the same for every
+// build and a failed build leaves the target as it was.
 function nextBuild(webRoot, target) {
   const out = join(webRoot, "out");
   rmSync(out, { recursive: true, force: true });
