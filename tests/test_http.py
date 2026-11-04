@@ -46,6 +46,20 @@ def test_waits_as_long_as_the_rate_limit_reset_asks():
     assert sleeps == [90.0]
 
 
+def test_pauses_before_the_next_request_when_a_success_spends_the_window():
+    sleeps: list[float] = []
+    last_in_window = httpx.Response(
+        200, json={}, headers={"x-ratelimit-remaining": "0", "x-ratelimit-reset": "5000"}
+    )
+    client = client_for([last_in_window, httpx.Response(200, json={})], sleeps)
+
+    client.request_json("GET", "http://x.invalid")
+    assert sleeps == []
+
+    client.request_json("GET", "http://x.invalid")
+    assert sleeps == [5.0]
+
+
 def test_retry_after_is_honored_but_capped():
     sleeps: list[float] = []
     limited = httpx.Response(429, headers={"retry-after": "999999"})

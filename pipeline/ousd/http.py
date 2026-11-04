@@ -11,8 +11,8 @@ log = logging.getLogger(__name__)
 
 USER_AGENT = "open-usd-monitor/0.1"
 RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
-# Upper bound on honoring a server's "come back later" hint. Blockscout's window is ~22 minutes.
-MAX_SERVER_WAIT = 1800.0
+# Upper bound on honoring a server's "come back later" hint. Blockscout has asked for 36 minutes.
+MAX_SERVER_WAIT = 3600.0
 
 
 def _server_wait(response: httpx.Response) -> float:
@@ -49,6 +49,7 @@ class PoliteClient:
         self._backoff = backoff
         self._sleep = sleep
         self._last_request = 0.0
+        self._pause_next = 0.0
 
     def request_json(self, method: str, url: str, **kwargs: Any) -> Any:
         failure = ""
@@ -64,6 +65,8 @@ class PoliteClient:
             except httpx.TransportError as exc:
                 failure = repr(exc)
                 continue
+            # Spending the last request in a window: wait it out instead of earning a 429.
+            self._pause_next = _server_wait(response) if response.is_success else 0.0
             if response.status_code in RETRYABLE_STATUS:
                 failure = f"HTTP {response.status_code}"
                 server_wait = _server_wait(response)
@@ -77,7 +80,8 @@ class PoliteClient:
         raise HttpError(f"{url}: gave up after {self._max_attempts} attempts: {failure}")
 
     def _throttle(self) -> None:
-        wait = self._last_request + self._min_interval - time.monotonic()
+        wait = max(self._pause_next, self._last_request + self._min_interval - time.monotonic())
+        self._pause_next = 0.0
         if wait > 0:
             self._sleep(wait)
         self._last_request = time.monotonic()
