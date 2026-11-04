@@ -79,6 +79,8 @@ The first full pass ran at 2026-11-04 09:24 UTC. Run scope `full`, exit 0, and t
 
 **Same-looking groups are all real.** Tempo's 3,247 transactions with a group were proven from their receipts, and Ethereum's 6 from Blockscout logs. No address has a negative balance on any chain.
 
+**A second full run also passed.** At 2026-11-04 09:25 UTC it exited 0 again, with no census flag. Bridge read 902,540,685.17664, updated 09:20:49Z, which equals the chain sum, a difference of 0.
+
 ### Base
 
 The first cold backfill took 16 min 38 s, with no retries and no reorgs logged. It stored 70,743 transfers to block 53490000. Earlier checks matched at the start block, before and at the first mint, and at 52483090. A second cold backfill agreed with the first row for row, with 0 differences either way through block 53488800. It stopped once on a `-32603` "internal filter error" at block 52.53M, and that error is now retried.
@@ -87,13 +89,13 @@ The first cold backfill took 16 min 38 s, with no retries and no reorgs logged. 
 
 Two runs, about 175 minutes in total, with 2,802 HTTP 429 retries. No part of a key appeared in any log.
 
-**The first run stopped at the invariant on a plain burn.** At slot 459717019 it met a burn that was not a `Checked` form. All 142 mints and burns we had sampled by hand were `Checked` forms, so the decoder assumed they all were. The stop stored no wrong number. A small decoder change resumed the run from its cursor.
+**The first run stopped at the invariant on a plain burn.** At slot 459717019 it met a burn that was not a `Checked` form. All 142 mints and burns in our sample were `Checked` forms, so the decoder assumed they all were. The stop stored no wrong number. A small decoder change resumed the run from its cursor.
 
 **Credits charged are unknown.** The RPC doesn't report them, and the provider's dashboard wasn't read.
 
 ### What reviews found before the real run
 
-These were found by reading the code, not by running it. Each has a test now.
+These were found before any real run, by reviews that reproduced each one against fakes. Each has a test now.
 
 - **Keys leaked through parse errors.** A provider key could reach a log or an error through a parse error.
 - **The publish gate trusted the run row alone.** A pass could still be read as current after newer rows landed, or after rows changed at the same height. The gate now also compares each chain's cursor, pin hash and transfer count with what the run recorded.
