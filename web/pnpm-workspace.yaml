@@ -1,0 +1,2 @@
+# Install scripts stay off, because .env sits one directory up from every install.
+onlyBuiltDependencies: []
