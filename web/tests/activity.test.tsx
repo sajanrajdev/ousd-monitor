@@ -11,6 +11,7 @@ function mount(edit?: (props: Parameters<typeof ActivityView>[0]) => void) {
     activity: structuredClone(activity),
     kpis: structuredClone(summary.kpis),
     definitions: manifest.definitions,
+    warnings: structuredClone(manifest.warnings),
     state,
   };
   edit?.(props);
@@ -183,5 +184,67 @@ describe("the real activity view", () => {
     for (const card of container.querySelectorAll(".chart-card")) {
       expect(card.getAttribute("data-frame")).toBe("Sample");
     }
+  });
+
+  it("always says that a small circulating supply makes velocity jumpy", () => {
+    const { container } = mount();
+    expect(container.querySelector('[data-note="velocity-jumpy"]')!.textContent).toMatch(
+      /small circulating supply makes velocity jumpy/,
+    );
+    expect(container.querySelector('[data-note="velocity-warning"]')).toBeNull();
+  });
+
+  it("dates a velocity note from each circulating-supply warning, and ignores other metrics", () => {
+    const { container } = mount((props) => {
+      props.warnings = [
+        {
+          chain: "ethereum",
+          metric: "circulating_supply",
+          day: "2026-11-03",
+          previous: "6405808717650",
+          current: "2837423707650",
+        },
+        { chain: "base", metric: "total_supply", day: "2026-11-03", previous: "1", current: "2" },
+      ];
+    });
+    const notes = [...container.querySelectorAll('[data-note="velocity-warning"]')];
+    expect(notes).toHaveLength(1);
+    expect(notes[0].getAttribute("data-chain")).toBe("ethereum");
+    const text = notes[0].textContent!;
+    expect(text).toContain("3 Nov 2026 UTC");
+    expect(text).toContain("$6.4M");
+    expect(text).toContain("$2.8M");
+    expect(text).toContain("unusually high");
+    expect(text).toContain("shouldn't be read as a trend");
+    expect(notes[0].closest("section")!.querySelector("table")).not.toBeNull();
+  });
+
+  it("says the Day 0 scope as a Fact when the rows add up to supply, and leaves it out when not", () => {
+    const exact = mount((props) => {
+      const [first] = props.activity;
+      props.activity.push({
+        ...first,
+        day: "2026-09-01",
+        minted: "5000000000000",
+        burned: "1000000000000",
+      });
+      for (const kpi of props.kpis) {
+        if (kpi.chain !== first.chain) continue;
+        kpi.total_supply = props.activity
+          .filter((row) => row.chain === kpi.chain)
+          .reduce((sum, row) => sum + BigInt(row.minted) - BigInt(row.burned), 0n)
+          .toString();
+      }
+    });
+    const note = exact.container.querySelector('[data-note="day-0-scope"]')!;
+    expect(note.textContent).toContain("Fact");
+    expect(note.textContent).toContain("from Day 0, 30 Sept 2026 UTC");
+    expect(note.textContent).toContain("Supply also includes mints from before it");
+    exact.unmount();
+    // Mismatched by one base unit, so the figure isn't exact and nothing is claimed.
+    const off = mount((props) => {
+      props.activity.push({ ...props.activity[0], day: "2026-09-01", minted: "5", burned: "0" });
+    });
+    expect(off.container.querySelector('[data-note="day-0-scope"]')).toBeNull();
   });
 });

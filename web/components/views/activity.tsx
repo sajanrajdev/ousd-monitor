@@ -2,13 +2,22 @@ import { ChartCard, TableCard } from "@/components/chart-card";
 import { HairlineTable } from "@/components/hairline-table";
 import { WaterfallChart, WeeklyBars } from "@/components/views/activity-charts";
 import { dayRange, floorBps, newestByChain } from "@/lib/aggregate";
-import type { ActivityRow, Definitions, DatasetState, KpiRow } from "@/lib/dataset";
+import { StatusChip } from "@/components/status-chip";
+import type {
+  ActivityRow,
+  Definitions,
+  DatasetState,
+  KpiRow,
+  ManifestWarning,
+} from "@/lib/dataset";
 import { CHAIN_NAMES, DAY_ZERO, definitionHref } from "@/lib/definitions";
 import { formatBps, formatCompact, formatUtcDate, UNKNOWN_TEXT } from "@/lib/format";
 import {
+  day0Scope,
   historyLabel,
   perChain,
   velocityTakeaway,
+  velocityWarnings,
   waterfall,
   waterfallTakeaway,
   weeklyEveryday,
@@ -19,6 +28,7 @@ export type ActivityViewProps = {
   activity: ActivityRow[];
   kpis: KpiRow[];
   definitions: Definitions;
+  warnings: ManifestWarning[];
   state: DatasetState;
 };
 
@@ -27,6 +37,9 @@ const SOURCE = "Chain data and public labels";
 const VELOCITY_EXPLANATION =
   "Velocity divides clean volume by circulating supply. Headline velocity divides all transfers by total supply. Because circulating supply is smaller, velocity can be higher than headline velocity even though clean volume is smaller than headline volume. They aren't two cuts of one number.";
 
+const JUMPY_NOTE =
+  "A small circulating supply makes velocity jumpy: the same volume over a smaller base gives a bigger percentage.";
+
 // A dated fact from the project's own notes, not a dataset field. Issuer flows leave this out.
 function SmallTicketNote() {
   return (
@@ -34,6 +47,17 @@ function SmallTicketNote() {
       <strong>Not in the dataset:</strong> in the week of 26 Oct 2026, Bridge&rsquo;s small-ticket
       issuance, which issuer flows exclude, was $4.07M in 2,441 transfers to 237 recipients, against
       $3.13M of Tempo everyday volume. Its cause is unproven.
+    </p>
+  );
+}
+
+// Said where the waterfall is scoped. A Fact because it is minted minus burned, read from the chain.
+function Day0Note({ scope }: { scope: NonNullable<ReturnType<typeof day0Scope>> }) {
+  return (
+    <p data-note="day-0-scope">
+      <StatusChip kind="fact" /> Flows here count from Day 0, {formatUtcDate(DAY_ZERO)}. Supply also
+      includes mints from before it: {formatCompact(scope.before)} of the{" "}
+      {formatCompact(scope.total)} total.
     </p>
   );
 }
@@ -68,10 +92,12 @@ function PeriodTable({ activity }: { activity: ActivityRow[] }) {
   );
 }
 
-export function ActivityView({ activity, kpis, definitions, state }: ActivityViewProps) {
+export function ActivityView({ activity, kpis, definitions, warnings, state }: ActivityViewProps) {
   const newest = newestByChain(activity);
   const asOf = dayRange(newest.map((row) => row.day)) ?? DAY_ZERO;
   const all = waterfall(activity);
+  const scope = day0Scope(activity, kpis);
+  const velocityNotes = velocityWarnings(warnings);
   const weeks = weeklyEveryday(activity);
   const everydayLabel = formatCompact(definitions.large_transfer_base_units);
   const dust = formatCompact(definitions.active_dust_base_units);
@@ -111,6 +137,7 @@ export function ActivityView({ activity, kpis, definitions, state }: ActivityVie
         }}
         note={
           <>
+            {scope ? <Day0Note scope={scope} /> : null}
             <SmallTicketNote />
             <div className="mt-4">
               <PeriodTable activity={activity} />
@@ -176,12 +203,27 @@ export function ActivityView({ activity, kpis, definitions, state }: ActivityVie
           })),
         }}
         note={
-          <p data-note="velocity-denominators">
-            {VELOCITY_EXPLANATION}{" "}
-            <a href={definitionHref("velocity")} className="underline underline-offset-4">
-              How velocity is worked out
-            </a>
-          </p>
+          <>
+            <p data-note="velocity-denominators">
+              {VELOCITY_EXPLANATION}{" "}
+              <a href={definitionHref("velocity")} className="underline underline-offset-4">
+                How velocity is worked out
+              </a>
+            </p>
+            <p className="mt-3" data-note="velocity-jumpy">
+              {JUMPY_NOTE}
+            </p>
+            {velocityNotes.map((note) => (
+              <p
+                className="mt-3"
+                key={`${note.chain}-${note.day}`}
+                data-note="velocity-warning"
+                data-chain={note.chain}
+              >
+                {note.text}
+              </p>
+            ))}
+          </>
         }
       />
     </section>

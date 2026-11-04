@@ -28,6 +28,8 @@ const LABEL_MIN_BPS = 2500;
 type Part = (typeof JOURNEY_PARTS)[number];
 
 // Meaning colours, plus a pattern where the design system asks for one, so colour is never alone.
+// Only marks in ramp steps 3 and 4 (removed, idle) get the maroon hairline outline the design
+// system asks for. The other segments differ from their neighbours by colour and are left bare.
 const HATCH =
   "repeating-linear-gradient(45deg, transparent 0 4px, color-mix(in srgb, var(--color-maroon-dark) 45%, transparent) 4px 6px)";
 const DOTS =
@@ -35,18 +37,20 @@ const DOTS =
 
 export const PART_STYLES: Record<
   Part,
-  { label: string; background: string; image?: string; color: string }
+  { label: string; background: string; image?: string; color: string; outlined?: boolean }
 > = {
   issuer_inventory: {
     label: "Issuer inventory",
     background: "var(--meaning-removed)",
     image: HATCH,
     color: "var(--color-maroon-dark)",
+    outlined: true,
   },
   placed_supply: {
     label: "Placed",
     background: "var(--meaning-idle)",
     color: "var(--color-maroon-dark)",
+    outlined: true,
   },
   venue_dex: {
     label: "DEX venues",
@@ -119,7 +123,7 @@ function Bar({ row }: { row: BarRow }) {
           · {row.day}
         </span>
       </p>
-      <div className="mt-1 flex min-h-10 w-full overflow-hidden rounded-[var(--radius-control)] border border-[var(--color-maroon)]">
+      <div className="mt-1 flex min-h-10 w-full overflow-hidden rounded-[var(--radius-control)] border border-[var(--color-border)]">
         {parts
           .filter((p) => BigInt(p.amount) > 0n)
           .map(({ part, bps, amount }) => {
@@ -129,7 +133,7 @@ function Bar({ row }: { row: BarRow }) {
                 key={part}
                 data-part={part}
                 title={`${style.label}: ${formatCompact(amount)}`}
-                className="min-w-px overflow-hidden border-r border-[var(--color-maroon)] px-1 text-[length:var(--text-meta)] leading-tight break-words last:border-r-0"
+                className="min-w-px overflow-hidden px-1 text-[length:var(--text-meta)] leading-tight break-words"
                 style={{
                   flexBasis: `${bps / 100}%`,
                   flexGrow: 0,
@@ -138,6 +142,7 @@ function Bar({ row }: { row: BarRow }) {
                     ? `${style.image}, ${style.background}`
                     : style.background,
                   color: style.color,
+                  ...(style.outlined ? { border: "1px solid var(--color-maroon)" } : {}),
                 }}
               >
                 {bps >= LABEL_MIN_BPS ? `${style.label} ${formatBps(bps)}` : null}
@@ -194,8 +199,10 @@ export function BarLegend() {
         <li key={part} className="flex items-center gap-1">
           <span
             aria-hidden="true"
-            className="inline-block h-3 w-3 border border-[var(--color-maroon)]"
+            className="inline-block h-3 w-3 border border-[var(--color-border)]"
+            data-outlined={PART_STYLES[part].outlined ? "" : undefined}
             style={{
+              ...(PART_STYLES[part].outlined ? { borderColor: "var(--color-maroon)" } : {}),
               background: PART_STYLES[part].image
                 ? `${PART_STYLES[part].image}, ${PART_STYLES[part].background}`
                 : PART_STYLES[part].background,

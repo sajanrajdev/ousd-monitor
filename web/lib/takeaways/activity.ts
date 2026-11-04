@@ -1,5 +1,5 @@
 import { floorBps } from "../aggregate.ts";
-import type { ActivityRow, ChainName, KpiRow } from "../dataset/rows.ts";
+import type { ActivityRow, ChainName, KpiRow, ManifestWarning } from "../dataset/rows.ts";
 import { CHAIN_NAMES, DAY_ZERO } from "../definitions.ts";
 import { formatBps, formatCompact, formatUtcDate, UNKNOWN_TEXT } from "../format.ts";
 
@@ -199,5 +199,48 @@ export function velocityTakeaway(kpis: KpiRow[]): string {
   }
   const names = above.map((row) => CHAIN_NAMES[row.chain]);
   const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
-  return `On ${list}, velocity is higher than headline velocity because the two divide by different supplies.`;
+  return `On ${list}, velocity is higher than headline velocity. Velocity is clean volume over circulating supply, and headline velocity is all transfers over total supply.`;
+}
+
+export type VelocityWarning = { chain: ChainName; day: string; text: string };
+
+// One dated sentence pair per manifest warning on circulating supply, the denominator of velocity.
+// Other metrics' warnings aren't about this card. A drop makes that day's velocity unusually high,
+// a rise unusually low, and either way it isn't a trend.
+export function velocityWarnings(warnings: ManifestWarning[]): VelocityWarning[] {
+  return warnings.flatMap((warning) => {
+    if (warning.metric !== "circulating_supply") return [];
+    const fell = BigInt(warning.current) < BigInt(warning.previous);
+    const name = CHAIN_NAMES[warning.chain];
+    return [
+      {
+        chain: warning.chain,
+        day: warning.day,
+        text: `On ${formatUtcDate(warning.day)}, ${name}'s circulating supply, which its velocity divides by, moved sharply: from ${formatCompact(warning.previous)} to ${formatCompact(warning.current)}. Its velocity is unusually ${fell ? "high" : "low"} that day and shouldn't be read as a trend.`,
+      },
+    ];
+  });
+}
+
+export type Day0Scope = { before: string; total: string };
+
+// Flows count from Day 0, but supply counts every mint and burn. The part from before Day 0 is
+// stated only when each chain's mints minus burns, over all the rows, equal its reported total
+// supply to the base unit. Otherwise the rows can't carry the figure and nothing is said.
+export function day0Scope(activity: ActivityRow[], kpis: KpiRow[]): Day0Scope | null {
+  if (kpis.length === 0) return null;
+  let before = 0n;
+  let total = 0n;
+  for (const kpi of kpis) {
+    let all = 0n;
+    for (const row of activity) {
+      if (row.chain !== kpi.chain || row.day > kpi.day) continue;
+      const net = BigInt(row.minted) - BigInt(row.burned);
+      all += net;
+      if (row.day < DAY_ZERO) before += net;
+    }
+    if (all !== BigInt(kpi.total_supply)) return null;
+    total += all;
+  }
+  return before > 0n ? { before: before.toString(), total: total.toString() } : null;
 }

@@ -141,6 +141,13 @@ describe("the takeaways", () => {
     expect(velocityTakeaway(kpis)).not.toContain("Ethereum");
   });
 
+  it("says what each velocity divides, without claiming only the supplies differ", () => {
+    const text = velocityTakeaway(kpis);
+    expect(text).toContain("clean volume over circulating supply");
+    expect(text).toContain("all transfers over total supply");
+    expect(text).not.toContain("different supplies");
+  });
+
   it("is unknown when no chain has both velocities", () => {
     expect(velocityTakeaway(kpis.map((row) => ({ ...row, headline_velocity_bps: null })))).toBe(
       UNKNOWN_TEXT,
