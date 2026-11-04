@@ -167,7 +167,9 @@ having count(*) > 1
 **Test helper:** `tests/dbt_helpers.py`
 
 ```python
-def build_marts(tmp_path, transfers, labels, sync_state, reconciliations=(), select=None, dbt_vars=None) -> duckdb.DuckDBPyConnection:
+def build_marts(
+    tmp_path, transfers, labels, sync_state, reconciliations=(), select=None, dbt_vars=None
+) -> duckdb.DuckDBPyConnection:
     """Write a raw DuckDB and a labels CSV under tmp_path, run dbt build through dbtRunner,
     and return a read-only connection to the marts file. Raises if dbt fails unless told not to."""
 ```
@@ -948,7 +950,10 @@ CREATE TABLE IF NOT EXISTS check_results (
 ```python
 # sources.py
 class RpcClient:
-    def balance_of(self, token: str, address: str, block: int | str) -> int: ...  # selector 0x70a08231
+    def balance_of(
+        self, token: str, address: str, block: int | str
+    ) -> int: ...  # selector 0x70a08231
+
 
 # checks.py
 @dataclass(frozen=True)
@@ -958,17 +963,32 @@ class CheckResult:
     blocking: bool
     detail: str
 
-def run_checks(store: Store, marts: duckdb.DuckDBPyConnection, chains: list[Chain], run_id: str,
-               allow_partial: bool = False) -> list[CheckResult]: ...  # also writes check_results
+
+def run_checks(
+    store: Store,
+    marts: duckdb.DuckDBPyConnection,
+    chains: list[Chain],
+    run_id: str,
+    allow_partial: bool = False,
+) -> list[CheckResult]: ...  # also writes check_results
+
 
 # publish.py
 class PublishRefused(RuntimeError): ...
 
-def publish(run_id: str, marts_path: Path, raw_path: Path, out_root: Path,
-            allow_partial: bool = False, now: datetime | None = None) -> Path:
+
+def publish(
+    run_id: str,
+    marts_path: Path,
+    raw_path: Path,
+    out_root: Path,
+    allow_partial: bool = False,
+    now: datetime | None = None,
+) -> Path:
     """Read check_results for run_id and refuse unless all six are present and acceptable.
     Write a new dated folder, validate it against the schemas, then repoint `latest`.
     Return the new folder. Never touches `latest` on failure."""
+
 
 # verdict.py
 def build_verdict(rows: VerdictInputs) -> Verdict: ...
