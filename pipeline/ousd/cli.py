@@ -23,14 +23,15 @@ def format_units(base_units: int) -> str:
 
 
 def _rpc_for(chain: Chain) -> RpcClient:
-    return RpcClient(PoliteClient(min_interval=chain.rpc_interval), chain.rpc_url)
+    http = PoliteClient(label=f"{chain.name}-rpc", min_interval=chain.rpc_interval)
+    return RpcClient(http, chain.rpc_url)
 
 
 def _sync(chains: list[Chain], store: Store) -> int:
     for chain in chains:
         history = None
         if chain.blockscout_url:
-            http = PoliteClient(min_interval=BLOCKSCOUT_INTERVAL)
+            http = PoliteClient(label=f"{chain.name}-blockscout", min_interval=BLOCKSCOUT_INTERVAL)
             history = BlockscoutClient(http, chain.blockscout_url)
         result = sync_chain(chain, _rpc_for(chain), store, history)
         reorg = f", reorg repaired at {result.reorg_fork_block}" if result.reorg_fork_block else ""
@@ -58,7 +59,9 @@ def _reconcile(chains: list[Chain], store: Store, at_block: int | None) -> int:
 
     if at_block is None:
         url = os.environ.get("BRIDGE_API_URL", DEFAULT_BRIDGE_URL)
-        comparison = compare_with_bridge(results, bridge_total_base_units(PoliteClient(), url))
+        comparison = compare_with_bridge(
+            results, bridge_total_base_units(PoliteClient(label="bridge"), url)
+        )
         status = "PARTIAL" if comparison.is_partial else "FULL"
         print(f"Bridge comparison: {status}")
         print(f"  chains included  {', '.join(comparison.chains_included)}")

@@ -1,6 +1,6 @@
 import duckdb
 import pytest
-from conftest import ALICE, rows
+from conftest import ALICE, make_chain, rows
 from ousd.cli import format_units
 from ousd.decode import Transfer
 from ousd.store import Store
@@ -50,3 +50,9 @@ def test_format_units_uses_exact_integer_arithmetic():
     assert format_units(872_221_164_606_640) == "872,221,164.606640"
     assert format_units(-1) == "-0.000001"
     assert format_units(0) == "0.000000"
+
+
+def test_chain_repr_hides_provider_urls():
+    chain = make_chain(rpc_url="https://rpc.invalid/KEY", blockscout_url="https://bs.invalid/KEY")
+
+    assert "KEY" not in repr(chain)

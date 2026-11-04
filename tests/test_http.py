@@ -78,7 +78,7 @@ def test_a_long_pause_is_logged_and_a_short_one_is_not(caplog):
         assert caplog.messages == []
         client.request_json("GET", "http://x.invalid")
 
-    assert caplog.messages == ["rate limit window spent, pausing 90s"]
+    assert caplog.messages == ["http: rate limit window spent, pausing 90s"]
 
 
 def test_a_rate_limit_hint_does_not_outlive_its_response():
@@ -191,6 +191,41 @@ def test_a_slow_response_inside_the_deadline_succeeds():
     )
 
     assert client.request_json("GET", "http://x.invalid") == {"ok": True}
+
+
+SECRET_URL = "https://key-in-host.invalid/v2/KEY-IN-PATH"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(500),
+        httpx.Response(403, text=f"bad key for {SECRET_URL}"),
+        httpx.ConnectError("cannot reach key-in-host.invalid"),
+    ],
+)
+def test_a_failure_never_reveals_the_url(response, caplog):
+    client = PoliteClient(
+        label="testnet-rpc",
+        min_interval=0,
+        max_attempts=2,
+        transport=httpx.MockTransport(lambda request: _raise_or_return(response)),
+        sleep=lambda _: None,
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="ousd"), pytest.raises(HttpError) as failure:
+        client.request_json("POST", SECRET_URL)
+
+    text = f"{failure.value!s} {failure.value!r} {caplog.text}"
+    assert "testnet-rpc" in str(failure.value)
+    assert "KEY-IN-PATH" not in text
+    assert "key-in-host" not in text
+
+
+def _raise_or_return(item):
+    if isinstance(item, Exception):
+        raise item
+    return item
 
 
 def test_suite_cannot_reach_the_network():

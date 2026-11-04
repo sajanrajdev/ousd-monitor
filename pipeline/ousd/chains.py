@@ -2,7 +2,7 @@
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 DECIMALS = 6
 DEFAULT_DB_PATH = "data/ousd.duckdb"
@@ -17,7 +17,8 @@ class Chain:
     name: str
     chain_id: int
     token: str
-    rpc_url: str
+    # Provider URLs can hold API keys, so they stay out of repr().
+    rpc_url: str = field(repr=False)
     # First block worth scanning. Verified against the chain, see docs/build-log.md.
     start_block: int
     # Largest block span the RPC accepts in one eth_getLogs call.
@@ -27,7 +28,7 @@ class Chain:
     # Seconds between requests to the RPC.
     rpc_interval: float = 0.1
     # Blockscout API for old ranges the RPC refuses. None means the RPC serves all history.
-    blockscout_url: str | None = None
+    blockscout_url: str | None = field(default=None, repr=False)
     # Blocks at the tip read from the RPC even when Blockscout is configured. This keeps
     # unfinalized data, and anything Blockscout has not indexed yet, away from Blockscout.
     rpc_tail_blocks: int = 0

@@ -43,8 +43,11 @@ class HttpError(RuntimeError):
 
 
 class PoliteClient:
+    """Callers name each client with a label. URLs can hold API keys, so they are never logged."""
+
     def __init__(
         self,
+        label: str = "http",
         min_interval: float = 0.1,
         max_attempts: int = 6,
         backoff: float = 1.0,
@@ -56,6 +59,7 @@ class PoliteClient:
         self._client = httpx.Client(
             headers={"User-Agent": USER_AGENT}, timeout=60.0, transport=transport
         )
+        self._label = label
         self._min_interval = min_interval
         self._max_attempts = max_attempts
         self._backoff = backoff
@@ -71,7 +75,7 @@ class PoliteClient:
         for attempt in range(self._max_attempts):
             if attempt:
                 delay = max(self._backoff * 2 ** (attempt - 1), server_wait)
-                log.warning("retrying %s in %.0fs: %s", url, delay, failure)
+                log.warning("%s: retrying in %.0fs: %s", self._label, delay, failure)
                 self._sleep(delay)
             # A hint only applies to the response that gave it, not to later failures.
             server_wait = 0.0
@@ -79,7 +83,7 @@ class PoliteClient:
             try:
                 response, body = self._fetch(method, url, **kwargs)
             except httpx.TransportError as exc:
-                failure = repr(exc)
+                failure = self._scrub(repr(exc), url)
                 continue
             # Spending the last request in a window: wait it out instead of earning a 429.
             self._pause_next = _server_wait(response) if response.is_success else 0.0
@@ -88,12 +92,21 @@ class PoliteClient:
                 server_wait = _server_wait(response)
                 continue
             if response.is_error:
-                raise HttpError(f"{url}: HTTP {response.status_code}: {_snippet(body)}")
+                detail = self._scrub(_snippet(body), url)
+                raise HttpError(f"{self._label}: HTTP {response.status_code}: {detail}")
             try:
                 return json.loads(body)
             except ValueError:
                 failure = "response was not JSON"
-        raise HttpError(f"{url}: gave up after {self._max_attempts} attempts: {failure}")
+        raise HttpError(f"{self._label}: gave up after {self._max_attempts} attempts: {failure}")
+
+    def _scrub(self, text: str, url: str) -> str:
+        """Remove a URL and its parts from text a server or library produced."""
+        parsed = httpx.URL(url)
+        for secret in (url, parsed.host, parsed.path):
+            if len(secret) > 1:
+                text = text.replace(secret, f"<{self._label}>")
+        return text
 
     def _fetch(self, method: str, url: str, **kwargs: Any) -> tuple[httpx.Response, bytes]:
         """Read a whole response, raising a retryable timeout once the deadline passes."""
@@ -110,7 +123,7 @@ class PoliteClient:
         wait = max(self._pause_next, self._last_request + self._min_interval - self._clock())
         self._pause_next = 0.0
         if wait >= VISIBLE_WAIT:
-            log.warning("rate limit window spent, pausing %.0fs", wait)
+            log.warning("%s: rate limit window spent, pausing %.0fs", self._label, wait)
         if wait > 0:
             self._sleep(wait)
         self._last_request = self._clock()
