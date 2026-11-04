@@ -1,0 +1,11 @@
+ousd_monitor:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('OUSD_MARTS_DB_PATH', 'data/marts.duckdb') }}"
+      threads: 2
+      attach:
+        - path: "{{ env_var('OUSD_DB_PATH', 'data/ousd.duckdb') }}"
+          alias: raw
+          read_only: true

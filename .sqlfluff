@@ -1,0 +1,6 @@
+[sqlfluff]
+dialect = duckdb
+templater = jinja
+max_line_length = 100
+# `value` is the raw column name. The join and select-target style rules fight the plan's SQL.
+exclude_rules = RF04, ST09, LT09

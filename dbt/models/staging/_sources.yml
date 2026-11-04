@@ -1,0 +1,10 @@
+version: 2
+sources:
+  - name: raw
+    database: raw
+    schema: main
+    tables:
+      - name: transfers
+      - name: sync_state
+      - name: reconciliations
+      - name: bridge_comparisons

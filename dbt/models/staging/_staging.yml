@@ -1,0 +1,32 @@
+version: 2
+models:
+  - name: stg_transfers
+    columns:
+      - name: chain
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [tempo, ethereum, base, solana]
+      - name: block_number
+        data_tests: [not_null]
+      - name: log_index
+        data_tests: [not_null]
+      # block_hash is deliberately untested: Blockscout and Solana rows have none.
+      - name: block_hash
+      - name: block_timestamp
+        data_tests: [not_null]
+      - name: day_utc
+        data_tests: [not_null]
+      - name: tx_hash
+        data_tests: [not_null]
+      - name: from_address
+        data_tests: [not_null]
+      - name: to_address
+        data_tests: [not_null]
+      - name: value
+        data_tests: [not_null]
+  - name: stg_sync_coverage
+    columns:
+      - name: chain
+        data_tests: [unique, not_null]
