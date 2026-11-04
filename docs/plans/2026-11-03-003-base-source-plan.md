@@ -244,22 +244,25 @@ Run by the coordinator after both units merge, from the primary checkout on `dev
 # 0. Back up the rows that took hours to fetch. Keep this until steps 1 to 8 pass.
 cp -n data/ousd.duckdb data/ousd.pre-base.duckdb
 
+# Steps 2 to 6 check one chain, so they are a partial run. Since unit 1.4 they print MATCH
+# and then exit 3 (unchecked), because a full pass is all four chains. Exit 3 here is expected.
+# A mismatch still exits 1.
 # 1. Backfill. About 486 log calls and up to 1,200 header calls. Resumes if interrupted.
 uv run --locked --env-file .env ousd -v --chain base sync
 
-# 2. At the synced tip. Must print MATCH with a difference of 0 base units.
+# 2. At the synced tip. Must print MATCH with a difference of 0 base units, then exit 3.
 uv run --locked --env-file .env ousd --chain base reconcile
 
-# 3. At the start block. Must print MATCH with every value 0.
+# 3. At the start block. Must print MATCH with every value 0, then exit 3.
 uv run --locked --env-file .env ousd --chain base reconcile --at-block 48631941
 
-# 4. Just before the first mint. Must print MATCH with every value 0.
+# 4. Just before the first mint. Must print MATCH with every value 0, then exit 3.
 uv run --locked --env-file .env ousd --chain base reconcile --at-block 50497982
 
-# 5. At the first mint. Must print MATCH with totalSupply() 1.000000.
+# 5. At the first mint. Must print MATCH with totalSupply() 1.000000, then exit 3.
 uv run --locked --env-file .env ousd --chain base reconcile --at-block 50497983
 
-# 6. At a known point. Must print MATCH with totalSupply() 84,834,727.170000.
+# 6. At a known point. Must print MATCH with totalSupply() 84,834,727.170000, then exit 3.
 uv run --locked --env-file .env ousd --chain base reconcile --at-block 52483090
 
 # 7. No address may have a negative balance. Must print 0. Catches many lost inflows.

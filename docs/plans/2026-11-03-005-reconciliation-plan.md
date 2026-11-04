@@ -1,7 +1,7 @@
 ---
 title: "feat: Full cross-chain reconciliation against Bridge (Phase 1, unit 1.4)"
 type: feat
-status: active
+status: completed
 date: 2026-11-03
 ---
 
@@ -267,7 +267,7 @@ U4, U5 and U6 change `pipeline/ousd/reconcile.py`, a protected path, and contain
 
 ---
 
-- [ ] **U1. Store tables and queries (foundation)**
+- [x] **U1. Store tables and queries (foundation)**
 
 **Goal:** the tables and read queries the checks use.
 
@@ -303,7 +303,7 @@ U4, U5 and U6 change `pipeline/ousd/reconcile.py`, a protected path, and contain
 
 ---
 
-- [ ] **U2. Source reads (foundation)**
+- [x] **U2. Source reads (foundation)**
 
 **Goal:** the reads the checks need, with no decisions in them.
 
@@ -335,7 +335,7 @@ U4, U5 and U6 change `pipeline/ousd/reconcile.py`, a protected path, and contain
 
 ---
 
-- [ ] **U3. Ingest guards: refuse a moved row, and keep top-ups on RPC**
+- [x] **U3. Ingest guards: refuse a moved row, and keep top-ups on RPC**
 
 **Goal:** the standing guard against `logIndex` drift, and daily Ethereum top-ups that avoid Blockscout's lag gap.
 
@@ -363,7 +363,7 @@ In `chains.py`, Ethereum's `rpc_tail_blocks` goes from 2,000 to 9,000, with a co
 
 ---
 
-- [ ] **U4. Status model and per-chain supply check**
+- [x] **U4. Status model and per-chain supply check**
 
 **Goal:** the three statuses, the run, and blocking check 1 with its retry.
 
@@ -401,7 +401,7 @@ In `chains.py`, Ethereum's `rpc_tail_blocks` goes from 2,000 to 9,000, with a co
 
 ---
 
-- [ ] **U5. Bridge check**
+- [x] **U5. Bridge check**
 
 **Goal:** blocking check 2, with the timing window and attempts.
 
@@ -437,7 +437,7 @@ In `chains.py`, Ethereum's `rpc_tail_blocks` goes from 2,000 to 9,000, with a co
 
 ---
 
-- [ ] **U6. Sampled balances and same-looking proof**
+- [x] **U6. Sampled balances and same-looking proof**
 
 **Goal:** blocking check 3 and the `same_looking` check.
 
@@ -476,7 +476,7 @@ In `chains.py`, Ethereum's `rpc_tail_blocks` goes from 2,000 to 9,000, with a co
 
 ---
 
-- [ ] **U7. Chain probes**
+- [x] **U7. Chain probes**
 
 **Goal:** connect the checks to each chain family, away from the protected path.
 
@@ -510,7 +510,7 @@ In `chains.py`, Ethereum's `rpc_tail_blocks` goes from 2,000 to 9,000, with a co
 
 ---
 
-- [ ] **U8. CLI**
+- [x] **U8. CLI**
 
 **Goal:** `ousd reconcile` runs the whole thing, reports it plainly and exits correctly.
 
@@ -539,7 +539,7 @@ In `chains.py`, Ethereum's `rpc_tail_blocks` goes from 2,000 to 9,000, with a co
 
 ---
 
-- [ ] **U9. Docs**
+- [x] **U9. Docs**
 
 **Goal:** the README and build log match the code.
 
@@ -600,6 +600,7 @@ for row in db.execute('''
 |---|---|
 | Exit 0 | Phase 1's reconciliation is done. Add the result to the build log |
 | Exit 3 | Read the reasons. `bridge_*`, `state_unavailable`, `sync_failed` and `pin_behind_cursor`: rerun later. `not_synced`: run step 2. `census_missing`: run step 3. `group_proof_unavailable`: report it, as an archive source may be needed |
+| Exit 3, `not_synced`, on Solana with a tail over 100,000 slots | A check syncs at most 100,000 slots (about 11 hours), because more is a backfill that would hold the database lock for hours. Run `make sync` first, then reconcile again |
 | Exit 1 | Stop and report. Don't rerun until it's understood. **A group that isn't real, or a `bridge_mismatch`, goes to the maintainer** |
 
 ### Owner action, before or after the run
