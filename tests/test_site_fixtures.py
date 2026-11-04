@@ -1,6 +1,7 @@
 """The site's sample datasets stay true to what the pipeline would write, and can't pass as real."""
 
 import json
+import re
 import shutil
 import subprocess
 from datetime import timedelta
@@ -12,11 +13,12 @@ import yaml
 from ousd import publish as publisher
 from ousd.chains import REQUIRED_CHAINS
 from ousd.publish import DAY_ZERO, VELOCITY_DEFINITIONS
-from ousd.verdict import known_limits
+from ousd.verdict import EVERYDAY_THRESHOLD_BPS, PLACED_THRESHOLD_BPS, known_limits
 
 REPO = Path(__file__).resolve().parent.parent
 SAMPLES = REPO / "web" / "fixtures" / "dataset"
 README = (REPO / "labels" / "README.md").read_text()
+METHODOLOGY = (REPO / "docs" / "methodology.md").read_text()
 JSON_FILES = (
     "manifest.json",
     "summary.json",
@@ -149,6 +151,45 @@ def test_the_site_lists_the_real_token_contracts() -> None:
 
     for address in publisher._token_contracts():
         assert f'"{address}"' in site_constants
+
+
+def test_the_methodology_legend_and_rule_are_the_labels_readmes_words(sample: str) -> None:
+    labels = read(sample, "labels.json")
+    rule = METHODOLOGY.partition("### The rule")[2].partition("\n## ")[0]
+
+    assert publisher._read_legend(METHODOLOGY) == publisher._read_legend(README)
+    assert publisher._read_legend(METHODOLOGY) == labels["source_legend"]
+    assert " ".join(rule.split()) == labels["unnamed_clusters"]["rule"]
+
+
+def test_the_methodology_states_every_limit_the_dataset_always_carries(sample: str) -> None:
+    conditional = {"no_issuer_row", "no_issuer_label", "local_preview", "chains_missing"}
+
+    for limit in read(sample, "summary.json")["known_limits"]:
+        if limit["id"] not in conditional:
+            assert limit["text"] in METHODOLOGY, limit["id"]
+
+
+def test_the_methodology_states_the_defaults_the_site_and_verdict_use() -> None:
+    constants = (REPO / "web" / "lib" / "definitions.ts").read_text()
+    block = constants.partition("DEFAULT_DEFINITIONS = {")[2].partition("velocity:")[0]
+    defaults = {
+        name: value.strip('"') for name, value in re.findall(r"(\w+): (\"?[^\",\n]+\"?),", block)
+    }
+    stated = dict(re.findall(r"^\| `([a-z_]+)` \| (.+?) \|$", METHODOLOGY, re.MULTILINE))
+
+    assert len(defaults) == 7
+    for name, value in defaults.items():
+        assert stated[name] == value, name
+    assert stated["placed_threshold_bps"] == str(PLACED_THRESHOLD_BPS)
+    assert stated["everyday_threshold_bps"] == str(EVERYDAY_THRESHOLD_BPS)
+    for bps in (PLACED_THRESHOLD_BPS, EVERYDAY_THRESHOLD_BPS):
+        assert f"{bps // 100}% ({bps:,} basis points)" in METHODOLOGY
+
+
+def test_the_methodology_lists_the_real_token_contracts_exactly() -> None:
+    for address in publisher._token_contracts():
+        assert f"`{address}`" in METHODOLOGY
 
 
 @pytest.fixture
