@@ -5,7 +5,14 @@ import logging
 import os
 import sys
 
-from ousd.chains import DECIMALS, DEFAULT_BRIDGE_URL, DEFAULT_DB_PATH, Chain, load_chains
+from ousd.chains import (
+    DECIMALS,
+    DEFAULT_BRIDGE_URL,
+    DEFAULT_DB_PATH,
+    Chain,
+    load_chains,
+    missing_rpc_keys,
+)
 from ousd.http import PoliteClient
 from ousd.ingest import sync_chain
 from ousd.reconcile import ChainReconciliation, compare_with_bridge, reconcile_chain
@@ -89,8 +96,6 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.INFO if args.verbose else logging.WARNING,
         format="%(asctime)s %(levelname)s %(message)s",
     )
-    # httpx logs every request at INFO, which would bury our progress lines.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     available = load_chains()
     unknown = set(args.chain or []) - set(available)
@@ -100,6 +105,9 @@ def main(argv: list[str] | None = None) -> int:
     # Block numbers mean nothing across chains.
     if args.command == "reconcile" and args.at_block is not None and len(chains) != 1:
         parser.error("--at-block needs exactly one --chain")
+    missing = missing_rpc_keys([chain.name for chain in chains], os.environ)
+    if missing:
+        parser.error(f"set {', '.join(missing)} in .env, or limit the run with --chain")
 
     store = Store(os.environ.get("OUSD_DB_PATH", DEFAULT_DB_PATH))
     try:

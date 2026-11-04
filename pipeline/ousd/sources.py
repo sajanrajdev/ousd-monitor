@@ -73,7 +73,7 @@ class RpcClient:
         payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
         body = self._http.request_json("POST", self._url, json=payload)
         if "error" in body:
-            raise RpcError(f"{method} {params}: {body['error']}")
+            raise RpcError(self._http.scrub(f"{method} {params}: {body['error']}", self._url))
         return body["result"]
 
     def chain_id(self) -> int:
@@ -204,7 +204,9 @@ class BlockscoutClient:
         if body["status"] != "1":
             if body["message"].startswith("No logs found"):
                 return []
-            raise RuntimeError(f"Blockscout error for {params}: {body}")
+            raise RuntimeError(
+                self._http.scrub(f"Blockscout error for {params}: {body}", self._url)
+            )
         return [decode_blockscout_log(entry, token) for entry in body["result"]]
 
     def pages(

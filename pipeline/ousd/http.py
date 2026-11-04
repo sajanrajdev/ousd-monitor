@@ -2,13 +2,19 @@
 
 import json
 import logging
+import re
 import time
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import parse_qsl, quote, quote_plus, unquote, urlsplit
 
 import httpx
 
 log = logging.getLogger(__name__)
+# httpx and httpcore log every request URL at INFO and DEBUG, and a URL can hold an API key.
+# Setting this here covers every caller that imports the client, not only the CLI.
+for _name in ("httpx", "httpcore"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
 
 USER_AGENT = "open-usd-monitor/0.1"
 RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
@@ -17,6 +23,8 @@ MAX_SERVER_WAIT = 3600.0
 # Longest one attempt may run. The read timeout only limits the gap between bytes, so without
 # this a server trickling data could hold a request open indefinitely.
 REQUEST_DEADLINE = 120.0
+# Shortest URL part worth hiding on its own. Shorter parts are words like "v2" or "base".
+MIN_SECRET_PART = 8
 # Pauses at least this long are logged, so a quiet process means a hang and not a wait.
 VISIBLE_WAIT = 5.0
 
@@ -34,8 +42,29 @@ def _server_wait(response: httpx.Response) -> float:
     return 0.0
 
 
-def _snippet(body: bytes) -> str:
-    return body[:200].decode(errors="replace")
+def _url_parts(url: str) -> set[str]:
+    """The pieces of a URL that could carry or reveal a key, longer than a bare word."""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+    except ValueError:
+        return set()
+    found = {host}
+    long_parts = [parts.path, *host.split("."), *parts.path.split("/")]
+    long_parts.append(parts.fragment)
+    for pair in parts.query.split("&"):
+        long_parts += pair.partition("=")[::2]
+    for name, value in parse_qsl(parts.query, keep_blank_values=True):
+        long_parts += [name, value]
+    long_parts += [parts.username or "", parts.password or ""]
+    found.update(part for part in long_parts if len(part) >= MIN_SECRET_PART)
+    for part in list(found):
+        found.update(
+            variant
+            for variant in (unquote(part), quote(part, safe=""), quote_plus(part))
+            if len(variant) >= MIN_SECRET_PART
+        )
+    return {part for part in found if len(part) > 1}
 
 
 class HttpError(RuntimeError):
@@ -80,11 +109,18 @@ class PoliteClient:
             # A hint only applies to the response that gave it, not to later failures.
             server_wait = 0.0
             self._throttle()
+            invalid_url = False
             try:
                 response, body = self._fetch(method, url, **kwargs)
-            except httpx.TransportError as exc:
-                failure = self._scrub(repr(exc), url)
+            except httpx.InvalidURL:
+                # Its text can quote part of the URL, so only the label is kept.
+                invalid_url = True
+            except httpx.RequestError as exc:
+                failure = self.scrub(repr(exc), url)
                 continue
+            if invalid_url:
+                # Raised outside the except block so that no cause or context is attached.
+                raise HttpError(f"{self._label}: invalid URL")
             # Spending the last request in a window: wait it out instead of earning a 429.
             self._pause_next = _server_wait(response) if response.is_success else 0.0
             if response.status_code in RETRYABLE_STATUS:
@@ -92,7 +128,8 @@ class PoliteClient:
                 server_wait = _server_wait(response)
                 continue
             if response.is_error:
-                detail = self._scrub(_snippet(body), url)
+                # Scrub the whole body first: a cut at 200 bytes could split a key in two.
+                detail = self.scrub(body.decode(errors="replace"), url)[:200]
                 raise HttpError(f"{self._label}: HTTP {response.status_code}: {detail}")
             try:
                 return json.loads(body)
@@ -100,13 +137,19 @@ class PoliteClient:
                 failure = "response was not JSON"
         raise HttpError(f"{self._label}: gave up after {self._max_attempts} attempts: {failure}")
 
-    def _scrub(self, text: str, url: str) -> str:
-        """Remove a URL and its parts from text a server or library produced."""
-        parsed = httpx.URL(url)
-        for secret in (url, parsed.host, parsed.path):
-            if len(secret) > 1:
-                text = text.replace(secret, f"<{self._label}>")
-        return text
+    def scrub(self, text: str, url: str) -> str:
+        """Remove a URL and its parts from text a server or library produced.
+
+        Besides the URL, host and path, this hides each host label, path segment, query value,
+        username and password of 8 or more characters, because a provider may echo the bare key.
+        Longer parts go first and everything is replaced in one pass, so inserted labels are
+        never rewritten.
+        """
+        secrets = {part for part in (url, *_url_parts(url)) if len(part) > 1}
+        if not secrets:
+            return text
+        pattern = "|".join(re.escape(part) for part in sorted(secrets, key=len, reverse=True))
+        return re.sub(pattern, lambda _: f"<{self._label}>", text, flags=re.IGNORECASE)
 
     def _fetch(self, method: str, url: str, **kwargs: Any) -> tuple[httpx.Response, bytes]:
         """Read a whole response, raising a retryable timeout once the deadline passes."""
