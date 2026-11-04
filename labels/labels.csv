@@ -1,0 +1,23 @@
+chain,address,entity,category,source_type,source_url,confidence,date_checked
+base,0x498581ff718922c3f8e6a244956af099b2652b2b,Uniswap v4 PoolManager,dex,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
+base,0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8,Bridge,issuer,published_research,https://crystalintelligence.com/stablecoin/ousd-stablecoin-first-week-on-chain-analysis/,high,2026-11-04
+ethereum,0x000000000004444c5dc75cb358380d2e3de08a90,Uniswap v4 PoolManager,dex,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
+ethereum,0x0198f9d5c8e8ef8869d70d387d3efa997f727464,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+ethereum,0x1767c61c9ec15126de4eb02cd9a91474584a1873,,issuer_route,onchain_metadata,https://etherscan.io/address/0x1767c61c9ec15126de4eb02cd9a91474584a1873,medium,2026-11-04
+ethereum,0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+ethereum,0x4508a7021dfb7a1afe5ff60169c1778c303389fb,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+ethereum,0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8,Bridge,issuer,explorer_tag,https://etherscan.io/address/0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8,high,2026-11-04
+ethereum,0x8458377a025da58e9cb547c979d5002c822a05cb,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+ethereum,0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43,Coinbase,exchange,explorer_tag,https://etherscan.io/address/0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43,high,2026-11-04
+tempo,0x0d136e26b4d9e4836fc5cb202baeb49cb6f5df48,Sentora OUSD Main,lending,project_docs,https://curator.morpho.org/vaults/4217/0x0d136e26b4d9e4836fc5cb202baeb49cb6f5df48,high,2026-11-04
+tempo,0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+tempo,0x33620f62c5b9b2086dd6b62f4a297a9f30347029,Uniswap v4 PoolManager,dex,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
+tempo,0x334cc71f818324f3932ab9d41285450373b84cdc,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+tempo,0x4508a7021dfb7a1afe5ff60169c1778c303389fb,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+tempo,0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8,Bridge,issuer,published_research,https://crystalintelligence.com/stablecoin/ousd-stablecoin-first-week-on-chain-analysis/,high,2026-11-04
+tempo,0x5176dfcab18ff5519bc1cfa4c6ef2d8008371d5f,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+tempo,0x8458377a025da58e9cb547c979d5002c822a05cb,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+tempo,0xb10c000000000000000000000000000000000000,Tempo ReceivePolicyGuard,system,project_docs,https://tempo.xyz/developers/docs/quickstart/predeployed-contracts,high,2026-11-04
+tempo,0xb86b3ccce82f6cb767c45afb9fb032ae5fde3592,Tempo Earn,lending,project_docs,https://curator.morpho.org/vaults/4217/0xb86b3ccce82f6cb767c45afb9fb032ae5fde3592,medium,2026-11-04
+tempo,0xdec0000000000000000000000000000000000000,Tempo Stablecoin DEX,dex,project_docs,https://tempo.xyz/developers/docs/quickstart/predeployed-contracts,high,2026-11-04
+tempo,0xfeec000000000000000000000000000000000000,Tempo Fee Manager,system,project_docs,https://tempo.xyz/developers/docs/quickstart/predeployed-contracts,high,2026-11-04

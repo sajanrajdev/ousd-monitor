@@ -1,0 +1,43 @@
+version: 2
+models:
+  - name: stg_labels
+    columns:
+      - name: chain
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [tempo, ethereum, base, solana]
+      - name: address
+        data_tests: [not_null]
+      # entity is deliberately untested: unnamed clusters have none.
+      - name: entity
+      - name: category
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [issuer, issuer_route, system, dex, lending, exchange]
+      - name: source_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - explorer_tag
+                  - project_docs
+                  - company_docs
+                  - official_statement
+                  - published_research
+                  - onchain_metadata
+                  - derived_rule
+      - name: source_url
+        data_tests: [not_null]
+      - name: confidence
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [high, medium]
+      - name: date_checked
+        data_tests: [not_null]
