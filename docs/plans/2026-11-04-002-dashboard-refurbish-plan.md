@@ -200,7 +200,7 @@ Each row is current text and its new home. U6 proves this by script: see `compar
 | Words in `main`, at 1440 | 1,489 | About 450 | 510 |
 | Height at 1440 | 6,676 px | Under half | Under 3,338 px |
 | Height at 390 | 12,858 px | Under half | Under 6,429 px |
-| `index.html`, gzipped | 24,880 bytes | No target | Under 150,000 bytes |
+| `index.html`, gzipped | 24,867 bytes | No target | Under 150,000 bytes |
 
 **Words, counted from draft strings on the real dataset.** This is a draft, and the final count comes from U6.
 
@@ -346,13 +346,13 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 **Suggested worker:** a frontend engineer strong on accessibility and native HTML. High effort, as every later unit builds on this.
 
 **Files**
-- Create: `web/components/info-popover.tsx`, `web/components/explain-enhance.tsx`, `web/components/pinned-notes.tsx`, `web/components/data-toggle.tsx`, `web/components/chain-filter.tsx`, `web/components/chain-panels.tsx`, `web/components/marker-legend.tsx`, `web/lib/chain-scope.ts`, `web/scripts/measure-page.mjs`, `web/scripts/acceptance.mjs`
-- Modify: `web/components/chart-card.tsx`, `web/components/status-chip.tsx`, `web/app/layout.tsx`, `web/app/globals.css`, `web/app/tokens.css`, `web/scripts/verify-output.mjs`, `web/package.json`, `Makefile`, `docs/design-system.md`
+- Create: `web/components/info-popover.tsx`, `web/components/explain-enhance.tsx`, `web/components/pinned-notes.tsx`, `web/components/data-toggle.tsx`, `web/components/chain-filter.tsx`, `web/components/chain-panels.tsx`, `web/components/marker-legend.tsx`, `web/lib/chain-scope.ts`, `web/scripts/measure-page.mjs`, `web/scripts/acceptance.mjs`, `web/scripts/local-browser.mjs`
+- Modify: `web/components/chart-card.tsx`, `web/components/status-chip.tsx`, `web/components/views/journey.tsx`, `web/app/layout.tsx`, `web/app/globals.css`, `web/app/tokens.css`, `web/scripts/verify-output.mjs`, `web/scripts/shots.mjs`, `web/package.json`, `Makefile`, `docs/design-system.md`
 - Test: `web/tests/info-popover.test.tsx`, `web/tests/pinned-notes.test.tsx`, `web/tests/data-toggle.test.tsx`, `web/tests/chain-filter.test.tsx`, `web/tests/marker-legend.test.tsx`, `web/tests/chain-scope.test.ts`, `web/tests/chart-card.test.tsx`, `web/tests/shell.test.tsx`, `web/tests/verify-output.test.ts`
 
 **Approach**
 - **Tokens:** add those listed under "Tokens the refurbish adds" in `docs/design-system.md` to `tokens.css`, and move their rows into the design system's real tables in the same change, as `tokens.test.ts` requires.
-- **`ChartCard`:** the same required props, plus an optional `notes: PinnedNote[]`. It renders the heading, marker, popover, plot, notes, data toggle and visible meta. `note` stays until U5, so old views keep working. The visually hidden `summary` stays for assistive tech.
+- **`ChartCard`:** the same required props, plus optional `notes: PinnedNote[]`, `id`, `detail` (more for the popover: a long takeaway or a note in full), `moreTables` (further tables under the toggle) and `needsJs`, because U2 to U4 fill these and don't change this file. It renders the heading, marker, popover, plot, notes, data toggle and visible meta. `note` stays until U5, so old views keep working. The visually hidden `summary` stays for assistive tech.
 - **`.chart-card__meta`:** holds the as-of `time` and the frame word, always visible. Source and definition link move into the popover and the `<noscript>` note.
 - **Info popover:** a `<details name="info">`. The `<summary>` is placed into a corner the head reserves, and the panel flows beneath the head. Panel text is at least `--text-small`. Its trigger is at least 24 px, with an `aria-label` naming the card.
 - **`explain-enhance`:** one client component, mounted once in the layout, with delegated listeners and nothing else. With a mouse, hover opens after a short delay, and leaving closes after a short delay unless it was clicked open. The first click on a hover-opened panel keeps it open rather than closing it. Escape closes and returns focus to the trigger. Outside clicks close. Clicking a finding link sets the filter to All. A reader without it loses none of the content.
@@ -365,7 +365,7 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 - **Without JavaScript:** a chart that needs it says "This chart needs JavaScript. The Table button has the same data.", since the table no longer sits below it.
 - **`verify-output`:** `checkCards` now requires a visible `time[datetime]` in `.chart-card__meta`, outside any `details`. It requires "Source:" and a definition link both in the popover panel and in a `<noscript>` note. A new check fails any `[data-pinned-notes]` inside a `details` or `noscript`.
 - **`measure-page.mjs`:** the method in [the budget](#word-and-height-budget). Run it on a build of the current site in this unit's PR, to pin the baseline.
-- **`acceptance.mjs`:** local only, never called by `make check`, through `make web-acceptance`. It takes built folders, and each later unit adds checks. It starts with the browser checks for this unit.
+- **`acceptance.mjs`:** local only, never called by `make check`, through `make web-acceptance`. It takes built folders, and each later unit adds checks. It starts with the browser checks for this unit. The filter, legend and grid aren't on the page until U2 and U3, so it renders those real components with made-up amounts into the built page, under `[data-harness]`. Each later unit drops the part it mounts for real.
 
 **Test scenarios**
 - Happy path: a card renders heading, marker and visible as-of. Source and definition are in the panel, and in `noscript` when parsed as `verify-output` parses it.
@@ -406,7 +406,7 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 - **Trust status:** the same sentences and marker, one slim row at the top of the first screen. "What this covers" and "Reconciliation detail" become one disclosure with the same text and table. `data-section="trust-strip"` stays.
 - **Headline block:** the question line, then the headline at `--text-headline`, the "Our reading" marker, an info popover, and the as-of line. Follow [the interim text rule](#headline-wording-open). The popover holds "How we read this", `verdict.text` where allowed, and `verdictGroups`. Add `verdictTextVisible(verdict, state)` to `web/lib/verdict.ts`. `VERDICT_SENTENCES` doesn't change.
 - **KPI row:** label, value and marker in each cell, with the note and definition link in its popover. "Across {chains}." and the frame word stay visible. The as-of line above covers the KPI's date, and the build's check of it stays.
-- **Findings row:** four cards, each a whole-card link with a heading's text and its marker. Add `journeyHeading`, `waterfallHeading`, `weeklyHeading` and `chainRolesHeading` beside the long takeaways, which stay for popovers. Worded for the real dataset:
+- **Findings row:** four cards, each a whole-card link carrying `data-finding-link`, which is how `explain-enhance` knows to set the filter to All, with a heading's text and its marker. Add `journeyHeading`, `waterfallHeading`, `weeklyHeading` and `chainRolesHeading` beside the long takeaways, which stay for popovers. Worded for the real dataset:
 
   | Function | Text on dataset 20261104T163224Z | Words |
   |---|---|---|
@@ -533,7 +533,7 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 - **Chain grid:** a real `<table>`, with measures as rows and chains as columns. Share of supply, minted in 30 days, everyday share, DEX flow share, lending flow. In-cell bars scale to each row's largest value. A lead marker comes from `leading_for`, with its meaning in words for assistive tech. A row of as-of days appears only when chains differ. Below the card-width rule, each measure stacks with four label and value pairs.
 - **Table:** the current chain roles table, with burned, placed share and "Leads on", under the toggle.
 - **Heading:** `chainRolesHeading` from U2. The no-swaps note is pinned.
-- **Cleanup:** remove `note` from `ChartCard`, and `TableCard` once nothing uses it.
+- **Cleanup:** remove `note` from `ChartCard`. `TableCard` stays for the methodology page's two cards, so remove only what the main page no longer uses.
 - **`verify-output`:** for each `circulating_supply` warning in the manifest, the main page must have a `data-note="velocity-warning"` for that chain outside any `details` and `noscript`. This makes the essential rule fail the build. The same check covers `data-note="no-swaps"` and the placed note.
 
 **Test scenarios**

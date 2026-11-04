@@ -38,6 +38,13 @@ function filesUnder(dir) {
   });
 }
 
+// The card's visible line. What's in a details or noscript isn't in view, so it doesn't count.
+function visibleMeta(card) {
+  return [...card.querySelectorAll(".chart-card__meta")].find(
+    (meta) => !meta.closest("details, noscript"),
+  );
+}
+
 function visibleTextNodes(document) {
   const { NodeFilter } = document.defaultView;
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -83,7 +90,7 @@ function checkStateOnPage(page, document, expected, problems) {
     if (card.getAttribute("data-frame") !== word) {
       problems.push(`${page}: a card has no ${word} edge`);
     }
-    if (!card.querySelector(".chart-card__meta")?.textContent.includes(word)) {
+    if (!visibleMeta(card)?.textContent.includes(word)) {
       problems.push(`${page}: a card has no "${word}" beside its as-of time`);
     }
   }
@@ -153,13 +160,35 @@ function checkAddresses(page, texts, allowedAddresses, problems) {
   }
 }
 
+function hasSourceAndDefinition(block) {
+  return {
+    source: Boolean(block?.textContent.includes("Source:")),
+    definition: Boolean(block?.querySelector('a[href*="#"]')),
+  };
+}
+
+// A card's time stays in view. Its source and definition are one tap away in the popover, and are in
+// a plain note with JavaScript off, which the page's parser reads as elements here.
 function checkCards(page, document, problems) {
   for (const card of document.querySelectorAll(".chart-card")) {
-    const meta = card.querySelector(".chart-card__meta");
-    if (!meta?.textContent.includes("Source:")) problems.push(`${page}: a card has no source`);
-    if (!meta?.querySelector("time[datetime]")) problems.push(`${page}: a card has no as-of time`);
-    const link = meta?.querySelector('a[href*="#"]');
-    if (!link) problems.push(`${page}: a card has no definition link`);
+    if (!visibleMeta(card)?.querySelector("time[datetime]")) {
+      problems.push(`${page}: a card has no visible as-of time`);
+    }
+    const panel = hasSourceAndDefinition(card.querySelector(".info-popover__panel"));
+    if (!panel.source) problems.push(`${page}: a card's popover has no source`);
+    if (!panel.definition) problems.push(`${page}: a card's popover has no definition link`);
+    const notes = [...card.querySelectorAll("noscript")].map(hasSourceAndDefinition);
+    if (!notes.some((note) => note.source)) {
+      problems.push(`${page}: a card's noscript note has no source`);
+    }
+    if (!notes.some((note) => note.definition)) {
+      problems.push(`${page}: a card's noscript note has no definition link`);
+    }
+  }
+  for (const notes of document.querySelectorAll("[data-pinned-notes]")) {
+    if (notes.closest("details, noscript")) {
+      problems.push(`${page}: pinned notes inside a details or noscript`);
+    }
   }
 }
 

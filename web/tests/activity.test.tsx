@@ -29,10 +29,10 @@ describe("the real activity view", () => {
     expect(cards).toHaveLength(3);
     for (const card of cards) {
       expect(card.querySelector("h2")!.textContent!.length).toBeGreaterThan(10);
-      const meta = card.querySelector(".chart-card__meta")!.textContent!;
-      expect(meta).toContain("Source:");
-      expect(meta).toContain("As of");
-      expect(card.querySelector('a[href^="/methodology/#"]')).not.toBeNull();
+      expect(card.querySelector(".chart-card__meta")!.textContent).toContain("As of");
+      const panel = card.querySelector(".info-popover__panel")!;
+      expect(panel.textContent).toContain("Source:");
+      expect(panel.querySelector('a[href^="/methodology/#"]')).not.toBeNull();
     }
   });
 

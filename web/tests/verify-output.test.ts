@@ -9,8 +9,11 @@ import { at, copySample, editJson, plantFile, releaseGrade, tempDir } from "./da
 const LINE = "Independent. Not affiliated with Open Standard or Bridge.";
 const BLOCKED = JSON.parse(readFileSync("scripts/blocked-names.json", "utf8")) as string[];
 const CARD = `<section class="chart-card" data-frame="Sample"><h2>T</h2>
-  <p class="chart-card__meta">Source: S · As of <time datetime="2026-11-03">3 Nov</time>
-  · <strong>Sample</strong> · <a href="/methodology/#velocity">Definition</a></p></section>`;
+  <details class="info-popover" name="info"><summary aria-label="About: T"></summary>
+  <div class="info-popover__panel"><p>Source: S</p><a href="/methodology/#velocity">Definition</a></div></details>
+  <p class="chart-card__meta">As of <time datetime="2026-11-03">3 Nov</time>
+  · <strong>Sample</strong></p>
+  <noscript><p class="chart-card__source-note">Source: S · <a href="/methodology/#velocity">Definition</a></p></noscript></section>`;
 
 const STALE_NOTE = "Data from 4 Nov. Nothing newer has reached this page.";
 const STALE_TRUST = "Last reconciled 4 Nov. Nothing newer has reached this page.";
@@ -168,7 +171,7 @@ describe("verifyOutput", () => {
       ],
       [
         "a card with no word",
-        (html: string) => html.replace("<strong>Sample</strong> · <a", "<a"),
+        (html: string) => html.replace("· <strong>Sample</strong>", ""),
         'a card has no "Sample" beside its as-of time',
       ],
       [
@@ -450,19 +453,80 @@ describe("verifyOutput", () => {
   });
 
   describe("chart cards", () => {
+    const POPOVER_SOURCE = "<p>Source: S</p>";
+    const POPOVER_LINK = '<a href="/methodology/#velocity">Definition</a></div>';
+    const NOTE = /<noscript>.*<\/noscript>/;
+    const NOTE_LINK = ' · <a href="/methodology/#velocity">Definition</a></p></noscript>';
+    const TIME = '<time datetime="2026-11-03">3 Nov</time>';
+
     it.each([
-      ["source", "Source: S · ", "a card has no source"],
-      ["as-of time", '<time datetime="2026-11-03">3 Nov</time>', "a card has no as-of time"],
+      ["as-of time", (card: string) => card.replace(TIME, ""), "a card has no visible as-of time"],
       [
-        "definition link",
-        '<a href="/methodology/#velocity">Definition</a>',
-        "a card has no definition link",
+        "as-of time but in a details",
+        (card: string) =>
+          card
+            .replace(TIME, "")
+            .replace("</details>", `<p class="chart-card__meta">${TIME}</p></details>`),
+        "a card has no visible as-of time",
       ],
-    ])("fails with no %s", (_name, part, problem) => {
-      const html = page(MAIN.replace(part, ""));
+      [
+        "as-of time but in a noscript",
+        (card: string) =>
+          card
+            .replace(TIME, "")
+            .replace("</noscript>", `<p class="chart-card__meta">${TIME}</p></noscript>`),
+        "a card has no visible as-of time",
+      ],
+      [
+        "source in the popover",
+        (card: string) => card.replace(POPOVER_SOURCE, ""),
+        "a card's popover has no source",
+      ],
+      [
+        "definition link in the popover",
+        (card: string) => card.replace(POPOVER_LINK, "</div>"),
+        "a card's popover has no definition link",
+      ],
+      [
+        "noscript note, so the source is only in the popover",
+        (card: string) => card.replace(NOTE, ""),
+        "a card's noscript note has no source",
+      ],
+      [
+        "definition link in the noscript note",
+        (card: string) => card.replace(NOTE_LINK, "</p></noscript>"),
+        "a card's noscript note has no definition link",
+      ],
+    ])("fails with no %s", (_name, change, problem) => {
+      const html = page(MAIN.replace(CARD, change(CARD)));
       expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
         `index.html: ${problem}`,
       );
+    });
+
+    it("a card's frame word doesn't count from inside a details", () => {
+      const moved = CARD.replace("<strong>Sample</strong>", "").replace(
+        "</details>",
+        '<p class="chart-card__meta"><strong>Sample</strong></p></details>',
+      );
+      const html = page(MAIN.replace(CARD, moved));
+      expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
+        'index.html: a card has no "Sample" beside its as-of time',
+      );
+    });
+
+    it.each([
+      ["a details", "<details><ol data-pinned-notes><li>A caveat</li></ol></details>"],
+      ["a noscript", "<noscript><ol data-pinned-notes><li>A caveat</li></ol></noscript>"],
+    ])("fails on pinned notes inside %s", (_name, html) => {
+      expect(verifyOutput(mainWith(html), sampleExpected)).toContain(
+        "index.html: pinned notes inside a details or noscript",
+      );
+    });
+
+    it("passes pinned notes in the open", () => {
+      const html = "<ol data-pinned-notes><li>A caveat</li></ol>";
+      expect(verifyOutput(mainWith(html), sampleExpected)).toEqual([]);
     });
   });
 });

@@ -1,7 +1,7 @@
 .PHONY: check lint types test build models sync reconcile publish preview run dagster-dev \
 	py-lint py-types py-test py-build \
 	web-tools web-install web-lint web-types web-test web-samples web-build web-release web-browser \
-	web-shots
+	web-shots web-acceptance
 
 # Load .env when it exists, so a keyed provider can replace the public defaults.
 ENV_FILE := $(if $(wildcard .env),--env-file .env)
@@ -119,3 +119,7 @@ web-browser: web-install
 # Local only. Never called by check.
 web-shots: web-samples
 	$(PNPM) run shots
+
+# Local only. Never called by check. Needs the browser from web-browser.
+web-acceptance: web-samples
+	$(PNPM) run acceptance

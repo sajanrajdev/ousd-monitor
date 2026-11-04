@@ -98,22 +98,13 @@ Both substitutes are free on Google Fonts, and the site serves them from the Fon
 | Token | Size | Use |
 |---|---|---|
 | `--text-display` | `clamp(2.5rem, 5vw, 4rem)` | The methodology page's title. The main page's headline uses the smaller size below |
+| `--text-headline` | `clamp(1.5rem, 1.2rem + 1.2vw, 2.25rem)` | The main page's headline, one line at 1056 and up in its usual state |
 | `--text-h2` | `clamp(1.5rem, 2.5vw, 2rem)` | Page section headings on the methodology page. Card titles use the smaller size below |
+| `--text-card-title` | `1.125rem` | Card titles and findings |
 | `--text-kpi` | `clamp(1.75rem, 3vw, 2.25rem)` | Key numbers |
 | `--text-body` | `clamp(1rem, 0.95rem + 0.25vw, 1.125rem)` | Narrative, from `1rem` to `1.125rem` |
 | `--text-small` | `0.875rem` | Table rows, chart labels, popover text |
 | `--text-meta` | `0.75rem` | Sources and as-of times |
-
-**Tokens the refurbish adds.** Unit U1 adds these to `tokens.css` and moves each row into the tables here, in one change. They have the use in their first column until then, because `web/tests/tokens.test.ts` requires any row that starts with a token to exist in `tokens.css`.
-
-| Use | Token | Value |
-|---|---|---|
-| The main page's headline, one line at 1056 and up in its usual state | `--text-headline` | `clamp(1.5rem, 1.2rem + 1.2vw, 2.25rem)` |
-| Card titles and findings | `--text-card-title` | `1.125rem` |
-| Between cards in the grid | `--grid-gap` | `1rem` |
-| Between the dashboard's sections, in place of `--section-space` on the main page | `--dashboard-space` | `clamp(1.5rem, 2vw, 2rem)` |
-| The chain filter's height, which `scroll-padding-top` adds from 768 while it's sticky | `--filter-height` | `2.75rem` |
-| A numbered pin | `--pin-size` | `1.25rem` |
 
 ## Layout
 
@@ -127,6 +118,10 @@ Taken from their tokens:
 | `--section-space` | `clamp(3.5rem, 4.1vw + 2.5rem, 6.25rem)` |
 | `--header-height` | `60px` on desktop. On phones it is a minimum, since the header wraps |
 | `--header-budget` | `88px`, the most the header may take at 390 wide. Also the phone `scroll-padding-top`, so anchors aren't covered |
+| `--grid-gap` | `1rem`, between cards in the grid |
+| `--dashboard-space` | `clamp(1.5rem, 2vw, 2rem)`, between the dashboard's sections, in place of `--section-space` on the main page |
+| `--filter-height` | `2.75rem`, the chain filter's height, which `scroll-padding-top` adds from 768 while it's sticky |
+| `--pin-size` | `1.25rem`, a numbered pin |
 
 **Named widths.** The first version of this file named 1440px and 1056px and no phone width. These are the widths the site is built and checked at. Two-column charts begin at 1056.
 

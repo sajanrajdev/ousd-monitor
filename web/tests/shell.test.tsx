@@ -66,6 +66,13 @@ describe("the site shell", () => {
   });
 });
 
+describe("the layout", () => {
+  it("mounts the explanation enhancer once", () => {
+    const layout = readFileSync(join(process.cwd(), "app/layout.tsx"), "utf8");
+    expect(layout.match(/<ExplainEnhance \/>/g)).toHaveLength(1);
+  });
+});
+
 describe("touch targets", () => {
   const css = readFileSync(join(process.cwd(), "app/globals.css"), "utf8");
 
@@ -77,6 +84,20 @@ describe("touch targets", () => {
     }
     expect(rule[1]).not.toMatch(/(^|,)\s*(main\s+)?p\s+a\b/);
   });
+
+  it.each([".info-popover > summary", ".data-toggle > summary"])(
+    "gives %s at least 24px",
+    (selector) => {
+      const escaped = selector.replace(/[.>]/g, "\\$&");
+      const rule = new RegExp(`${escaped} \\{([^}]*)\\}`).exec(css)!;
+      expect(rule).not.toBeNull();
+      const sizes = [...rule[1].matchAll(/(?:min-)?height:\s*([\d.]+)rem/g)].map((match) =>
+        Number(match[1]),
+      );
+      expect(sizes.length).toBeGreaterThan(0);
+      for (const size of sizes) expect(size).toBeGreaterThanOrEqual(1.5);
+    },
+  );
 
   it("puts target-link on the header's own links", () => {
     render(<SiteHeader />);

@@ -94,10 +94,10 @@ describe("NamedLabelsCard", () => {
     );
     const card = container.querySelector(".chart-card")!;
     expect(card.getAttribute("data-frame")).toBe("Sample");
-    const meta = card.querySelector(".chart-card__meta")!;
-    expect(meta.textContent).toContain("Source:");
-    expect(meta.querySelector("time[datetime]")).not.toBeNull();
-    expect(meta.querySelector('a[href*="#named-labels"]')).not.toBeNull();
+    expect(card.querySelector(".chart-card__meta time[datetime]")).not.toBeNull();
+    const panel = card.querySelector(".info-popover__panel")!;
+    expect(panel.textContent).toContain("Source:");
+    expect(panel.querySelector('a[href*="#named-labels"]')).not.toBeNull();
     expect(screen.getByRole("heading", { level: 3 })).toBeTruthy();
   });
 

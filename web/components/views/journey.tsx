@@ -176,6 +176,7 @@ export function JourneyView({ journey, activity, kpis, definitions, state }: Jou
         asOf={seriesAsOf}
         definitionHref={definitionHref("placed-supply")}
         frameWord={state.frameWord}
+        needsJs={series.length > 0}
         summary={
           series.length === 0
             ? UNKNOWN_TEXT
