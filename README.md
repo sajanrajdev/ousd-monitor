@@ -14,6 +14,8 @@ You need [uv](https://docs.astral.sh/uv/). It installs Python 3.12 and the depen
 make check       # lint, types (mypy) and tests, with no chain access
 make sync        # ingest transfers to the tip, repairing any reorg
 make reconcile   # compare events with totalSupply(), then with Bridge
+make run         # the whole daily run: ingest, reconcile, dbt, seven checks, publish
+make dagster-dev # the Dagster UI, to switch on the daily schedule
 ```
 
 `make reconcile` checks supply against `totalSupply()` (or `getTokenSupply` on Solana), samples wallet balances, proves same-looking transfer groups from receipts, and compares the four-chain total with Bridge's. Each part is `pass`, `fail` or `unchecked`, and the run ends with one line: `RESULT: FULL PASS`, `RESULT: FAIL` or `RESULT: UNCHECKED`. The exit code says which:
@@ -40,6 +42,12 @@ Run one writer at a time. `sync` and `reconcile` both write to the same DuckDB f
 The first Ethereum sync can take hours. Blockscout's free tier allows few requests per window, and the client waits each window out, logging every pause of 5 seconds or more. An interrupted sync resumes from where it stopped.
 
 Data goes to `data/ousd.duckdb`, which git ignores. Tempo and Ethereum settings are optional and have a public default. Base and Solana have no public endpoint, so `make sync` and `make reconcile` need `BASE_RPC_URL` and `SOLANA_RPC_URL`. `SOLANA_RPC_URL` is a Solana mainnet RPC URL, key included, and a devnet URL is refused. Solana reads only finalized data, runs first when no `--chain` is given, and does not support `reconcile --at-block`. For public chains alone, run `uv run --locked ousd --chain tempo --chain ethereum sync`, and the same for `reconcile`. To use your own provider, copy `.env.example` to `.env`.
+
+### The daily run
+
+`make run` runs the Dagster job `ousd_daily` in one process: `raw_transfers`, `chain_reconciliations`, `dbt_marts`, then `published_dataset`. It needs `BASE_RPC_URL` and `SOLANA_RPC_URL`, like `make sync`. The seven checks are blocking checks on `dbt_marts`, so a failed one stops the run before publish, marks the last published dataset stale, and publishes nothing. A reconciliation that isn't a full pass, or a failed dbt build, stops it the same way. Ingest and reconciliation retry twice, five minutes apart, when a source errors. A failed check or reconciliation never retries. Dagster's own state is kept in `data/.dagster`.
+
+The schedule (06:00 UTC every day) and the failure sensor are off until switched on in the UI that `make dagster-dev` serves, and run only while it is up. A failed run writes `data/alerts/<run_id>.json`, and nothing is sent anywhere. Don't run `make run` while another sync or `ousd` command holds the database.
 
 ## How it works
 

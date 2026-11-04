@@ -1,4 +1,4 @@
-.PHONY: check lint types test build models sync reconcile publish preview \
+.PHONY: check lint types test build models sync reconcile publish preview run dagster-dev \
 	py-lint py-types py-test py-build \
 	web-tools web-install web-lint web-types web-test web-build web-browser web-shots
 
@@ -56,6 +56,21 @@ preview:
 	run_id=$${RUN_ID:-preview-$$(date -u +%Y%m%dT%H%M%SZ)}; \
 	uv run --locked $(ENV_FILE) ousd check --run-id "$$run_id" --allow-partial; \
 	uv run --locked $(ENV_FILE) ousd publish --run-id "$$run_id" --allow-partial
+
+# Dagster needs an absolute home. The folder is created first, and data/ is gitignored. Load the
+# module as a file: the pipeline/dagster folder has no __init__.py, so it can't shadow dagster.
+DAGSTER_HOME := $(CURDIR)/data/.dagster
+DAGSTER_FILE := pipeline/dagster/definitions.py
+
+# The whole run, from ingest to data/published/latest, in one process. It needs the keys in .env.
+run:
+	mkdir -p "$(DAGSTER_HOME)"
+	DAGSTER_HOME="$(DAGSTER_HOME)" uv run --locked $(ENV_FILE) dagster job execute -f $(DAGSTER_FILE) -j ousd_daily
+
+# The UI, and the schedule and failure sensor once they are switched on there.
+dagster-dev:
+	mkdir -p "$(DAGSTER_HOME)"
+	DAGSTER_HOME="$(DAGSTER_HOME)" uv run --locked $(ENV_FILE) dagster dev -f $(DAGSTER_FILE)
 
 # Through npx, because a bare or Corepack pnpm can crash. The version's one home is packageManager
 # in web/package.json. These steps never load .env, and web code never reads an RPC variable.
