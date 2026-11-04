@@ -379,7 +379,13 @@ def test_a_real_audit_skips_a_transaction_until_it_changes(store):
     store.record_group_audit("testnet", "0xt", 1, "real", "receipt", [0, 1], [0, 1])
     assert store.same_looking_groups("testnet", 1) == []
 
-    ledger(store, (1, 2, ALICE, BOB, 5, "0xt"))
+    # A healing read returns the stored siblings too, so the guard sees no moved row.
+    ledger(
+        store,
+        (1, 0, ALICE, BOB, 5, "0xt"),
+        (1, 1, ALICE, BOB, 5, "0xt"),
+        (1, 2, ALICE, BOB, 5, "0xt"),
+    )
     assert [g.positions for g in store.same_looking_groups("testnet", 1)] == [[0, 1, 2]]
 
 
@@ -731,3 +737,78 @@ def test_the_newest_failed_census_ends_census_complete(store):
 
     assert not store.census_complete("ethereum")
     assert not store.census_complete("base")  # No census at all.
+
+
+def test_a_row_that_moved_position_is_refused_and_the_range_rolls_back(store):
+    store.write_range("testnet", [transfer(5, 5)], {}, 5)
+
+    with pytest.raises(StoreConflict, match=r"log 9.*log 5"):
+        store.write_range("testnet", [transfer(5, 9), transfer(6)], {6: "0xabc"}, 9)
+
+    assert [(row[0], row[1]) for row in rows(store)] == [(5, 5)]
+    assert store.block_hashes("testnet") == {}
+    assert store.synced_through("testnet") == 5
+
+
+def test_a_genuine_group_read_again_at_its_stored_positions_changes_nothing(store):
+    group = [transfer(5, index) for index in range(4)]
+    store.write_range("testnet", group, {}, 5)
+    before = rows(store)
+
+    store.write_range("testnet", group, {}, 5)
+
+    assert rows(store) == before
+
+
+def test_a_partial_re_read_of_a_group_loses_nothing(store):
+    group = [transfer(5, index) for index in range(4)]
+    store.write_range("testnet", group, {}, 5)
+
+    store.write_range("testnet", group[:3], {}, 5)
+
+    assert [row[1] for row in rows(store)] == [0, 1, 2, 3]
+
+
+def test_a_missing_row_with_different_content_is_stored(store):
+    store.write_range("testnet", [transfer(5, 0, value=1)], {}, 5)
+
+    store.write_range("testnet", [transfer(5, 0, value=1), transfer(5, 1, value=2)], {}, 5)
+
+    assert [(row[1], row[5]) for row in rows(store)] == [(0, 1), (1, 2)]
+
+
+def test_a_new_twin_beside_its_returned_stored_row_is_a_real_sibling(store):
+    store.write_range("testnet", [transfer(5, 0)], {}, 5)
+
+    store.write_range("testnet", [transfer(5, 0), transfer(5, 1)], {}, 5)
+
+    assert [row[1] for row in rows(store)] == [0, 1]
+
+
+def test_a_twin_arriving_late_with_the_first_not_returned_is_refused(store):
+    # The accepted cost: a lagging node returning only the missing twin looks like index drift.
+    store.write_range("testnet", [transfer(5, 0)], {}, 5)
+
+    with pytest.raises(StoreConflict, match=r"log 1.*log 0"):
+        store.write_range("testnet", [transfer(5, 1)], {}, 5)
+
+    assert [row[1] for row in rows(store)] == [0]
+
+
+def test_rows_without_a_hash_over_stored_rows_at_the_same_positions_are_accepted(store):
+    group = [transfer(5, index) for index in range(2)]
+    store.write_range("testnet", group, {}, 5)
+    before = rows(store)
+
+    without_hash = [Transfer(5, None, 1, "0x2", index, ALICE, ALICE, 1) for index in range(2)]
+    store.write_range("testnet", without_hash, {}, 5)
+
+    assert rows(store) == before
+
+
+def test_a_same_looking_row_in_another_block_is_not_a_twin(store):
+    store.write_range("testnet", [transfer(5, 0)], {}, 5)
+
+    store.write_range("testnet", [transfer(6, 3)], {}, 6)
+
+    assert [(row[0], row[1]) for row in rows(store)] == [(5, 0), (6, 3)]

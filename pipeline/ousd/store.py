@@ -255,9 +255,31 @@ class Store:
                 [chain, min(blocks), max(blocks)],
             ).fetchall()
         }
+        # Positions this write returned, per block. A stored row at one of them is accounted for.
+        returned: dict[int, set[int]] = {}
+        for t in transfers:
+            returned.setdefault(t.block_number, set()).add(t.log_index)
+        twins: dict[tuple[int, str, str, str, int], list[int]] | None = None
         for t in transfers:
             old = stored.get((t.block_number, t.log_index))
             if old is None:
+                # A new position. If a same-looking row is stored at a position this write did
+                # not return, the row did not move on the chain: the index scheme changed.
+                if twins is None:
+                    twins = {}
+                    for (block_number, log_index), content in stored.items():
+                        key = (block_number, content[2], content[3], content[4], content[5])
+                        twins.setdefault(key, []).append(log_index)
+                key = (t.block_number, t.tx_hash, t.from_address, t.to_address, t.value)
+                missing = [
+                    index for index in twins.get(key, []) if index not in returned[t.block_number]
+                ]
+                if missing:
+                    raise StoreConflict(
+                        f"{chain}: block {t.block_number}, log {t.log_index} was just read, "
+                        f"but the same transfer is stored at log {min(missing)}, which was not "
+                        f"returned. The log index scheme has changed"
+                    )
                 continue
             new = [
                 t.block_hash,
