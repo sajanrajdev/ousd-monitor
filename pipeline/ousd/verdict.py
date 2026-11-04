@@ -44,6 +44,8 @@ class VerdictInputs:
     large_transfer_base_units: int
     journey_first_day: date
     bridge_total: int | None
+    # --allow-partial was used. With every chain present nothing is skipped, but it isn't real.
+    preview: bool = False
 
 
 @dataclass(frozen=True)
@@ -141,7 +143,12 @@ def _labels_change_the_answer(inputs: VerdictInputs) -> bool:
     )
 
 
+_PREVIEW_PREFIX = "Local preview, not a finding. "
+
+
 def build_verdict(rows: VerdictInputs) -> Verdict:
+    preview = rows.preview or "skipped" in rows.check_statuses.values()
+    prefix = _PREVIEW_PREFIX if preview else ""
     order = {chain: index for index, chain in enumerate(REQUIRED_CHAINS)}
     chains = sorted(rows.chains, key=lambda figures: order.get(figures.chain, len(order)))
     scope = [figures.chain for figures in chains]
@@ -163,7 +170,7 @@ def build_verdict(rows: VerdictInputs) -> Verdict:
             "no_clear_statement",
             scope,
             as_of,
-            f"{where} data doesn't support a clear statement yet: {'; '.join(reasons)}.",
+            f"{prefix}{where} data doesn't support a clear statement yet: {'; '.join(reasons)}.",
             [],
             [],
             [],
@@ -175,7 +182,7 @@ def build_verdict(rows: VerdictInputs) -> Verdict:
     # Floors, so a figure never reads as past a threshold it hasn't reached.
     placed_part = (
         f"{placed_bps // 100}% of supply has sat still for at least {rows.placed_days} days in "
-        f"wallets of {format_dollars(rows.placed_min_base_units)} or more"
+        f"unlabeled wallets of {format_dollars(rows.placed_min_base_units)} or more"
     )
     moved_part = (
         f"transfers under {format_dollars(rows.large_transfer_base_units)} moved "
@@ -208,15 +215,17 @@ def build_verdict(rows: VerdictInputs) -> Verdict:
 
     days = sorted(set(as_of.values()))
     day_text = days[0] if len(days) == 1 else f"{days[0]} to {days[-1]}"
-    figures_read = [
+    facts = [
         f"The figures cover {_chain_list(scope)} and end on {day_text}, UTC.",
-        f"Placed supply is {_percent_two_places(placed_bps)}% of supply on these chains.",
-        f"Seven-day everyday volume is {_percent_two_places(everyday_bps)}% of supply on these "
-        "chains.",
+        f"Total supply on these chains is {format_dollars(total)}, and each chain's mints minus "
+        "burns equal its reported supply to the base unit.",
     ]
+    # Both rest on public labels, which can be incomplete, so neither can be a fact.
     estimates = [
-        "Placed supply depends on public labels: a wallet with no label is counted as unowned, "
-        "so an unlabeled issuer or venue wallet can count as placed."
+        f"Placed supply is {_percent_two_places(placed_bps)}% of supply on these chains. It counts "
+        "wallets with no public label, so an unlabeled issuer or venue wallet can count as placed.",
+        f"Seven-day everyday volume is {_percent_two_places(everyday_bps)}% of supply on these "
+        "chains. It leaves out flows to and from labeled wallets, so a missing label adds to it.",
     ]
     if share_estimate:
         estimates.insert(0, share_estimate)
@@ -226,18 +235,10 @@ def build_verdict(rows: VerdictInputs) -> Verdict:
             f"{_chain_list(unlabeled)} has no wallet labeled as the issuer, so its placed figure "
             "may include issuer inventory."
         )
-    if any(status == "skipped" for status in rows.check_statuses.values()):
-        # Nothing here is proven yet, so nothing may read as a fact.
-        return Verdict(
-            state,
-            scope,
-            as_of,
-            f"Local preview, not fully reconciled. {text}",
-            [],
-            [*figures_read, *estimates],
-            opinions,
-        )
-    return Verdict(state, scope, as_of, text, figures_read, estimates, opinions)
+    if preview:
+        # Nothing here is proven for release, so nothing may read as a fact.
+        return Verdict(state, scope, as_of, f"{prefix}{text}", [], [*facts, *estimates], opinions)
+    return Verdict(state, scope, as_of, text, facts, estimates, opinions)
 
 
 def known_limits(
@@ -246,6 +247,7 @@ def known_limits(
     chains_without_issuer_row: Sequence[str],
     chains_not_issuer_labeled: Sequence[str],
     chains_missing: Sequence[str],
+    preview: bool = False,
 ) -> list[KnownLimit]:
     """What the published figures can't show. Written for a reader, and shipped with the data."""
     limits = [
@@ -323,6 +325,13 @@ def known_limits(
                 "no_issuer_label",
                 f"{_chain_list(chains_not_issuer_labeled)} has no issuer or redemption-route "
                 "label at all, so its issuer inventory reads as zero.",
+            )
+        )
+    if preview:
+        limits.append(
+            KnownLimit(
+                "local_preview",
+                "This is a local preview, never a release. It may leave out chains and checks.",
             )
         )
     if chains_missing:

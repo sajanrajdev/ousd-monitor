@@ -204,7 +204,7 @@ It uses `ousd.store.Store` to create the raw file, sets `OUSD_DB_PATH` and `OUSD
 
 **Contract:** CSV with columns `chain,address,entity,category,source_type,source_url,confidence,date_checked`.
 
-- `entity` is empty for unnamed clusters, which still need a `source_url`. A `derived_rule` row points at the brainstorm section that defines the rule.
+- `entity` is empty for unnamed clusters, which still need a `source_url`. A `derived_rule` row points at `labels/README.md#how-unnamed-clusters-are-found`, which states the rule with no names.
 - `source_type`, one per row: `explorer_tag`, `project_docs`, `company_docs`, `official_statement`, `published_research`, `onchain_metadata`, or `derived_rule` (unnamed clusters only).
 - `category`: `issuer`, `issuer_route`, `system`, `dex`, `lending`, `exchange`.
 - `confidence`: `high`, `medium`.
@@ -225,14 +225,13 @@ select
 from read_csv('{{ var("labels_path") }}', header = true, all_varchar = true)
 ```
 
-**Initial rows.** `date_checked` is the day each source was really checked. Use the source URLs in the brainstorm's labels table, except that Uniswap's page moved to `https://developers.uniswap.org/docs/protocols/v4/deployments`. Bridge on Tempo and Base cites Crystal, as `published_research`, which shows the address shortened to `0x4c2c…00b8`; Basescan has no tag for it. Unnamed `issuer_route` rows use `derived_rule` and the brainstorm's section on label sources, except where noted.
+**Initial rows.** `date_checked` is the day each source was really checked. Use the source URLs in the brainstorm's labels table, except that Uniswap's page moved to `https://developers.uniswap.org/docs/protocols/v4/deployments`. Bridge on Tempo and Base cites Crystal, as `published_research`, which shows the address shortened to `0x4c2c…00b8`; Basescan has no tag for it. Unnamed `issuer_route` rows use `derived_rule` and the rule in `labels/README.md`, except where noted.
 
 | chain | address | entity | category | source_type | confidence |
 |---|---|---|---|---|---|
 | ethereum | `0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8` | Bridge | issuer | explorer_tag | high |
 | tempo, base | `0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8` | Bridge | issuer | published_research | medium, until a source gives the full address on these chains |
 | tempo, ethereum | `0x4508a7021dfb7a1afe5ff60169c1778c303389fb` |  | issuer_route | derived_rule | medium |
-| tempo, ethereum | `0x8458377a025da58e9cb547c979d5002c822a05cb` |  | issuer_route | derived_rule | medium |
 | tempo, ethereum | `0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e` |  | issuer_route | derived_rule | medium |
 | tempo | `0x334cc71f818324f3932ab9d41285450373b84cdc` |  | issuer_route | derived_rule | medium |
 | tempo | `0x5176dfcab18ff5519bc1cfa4c6ef2d8008371d5f` |  | issuer_route | derived_rule | medium |
@@ -253,7 +252,7 @@ from read_csv('{{ var("labels_path") }}', header = true, all_varchar = true)
 **Do not add** Wintermute, Coinbase Prime, the Coinbase custody addresses or any other wallet that lacks a source tying the name to the address. See the brainstorm. A wallet the explorer itself tags is different: the tag is the source.
 
 **Base and Solana rows:**
-- The Base and Solana redemption route has rows found by rule: wallets on the fixed path from the hub into burns. Ethereum's `0x597758c063efa82c86c3e22d6ac40b8f432fd810` is on that path too.
+- The Base and Solana redemption route has rows found by rule: the hub, which is the wallet a chain's mints go to, and the wallets on the fixed path from it into burns. Solana's `Hmc2dLxZZ4xfHqn2wFCTBu11oCpYiuwsj23JBjJmD4ni` is the hub, not on the path from it. Ethereum's `0x597758c063efa82c86c3e22d6ac40b8f432fd810` is on that path too. `0x8458377a025da58e9cb547c979d5002c822a05cb` is off it, so it is unlabeled on every chain.
 - Solana's mint recipient is an `issuer` row only if a source names the address. None does yet, so it is `issuer_route`, and its balance is still inventory.
 - Orca's pool has a source. Third-party routers, cross-chain relayers and their solvers are `system`, because they pass money through without holding it as a venue. Bridge, the issuer, stays `issuer`.
 
@@ -264,7 +263,7 @@ from read_csv('{{ var("labels_path") }}', header = true, all_varchar = true)
 - Every row has a `source_url`, a `category` in the list, a `source_type` in the list, a `confidence` in the list and a valid date.
 - EVM addresses match `^0x[0-9a-f]{40}$`. Solana addresses are never lowercased.
 - A named `entity` has an `http` source and never `derived_rule`. A local brainstorm path is only allowed when `entity` is empty.
-- A `derived_rule` row has no `entity` and no `http` requirement, and its section exists. Every other source type has an `http` source.
+- A `derived_rule` row has no `entity` and no `http` requirement, and points at the rule's section in `labels/README.md`, which names nobody. Every other source type has an `http` source.
 - A named `entity` starts with a reviewed organization name, so a person's name can't be added by accident.
 - Each chain has at least one `issuer` row. This is an expected failure for Solana until a source names its mint recipient, and the test fails as soon as one does, so the mark gets removed.
 - The legend covers every source type.
@@ -475,7 +474,7 @@ having min(running_balance) < 0
 
 **Derived, not stored:** venue is `venue_dex + venue_lending + venue_exchange`. Circulating is `total_supply - issuer_inventory - placed_supply`.
 
-**A `system` wallet's balance counts as free-floating**, which is 117.50 OUSD today. It is too small to need its own column.
+**A `system` wallet's balance counts as free-floating.** `system` now also covers third-party routers, relayers and solvers, so the 117.50 OUSD measured before that change no longer describes it. It has no column of its own, and any balance a solver or router holds reads as free-floating.
 
 **Reference values on the 2026-11-04 snapshot.** These are for a manual check once, not test assertions, because the data moves.
 
@@ -1023,21 +1022,24 @@ These replace the text above and below where they differ. Each is recorded so th
 
 - **Validate first.** Every payload is built and validated in memory, before anything is written, not after writing to `<stamp>.tmp`. The `.tmp` folder and the rename stay, so a write failure can't leave half a dataset either.
 - **Refusal marks the last good dataset stale.** Publish rewrites one field group in `latest/manifest.json`, in one step: `stale: true`, `stale_since` (the first refusal) and `stale_reason`. The data files and their hashes don't change. So `stale` is no longer "always false on write". A new good publish clears it, as its manifest is fresh. Unit 2.7 should call `mark_stale` in its failure path, because a failed blocking check stops Dagster before publish can refuse. The site may still compare `generated_at` with the build time as well.
-- **No exit status is evidence.** `dbt_tests` doesn't take dbt's exit code from Dagster. It always reads `run_results.json`, and fails on any node that didn't pass, on a command other than `build`, and on a narrowed build, since `dbt build --select x` also exits 0. It also fails if the marts weren't built from the stored transfers, or from the labels file the manifest names. Unit 2.7 runs dbt, then calls `run_checks` with the same `Sources`.
+- **No exit status is evidence.** `dbt_tests` doesn't take dbt's exit code from Dagster. It always reads `run_results.json`, and fails on any node that didn't pass, on a command other than `build`, and on a narrowed build, since `dbt build --select x` also exits 0. It also fails if the marts weren't built from the stored transfers, from the labels file the manifest names, or with the thresholds in `dbt_project.yml` plus any `--vars` on that build.
+- **Thresholds come from the build.** `definitions` are read from the SQL dbt compiled, in `run_results.json`, never live from `dbt_project.yml`. A model that stops showing one refuses publish. Unit 2.7 runs dbt, then calls `run_checks` with the same `Sources`.
 - **`run_checks(store, marts, run_id, allow_partial, now, sources)`.** No `chains` argument: `REQUIRED_CHAINS` is the one list, and `list[Chain]` can't hold Solana and would bring `rpc_url` into a module that has no use for it. `publish` also takes `sources`.
-- **What the checks saw.** `check_results` gains `data_fingerprint`, a hash of the raw cursors, counts and tip hashes, the published marts and the labels file. Publish refuses when it no longer matches, and repeats `reconciliation_gate` and `freshness` against the store and its own clock. So a recorded pass can't publish data that moved after it, or a week-old pass.
+- **What the checks saw.** `check_results` gains `data_fingerprint`, a hash of the raw cursors, counts and tip hashes, the published marts, the labels file, `run_results.json` and `dbt_project.yml`. Publish refuses when it no longer matches, and repeats `reconciliation_gate` and `freshness` against the store and its own clock. So a recorded pass can't publish data that moved after it, or a week-old pass.
 - **The published numbers must be the gate's.** A real publish refuses unless every `mart_reconciliation` row comes from the run the gate accepted.
 - **`--allow-partial` has no environment variable.** `OUSD_ALLOW_PARTIAL` is dropped, as one left set would turn a scheduled release into a preview that exits 0.
-- **`--allow-partial` output.** It goes to `preview-not-for-release/`, beside `published/`, as `preview-<stamp>/`, under `latest-preview`. It never writes under `published/`, and a refused preview doesn't mark the real dataset stale. Every JSON file has `preview: true`, and the manifest has a plain `notice`. The manifest schema refuses `preview: false` with incomplete coverage, a skipped check or a `preview-` version. **The Phase 3 site build must fail on `preview: true` for a release.**
-- **Labels are published, in `labels.json`.** This replaces "Labels are not published in Phase 3": unit 3.4 needs them, with the source legend, so a reader can see how we know each label. Rows have `chain`, `entity`, `category`, `source_type`, `source_url`, `confidence` and `date_checked`, and **no address column**. An explorer `source_url` holds the address it points at, as the link has to open: that is the one exception to the "no wallet address" scan. The address scan test covers it, so holders' wallets still appear nowhere.
+- **`--allow-partial` output.** It goes to `preview-not-for-release/`, beside `published/`, as `preview-<stamp>/`, under `latest-preview`. It never writes under `published/`, and a refused preview doesn't mark the real dataset stale. Every JSON file has `preview: true`, the manifest has a plain `notice`, every CSV row has a first `preview` column, and the verdict opens with "Local preview, not a finding." and has no facts, even with all four chains present. The manifest schema refuses `preview: false` with incomplete coverage, a skipped check or a `preview-` version. **The Phase 3 site build must fail on `preview: true` for a release.**
+- **Named labels are published, in `labels.json`.** This replaces "Labels are not published in Phase 3": unit 3.4 needs them, with the source legend, so a reader can see how we know each label. Rows have `chain`, `entity`, `category`, `source_type`, `source_url`, `confidence` and `date_checked`, and **no address column**. **Unnamed clusters publish only `unnamed_clusters`:** a count by chain and category, the rule's text and its reference, with no address and no per-address link. `labels.csv` stays the full record.
+- **A runtime guard, not only tests.** Before anything is written, publish refuses the whole dataset on any EVM-shaped or base58-shaped value, any URL, or any provider value from the environment, anywhere in any file, in values and keys. The four token contracts are allowed. The one exception is a named label's `source_url`, which has its own check: plain `https`, no query or fragment, a host `labels/README.md` lists for its source type, and no address but the row's own.
 - **Issuer rows and `issuer_labeled` differ.** `mart_supply_journey.issuer_labeled` is true for an `issuer` or an `issuer_route` label. Solana has route rows and no `issuer` row, so it is labeled and still lacks an issuer row. `labels.json` says both, per chain, with `chains_without_issuer_row`, and the known limits say so.
 - **Unit 2.7 calls `run_checks` once per run,** in one multi-asset check, and yields the seven results it returns, instead of one function and one write per check. `run_checks` records all seven together and decides which chains each covers, so a rerun can't keep an old pass.
 - **Exit 2 and no stale mark for a database in use,** or for a second publish in the same second. Neither says anything about the data. Any other failure marks stale.
 - **The attestation link is the site's.** `known_limits` says this isn't an attestation and points to Bridge's reports in words. The PRD's link is added by Phase 3, as this unit has no way to check a URL.
 - **`reconciliation.json`** adds `run_id` and `in_latest_run` per row, and `latest_run`. `reconciliations` records no run, so a chain row's `run_id` is the run whose supply check recorded the same figures.
 - **Velocity.** `activity.json` and `summary.kpis` carry both denominators, `circulating_supply` and `total_supply`, and `definitions.velocity` names them. Basis points have no upper bound in the schema, as velocity passes 10,000: Ethereum on 2026-11-03 was 33,260, against a headline of 8,912.
-- **Verdict.** A fourth state, `no_clear_statement`, for no data, zero supply, a chain under seven full days or before `journey_first_day`, a check that didn't pass, or a chain with no issuer label that could change the answer. `verdict` adds `as_of`, `facts`, `estimates` and `opinions`. `text` holds no opinion. Placed and everyday percentages in the text are floors, so 49.99% never reads as 50%. Share of OUSD is rounded, and reads "about". A chain with route wallets but no wallet labeled `issuer` counts as unlabeled for this, which today means Solana: if leaving its placed supply out would change the answer, the verdict is `no_clear_statement`. With a skipped check there are no `facts`. Share of OUSD is left out when all four chains are in scope.
+- **Verdict.** A fourth state, `no_clear_statement`, for no data, zero supply, a chain under seven full days or before `journey_first_day`, a check that didn't pass, or a chain with no issuer label that could change the answer. `verdict` adds `as_of`, `facts`, `estimates` and `opinions`. `text` holds no opinion. Placed and everyday percentages in the text are floors, so 49.99% never reads as 50%. Share of OUSD is rounded, and reads "about". A chain with route wallets but no wallet labeled `issuer` counts as unlabeled for this, which today means Solana: if leaving its placed supply out would change the answer, the verdict is `no_clear_statement`. In a preview there are no `facts`. Placed and everyday figures depend on labels, so they are `estimates`, and the sentence says "unlabeled wallets". Share of OUSD is left out when all four chains are in scope.
 - **Known limits are data:** `summary.known_limits`, as `id` and `text`.
+- **Integers.** Publish validates with `integer` meaning a real integer, so 714.0 is refused, though the spec allows it. A site validating parsed JSON can't tell them apart, so this is publish's job.
 - **Times.** The manifest adds `time_zone: "UTC"` and `coverage.last_transfer_at`. Each schema requires a trailing `Z`.
 - **Activity on a day with no supply.** The KPI columns are null there, since the KPI mart has no row for that day.
 
@@ -1113,7 +1115,7 @@ Version 1. The Phase 3 site depends on this, and validates it at build. Any brea
 
 **CSV:** `journey`, `activity` and `chain_roles`, same columns and base units, flattening `leading_for` with `;`.
 
-**`labels.json`:** every label, with how we know it, and the source legend from `labels/README.md`, for the methodology page (unit 3.4). See the overrides above. Journey and activity stay aggregates, so no holder's wallet appears.
+**`labels.json`:** named labels, with how we know each, unnamed clusters as counts with their rule, and the source legend from `labels/README.md`, for the methodology page (unit 3.4). See the overrides above. Journey and activity stay aggregates, so no holder's wallet appears.
 
 **Verdict.** `verdict.py` picks a template by state, computed from the chains with data. `scope` lists those chains, and the text names them.
 

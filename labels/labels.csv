@@ -1,56 +1,54 @@
 chain,address,entity,category,source_type,source_url,confidence,date_checked
 base,0x0729e2a4716d9f7dd17858d5d504426d228697f7,Relay Router,system,project_docs,https://api.relay.link/chains,high,2026-11-04
 base,0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae,LI.FI Diamond,system,explorer_tag,https://basescan.org/address/0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae,high,2026-11-04
-base,0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+base,0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 base,0x20fe51a9229eef2cf8ad9e89d91cab9312cf3b7a,Coinbase,exchange,explorer_tag,https://basescan.org/address/0x20fe51a9229eef2cf8ad9e89d91cab9312cf3b7a,medium,2026-11-04
 base,0x4787ad0324a68152834f150326fe2357af8993cc,,issuer_route,onchain_metadata,https://basescan.org/address/0x4787ad0324a68152834f150326fe2357af8993cc,medium,2026-11-04
 base,0x498581ff718922c3f8e6a244956af099b2652b2b,Uniswap v4 PoolManager,dex,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
 base,0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8,Bridge,issuer,published_research,https://crystalintelligence.com/stablecoin/ousd-stablecoin-first-week-on-chain-analysis/,medium,2026-11-04
-base,0x4cd00e387622c35bddb9b4c962c136462338bc31,Relay Depository,system,project_docs,https://docs.relay.link/references/protocol/addresses,high,2026-11-04
+base,0x4cd00e387622c35bddb9b4c962c136462338bc31,Relay Depository,system,project_docs,https://api.relay.link/chains,high,2026-11-04
 base,0x4f6f91599858bf0d19fabcf2c5d591fe13f7c059,0x Settler,system,onchain_metadata,https://basescan.org/address/0x4f6f91599858bf0d19fabcf2c5d591fe13f7c059,medium,2026-11-04
-base,0x597758c063efa82c86c3e22d6ac40b8f432fd810,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+base,0x597758c063efa82c86c3e22d6ac40b8f432fd810,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 base,0x67d03631fe51b741c0c00c4e16eb662ac84381df,OKX DEX Router,system,explorer_tag,https://basescan.org/address/0x67d03631fe51b741c0c00c4e16eb662ac84381df,high,2026-11-04
 base,0x6ff5693b99212da76ad316178a184ab56d299b43,Uniswap Universal Router,system,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
 base,0x732b729eb508aada950210173ff692456dc5d350,Uniswap v3 OUSD/WETH pool,dex,onchain_metadata,https://basescan.org/address/0x732b729eb508aada950210173ff692456dc5d350,high,2026-11-04
 base,0x7e7094f6b6cacfb0c681ea292d92e10da3449c97,Uniswap v2 pool,dex,onchain_metadata,https://basescan.org/address/0x7e7094f6b6cacfb0c681ea292d92e10da3449c97,medium,2026-11-04
 base,0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,Relay Router,system,explorer_tag,https://basescan.org/address/0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,high,2026-11-04
 base,0xd6145b2d3f379919e8cdeda7b97e37c4b2ca9c40,Uniswap Universal Router,system,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
-base,0xf37a982d1f6c9d1cc9d792aaba494264e0f315d7,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+base,0xf37a982d1f6c9d1cc9d792aaba494264e0f315d7,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 base,0xf70da97812cb96acdf810712aa562db8dfa3dbef,Relay Solver,system,explorer_tag,https://basescan.org/address/0xf70da97812cb96acdf810712aa562db8dfa3dbef,high,2026-11-04
 ethereum,0x000000000004444c5dc75cb358380d2e3de08a90,Uniswap v4 PoolManager,dex,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
-ethereum,0x0198f9d5c8e8ef8869d70d387d3efa997f727464,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+ethereum,0x0198f9d5c8e8ef8869d70d387d3efa997f727464,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 ethereum,0x0729e2a4716d9f7dd17858d5d504426d228697f7,Relay Router,system,project_docs,https://api.relay.link/chains,high,2026-11-04
 ethereum,0x0cef320d0c5793ade37964e2661a033771e53cd5,0x Settler,system,onchain_metadata,https://etherscan.io/address/0x0cef320d0c5793ade37964e2661a033771e53cd5,medium,2026-11-04
 ethereum,0x1767c61c9ec15126de4eb02cd9a91474584a1873,,issuer_route,onchain_metadata,https://etherscan.io/address/0x1767c61c9ec15126de4eb02cd9a91474584a1873,medium,2026-11-04
-ethereum,0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+ethereum,0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 ethereum,0x23617e59a5925b2a4bf75d73ff6711cd0b29de85,Uniswap Universal Router,system,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
-ethereum,0x4508a7021dfb7a1afe5ff60169c1778c303389fb,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+ethereum,0x4508a7021dfb7a1afe5ff60169c1778c303389fb,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 ethereum,0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8,Bridge,issuer,explorer_tag,https://etherscan.io/address/0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8,high,2026-11-04
-ethereum,0x4cd00e387622c35bddb9b4c962c136462338bc31,Relay Depository,system,project_docs,https://docs.relay.link/references/protocol/addresses,high,2026-11-04
-ethereum,0x597758c063efa82c86c3e22d6ac40b8f432fd810,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+ethereum,0x4cd00e387622c35bddb9b4c962c136462338bc31,Relay Depository,system,project_docs,https://api.relay.link/chains,high,2026-11-04
+ethereum,0x597758c063efa82c86c3e22d6ac40b8f432fd810,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 ethereum,0x666fedd4cdd4e890a5ad20e7b60975409435a64a,0x Settler,system,onchain_metadata,https://etherscan.io/address/0x666fedd4cdd4e890a5ad20e7b60975409435a64a,medium,2026-11-04
-ethereum,0x8458377a025da58e9cb547c979d5002c822a05cb,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
 ethereum,0x8f10b468b06c6fd214b65f87778827f7d113f996,KyberSwap Aggregation Executor,system,explorer_tag,https://etherscan.io/address/0x8f10b468b06c6fd214b65f87778827f7d113f996,high,2026-11-04
 ethereum,0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43,Coinbase,exchange,explorer_tag,https://etherscan.io/address/0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43,high,2026-11-04
 ethereum,0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,Relay Router,system,explorer_tag,https://etherscan.io/address/0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,high,2026-11-04
 ethereum,0xcd531ae9efcce479654c4926dec5f6209531ca7b,Coinbase,exchange,explorer_tag,https://etherscan.io/address/0xcd531ae9efcce479654c4926dec5f6209531ca7b,high,2026-11-04
 ethereum,0xf70da97812cb96acdf810712aa562db8dfa3dbef,Relay Solver,system,project_docs,https://api.relay.link/chains,high,2026-11-04
-solana,3ZGf3ERiitfTR9RCChchfo7QWmSfH1WArJ3jjrtMXnKa,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+solana,3ZGf3ERiitfTR9RCChchfo7QWmSfH1WArJ3jjrtMXnKa,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 solana,BqCfmajD8Z67KrVE8i4XN43vyPS9hppFAt5dPZFFaMfu,Orca OUSD/USDC Whirlpool,dex,project_docs,https://api.orca.so/v2/solana/pools/BqCfmajD8Z67KrVE8i4XN43vyPS9hppFAt5dPZFFaMfu,high,2026-11-04
 solana,F7p3dFrjRTbtRp8FRF6qHLomXbKRBzpvBLjtQcfcgmNe,Relay Solver,system,project_docs,https://api.relay.link/chains,high,2026-11-04
-solana,FV8nrrPzQuREwpueQrFdnJdqPDjC3wbguoC5HKaLJzGs,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
-solana,Hmc2dLxZZ4xfHqn2wFCTBu11oCpYiuwsj23JBjJmD4ni,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+solana,FV8nrrPzQuREwpueQrFdnJdqPDjC3wbguoC5HKaLJzGs,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,Hmc2dLxZZ4xfHqn2wFCTBu11oCpYiuwsj23JBjJmD4ni,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 tempo,0x0729e2a4716d9f7dd17858d5d504426d228697f7,Relay Router,system,project_docs,https://api.relay.link/chains,high,2026-11-04
 tempo,0x0d136e26b4d9e4836fc5cb202baeb49cb6f5df48,Sentora OUSD Main,lending,project_docs,https://curator.morpho.org/vaults/4217/0x0d136e26b4d9e4836fc5cb202baeb49cb6f5df48,high,2026-11-04
 tempo,0x182a927119d56008d921126764bf884221b10f59,Uniswap Universal Router,system,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
-tempo,0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
-tempo,0x334cc71f818324f3932ab9d41285450373b84cdc,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+tempo,0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+tempo,0x334cc71f818324f3932ab9d41285450373b84cdc,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 tempo,0x33620f62c5b9b2086dd6b62f4a297a9f30347029,Uniswap v4 PoolManager,dex,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
-tempo,0x4508a7021dfb7a1afe5ff60169c1778c303389fb,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+tempo,0x4508a7021dfb7a1afe5ff60169c1778c303389fb,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 tempo,0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8,Bridge,issuer,published_research,https://crystalintelligence.com/stablecoin/ousd-stablecoin-first-week-on-chain-analysis/,medium,2026-11-04
-tempo,0x4cd00e387622c35bddb9b4c962c136462338bc31,Relay Depository,system,project_docs,https://docs.relay.link/references/protocol/addresses,high,2026-11-04
-tempo,0x5176dfcab18ff5519bc1cfa4c6ef2d8008371d5f,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
-tempo,0x8458377a025da58e9cb547c979d5002c822a05cb,,issuer_route,derived_rule,docs/brainstorms/2026-11-03-adoption-metrics-requirements.md#which-published-sources-can-label-wallets,medium,2026-11-04
+tempo,0x4cd00e387622c35bddb9b4c962c136462338bc31,Relay Depository,system,project_docs,https://api.relay.link/chains,high,2026-11-04
+tempo,0x5176dfcab18ff5519bc1cfa4c6ef2d8008371d5f,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 tempo,0xb10c000000000000000000000000000000000000,Tempo ReceivePolicyGuard,system,project_docs,https://tempo.xyz/developers/docs/quickstart/predeployed-contracts,high,2026-11-04
 tempo,0xb86b3ccce82f6cb767c45afb9fb032ae5fde3592,Tempo Earn (Morpho vault),lending,project_docs,https://curator.morpho.org/vaults/4217/0xb86b3ccce82f6cb767c45afb9fb032ae5fde3592,medium,2026-11-04
 tempo,0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,Relay Router,system,project_docs,https://api.relay.link/chains,high,2026-11-04

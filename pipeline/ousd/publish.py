@@ -16,19 +16,21 @@ import os
 import re
 import shutil
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections import Counter
+from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import duckdb
 import jsonschema
-import yaml
 
-from ousd.chains import REQUIRED_CHAINS
+from ousd.chains import KEYED_RPC_ENV, REQUIRED_CHAINS, load_chains
 from ousd.checks import (
     CHECK_NAMES,
     Sources,
+    built_thresholds,
     data_fingerprint,
     data_warnings,
     freshness,
@@ -39,6 +41,7 @@ from ousd.checks import (
     utc_moment,
     utc_text,
 )
+from ousd.solana import OUSD_MINT
 from ousd.store import LatestReconciliation, Store, StoredCheck
 from ousd.verdict import ChainFigures, VerdictInputs, build_verdict, known_limits
 
@@ -59,6 +62,8 @@ PREVIEW_NOTICE = (
     "Local preview only, never for public release. It was published with --allow-partial, so "
     "chains may be missing and the full reconciliation may not have been checked."
 )
+PREVIEW_CSV_MARK = "LOCAL PREVIEW, NOT FOR RELEASE"
+UNNAMED_RULE_REFERENCE = "labels/README.md#how-unnamed-clusters-are-found"
 VELOCITY_DEFINITIONS = {
     "velocity_bps": {"numerator": "clean_7d / 7", "denominator": "circulating_supply"},
     "velocity_everyday_bps": {
@@ -70,8 +75,29 @@ VELOCITY_DEFINITIONS = {
 
 _STAMP = re.compile(r"^(preview-)?[0-9]{8}T[0-9]{6}Z(\.tmp)?$")
 _LEGEND_HEADING = "## How we know: the source legend"
+_RULE_HEADING = "## How unnamed clusters are found"
+_HOSTS_HEADING = "## Where each source lives"
 _LEGEND_ROW = re.compile(r"^\| `([a-z_]+)` \| (.+?) \| (.+?) \|$")
+_HOST_ROW = re.compile(r"^\| `([a-z_]+)` \| (.+?) \|$")
 _READING_NOTE = re.compile(r"^\*\*Reading a label:\*\* (.+)$", re.MULTILINE)
+_EVM_SHAPE = re.compile(r"0[xX][0-9a-fA-F]{40}")
+# Bounded by anything that isn't a letter or digit, so a longer hash can't match part of itself.
+_BASE58_SHAPE = re.compile(r"(?<![0-9A-Za-z])[1-9A-HJ-NP-Za-km-z]{32,44}(?![0-9A-Za-z])")
+# A run id is 32 hex characters, which is also valid base58. A real address is never all hex.
+_ALL_HEX = re.compile(r"[0-9a-f]+")
+_URL_SHAPE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+# A label's link, the one place a wallet-shaped value may be, and only after its own check.
+_LABEL_LINK_PLACE = re.compile(r"labels\.json/data/\d+/source_url")
+# Other variables that can hold a provider URL. KEYED_RPC_ENV has the rest.
+_RPC_ENV = ("TEMPO_RPC_URL", "ETHEREUM_RPC_URL", "ETHEREUM_BLOCKSCOUT_URL")
+
+# jsonschema follows the spec, where 714.0 is an integer. A float here means a mart changed type.
+_Validator = jsonschema.validators.extend(
+    jsonschema.Draft202012Validator,
+    type_checker=jsonschema.Draft202012Validator.TYPE_CHECKER.redefine(
+        "integer", lambda _, value: isinstance(value, int) and not isinstance(value, bool)
+    ),
+)
 
 # Written as strings of base units, as anything above 2^53 loses exactness in a JSON reader.
 _AMOUNTS = frozenset(
@@ -263,19 +289,110 @@ def _refuse_unless_one_run(rows: Sequence[Mapping[str, Any]], latest: LatestReco
         raise PublishRefused(f"mart_reconciliation's Bridge row is not from run {latest.run_id}")
 
 
-def _read_legend(path: Path) -> dict[str, Any]:
+def _section(text: str, heading: str) -> str:
+    _, found, after = text.partition(heading)
+    if not found:
+        raise PublishRefused(f"labels/README.md has no section {heading.removeprefix('## ')!r}")
+    return after.partition("\n## ")[0]
+
+
+def _read_legend(text: str) -> dict[str, Any]:
     """The source legend, parsed from labels/README.md so there is one copy of the words."""
-    text = path.read_text()
-    _, found, after = text.partition(_LEGEND_HEADING)
-    note = _READING_NOTE.search(after)
-    if not found or note is None:
+    section = _section(text, _LEGEND_HEADING)
+    note = _READING_NOTE.search(section)
+    if note is None:
         raise PublishRefused("labels/README.md has no source legend to publish")
     rows = [
         {"source_type": match[1], "meaning": match[2], "how_to_check": match[3]}
-        for line in after.splitlines()
+        for line in section.splitlines()
         if (match := _LEGEND_ROW.match(line))
     ]
     return {"source_types": rows, "reading_a_label": note[1]}
+
+
+def _read_unnamed_rule(text: str) -> str:
+    return " ".join(_section(text, _RULE_HEADING).split())
+
+
+def _read_source_hosts(text: str) -> dict[str, set[str]]:
+    return {
+        match[1]: set(re.findall(r"`([^`]+)`", match[2]))
+        for line in _section(text, _HOSTS_HEADING).splitlines()
+        if (match := _HOST_ROW.match(line))
+    }
+
+
+def _comparable(address: str) -> str:
+    """EVM addresses are case-insensitive. Base58 addresses are not."""
+    return address.lower() if address.lower().startswith("0x") else address
+
+
+def _wallet_shapes(text: str) -> list[str]:
+    evm = _EVM_SHAPE.findall(text)
+    base58 = [shape for shape in _BASE58_SHAPE.findall(text) if not _ALL_HEX.fullmatch(shape)]
+    return [*evm, *base58]
+
+
+def _refuse_bad_source(row: Mapping[str, str], hosts: Mapping[str, set[str]]) -> None:
+    """A named label's link must open on the source its type documents, and show only that row.
+    Messages name the chain alone, since a bad value may be the very thing that must not spread."""
+    link = row["source_url"]
+    where = f"a label on {row['chain']}"
+    parts = urlsplit(link)
+    if parts.scheme != "https" or "?" in link or "#" in link or "@" in parts.netloc:
+        raise PublishRefused(f"{where} has a source link that isn't a plain https link")
+    if parts.hostname not in hosts.get(row["source_type"], ()):
+        raise PublishRefused(f"{where} has a source link on a host its source type doesn't list")
+    if any(_comparable(shape) != _comparable(row["address"]) for shape in _wallet_shapes(link)):
+        raise PublishRefused(f"{where} has a source link holding another address")
+
+
+def _token_contracts() -> set[str]:
+    """OUSD's own contracts, which are public and identify the token rather than any holder."""
+    evm = {chain.token.lower() for chain in load_chains({}).values()}
+    return {*evm, OUSD_MINT}
+
+
+def _provider_values() -> list[str]:
+    names = (*KEYED_RPC_ENV.values(), *_RPC_ENV)
+    return [value for name in names if (value := os.environ.get(name, "").strip())]
+
+
+def _strings(value: Any, place: str) -> Iterator[tuple[str, str]]:
+    if isinstance(value, str):
+        yield place, value
+    elif isinstance(value, Mapping):
+        for key, inner in value.items():
+            yield f"{place}/{key}", str(key)
+            yield from _strings(inner, f"{place}/{key}")
+    elif isinstance(value, list):
+        for index, inner in enumerate(value):
+            yield from _strings(inner, f"{place}/{index}")
+
+
+def _refuse_unsafe_text(place: str, text: str, tokens: set[str], providers: Sequence[str]) -> None:
+    """Names the place, never the value, as the value is what must not spread."""
+    if any(_comparable(shape) not in tokens for shape in _wallet_shapes(text)):
+        raise PublishRefused(f"{place} holds a wallet-shaped value")
+    if _URL_SHAPE.search(text):
+        raise PublishRefused(f"{place} holds a URL")
+    if any(value in text for value in providers):
+        raise PublishRefused(f"{place} holds a provider URL")
+
+
+def _refuse_unsafe_dataset(
+    payloads: Mapping[str, Mapping[str, Any]], tabular: Mapping[str, bytes]
+) -> None:
+    """The last gate on what leaves: the whole dataset is refused for one bad value, wherever a
+    new column, a check's detail or a label put it. A named label's link has its own check."""
+    tokens = _token_contracts()
+    providers = _provider_values()
+    for filename, payload in payloads.items():
+        for place, text in _strings(payload, filename):
+            if not _LABEL_LINK_PLACE.fullmatch(place):
+                _refuse_unsafe_text(place, text, tokens, providers)
+    for filename, data in tabular.items():
+        _refuse_unsafe_text(filename, data.decode(), tokens, providers)
 
 
 def _issuer_coverage(
@@ -308,43 +425,51 @@ def _without_issuer_row(coverage: Sequence[Mapping[str, Any]]) -> list[str]:
 
 def _labels_payload(
     labels: Sequence[Mapping[str, str]],
-    legend: Mapping[str, Any],
+    readme: str,
     coverage: Sequence[Mapping[str, Any]],
     preview: bool,
 ) -> dict[str, Any]:
-    """Every label with how we know it, and never its address column.
+    """Named labels with how we know them, and unnamed clusters only as a count and their rule.
 
-    An explorer link holds the address it points at, and that is the only way one reaches the
-    dataset: a reader has to be able to open the source.
+    An unnamed row publishes no address and no link to one: labels.csv stays the full record. A
+    named row's link holds its own address where its source needs that, or a reader can't open it.
     """
+    legend = _read_legend(readme)
     known = {row["source_type"] for row in legend["source_types"]}
     if unexplained := {row["source_type"] for row in labels} - known:
         raise PublishRefused(f"label source types not in the legend: {sorted(unexplained)}")
+    hosts = _read_source_hosts(readme)
+    named = [row for row in labels if row["entity"]]
+    for row in named:
+        _refuse_bad_source(row, hosts)
     rows = sorted(
         (
             {
                 "chain": row["chain"],
-                "entity": row["entity"] or None,
+                "entity": row["entity"],
                 "category": row["category"],
                 "source_type": row["source_type"],
                 "source_url": row["source_url"],
                 "confidence": row["confidence"],
                 "date_checked": row["date_checked"],
             }
-            for row in labels
+            for row in named
         ),
-        key=lambda row: (
-            row["chain"],
-            row["category"],
-            row["entity"] or "",
-            row["source_type"],
-            row["source_url"],
-        ),
+        key=lambda row: (row["chain"], row["category"], row["entity"], row["source_url"]),
     )
+    unnamed = Counter((row["chain"], row["category"]) for row in labels if not row["entity"])
     return {
         "schema_version": SCHEMA_VERSION,
         "preview": preview,
         "data": rows,
+        "unnamed_clusters": {
+            "rule_reference": UNNAMED_RULE_REFERENCE,
+            "rule": _read_unnamed_rule(readme),
+            "counts": [
+                {"chain": chain, "category": category, "count": count}
+                for (chain, category), count in sorted(unnamed.items())
+            ],
+        },
         "source_legend": legend,
         "issuer_coverage": coverage,
         "chains_without_issuer_row": _without_issuer_row(coverage),
@@ -352,15 +477,13 @@ def _labels_payload(
 
 
 def _definitions(sources: Sources) -> dict[str, Any]:
-    """The thresholds the marts were built with: the project's, plus any --vars on that build."""
-    project = yaml.safe_load(sources.dbt_project.read_text())["vars"]
-    overrides = json.loads(sources.run_results.read_text()).get("args", {}).get("vars", {})
-    used = {**project, **overrides}
-    placed_days = int(used["placed_days"])
+    """The thresholds the marts were built with, from the build's own compiled SQL, so a changed
+    dbt_project.yml or a --vars on that build can't make the manifest misdescribe them."""
+    built = built_thresholds(json.loads(sources.run_results.read_text()))
     return {
-        "placed_days": placed_days,
-        **{name: str(used[name]) for name in _DEFINITION_AMOUNTS},
-        "journey_first_day": (DAY_ZERO + timedelta(days=placed_days)).isoformat(),
+        "placed_days": built["placed_days"],
+        **{name: str(built[name]) for name in _DEFINITION_AMOUNTS},
+        "journey_first_day": (DAY_ZERO + timedelta(days=built["placed_days"])).isoformat(),
         "velocity": VELOCITY_DEFINITIONS,
     }
 
@@ -435,6 +558,7 @@ def _summary_payload(
             large_transfer_base_units=large,
             journey_first_day=date.fromisoformat(definitions["journey_first_day"]),
             bridge_total=int(bridge[0]["reference_value"]) if bridge else None,
+            preview=preview,
         )
     )
     limits = known_limits(
@@ -442,6 +566,7 @@ def _summary_payload(
         chains_without_issuer_row=_without_issuer_row(coverage),
         chains_not_issuer_labeled=[row["chain"] for row in kpis if not row["issuer_labeled"]],
         chains_missing=[chain for chain in REQUIRED_CHAINS if chain not in chains],
+        preview=preview,
     )
     return {
         "schema_version": SCHEMA_VERSION,
@@ -465,13 +590,17 @@ def _json_bytes(payload: Mapping[str, Any]) -> bytes:
     return (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode()
 
 
-def _csv_bytes(rows: Sequence[Mapping[str, Any]]) -> bytes:
+def _csv_bytes(rows: Sequence[Mapping[str, Any]], preview: bool = False) -> bytes:
+    """Base units and the same columns as the JSON. A preview gets a first column saying so on every
+    row, as a CSV travels without its folder and manifest."""
     buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=list(rows[0]), lineterminator="\n")
+    mark = {"preview": PREVIEW_CSV_MARK} if preview else {}
+    writer = csv.DictWriter(buffer, fieldnames=[*mark, *rows[0]], lineterminator="\n")
     writer.writeheader()
     for row in rows:
         writer.writerow(
-            {
+            mark
+            | {
                 name: (
                     ";".join(value)
                     if isinstance(value, list)
@@ -487,9 +616,7 @@ def _csv_bytes(rows: Sequence[Mapping[str, Any]]) -> bytes:
 
 def _validate(filename: str, payload: Mapping[str, Any]) -> None:
     schema = json.loads((SCHEMA_DIR / f"{filename.removesuffix('.json')}.schema.json").read_text())
-    error = jsonschema.exceptions.best_match(
-        jsonschema.Draft202012Validator(schema).iter_errors(payload)
-    )
+    error = jsonschema.exceptions.best_match(_Validator(schema).iter_errors(payload))
     if error is not None:
         # The place and the rule, not the value.
         place = "/".join(str(part) for part in error.absolute_path)
@@ -667,7 +794,7 @@ def _build_files(
 
     labels = read_labels(sources.labels)
     coverage = _issuer_coverage(labels, journey)
-    legend = _read_legend(sources.legend)
+    readme = sources.legend.read_text()
     summary = _summary_payload(tables, included, statuses, definitions, coverage, allow_partial)
     latest_run = (
         {
@@ -688,12 +815,13 @@ def _build_files(
             **_data_payload(reconciliation, allow_partial),
             "latest_run": latest_run,
         },
-        "labels.json": _labels_payload(labels, legend, coverage, allow_partial),
+        "labels.json": _labels_payload(labels, readme, coverage, allow_partial),
     }
     tabular = {"journey.csv": journey, "activity.csv": activity, "chain_roles.csv": roles}
 
     files = {name: _json_bytes(payload) for name, payload in payloads.items()}
-    files.update({name: _csv_bytes(rows) for name, rows in tabular.items()})
+    written = {name: _csv_bytes(rows, allow_partial) for name, rows in tabular.items()}
+    files.update(written)
     row_counts = {
         **{name: len(rows) for name, rows in tabular.items()},
         **{name: len(payload.get("data", ())) for name, payload in payloads.items()},
@@ -719,8 +847,10 @@ def _build_files(
         files,
         row_counts,
     )
-    for name, payload in {**payloads, "manifest.json": manifest}.items():
+    every_payload = {**payloads, "manifest.json": manifest}
+    for name, payload in every_payload.items():
         _validate(name, payload)
+    _refuse_unsafe_dataset(every_payload, written)
     files["manifest.json"] = _json_bytes(manifest)
     return version, files
 

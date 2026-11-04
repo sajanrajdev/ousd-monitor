@@ -7,6 +7,7 @@ what it found, so a pass can only ever come from the store.
 import csv
 import hashlib
 import json
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import duckdb
+import yaml
 
 from ousd.chains import REQUIRED_CHAINS
 from ousd.store import LatestReconciliation, Store
@@ -42,6 +44,22 @@ MARTS = (
 # Any of these in dbt's arguments means the build covered less than the whole project.
 _NARROWING_ARGS = ("select", "exclude", "selector", "resource_types", "exclude_resource_types")
 _PASSING_NODE = ("success", "pass")
+# Where each threshold shows in the SQL dbt compiled, as (model, pattern). That SQL is the one
+# record of what a build used: dbt_project.yml can change afterwards, with nothing rebuilt.
+_BUILT_THRESHOLDS = {
+    "placed_days": ("int_wallet_placed", r"count\(\*\) over w_full = (\d+)"),
+    "placed_min_base_units": ("mart_supply_journey", r"still_value >= (\d+)"),
+    "large_transfer_base_units": ("mart_activity_waterfall", r"clean_value >= (\d+)\), 0\)"),
+    "clean_tx_min_base_units": (
+        "mart_activity_waterfall",
+        r"clean_value >= (\d+)\)\s+as clean_tx_count",
+    ),
+    "active_dust_base_units": ("mart_activity_kpis", r"sent_7d >= (\d+)\) as active_wallets_7d"),
+    "active_secondary_base_units": (
+        "mart_activity_kpis",
+        r"sent_7d >= (\d+)\)\s+as active_wallets_over_100_7d",
+    ),
+}
 # Day-over-day change, in percent, above which a person should look. They never block.
 _SUPPLY_WARNING_PERCENT = 25
 _EVERYDAY_WARNING_PERCENT = 100
@@ -295,10 +313,42 @@ def sampled_balances(
     )
 
 
-def _dbt_problems(path: Path) -> list[str]:
+def built_thresholds(results: Mapping[str, Any]) -> dict[str, int]:
+    """The thresholds a build really used, from its own compiled SQL. It raises rather than guess
+    when a model no longer shows one, so a changed model stops publish until this is updated."""
+    compiled = {
+        node["unique_id"].split(".")[-1]: node.get("compiled_code") or ""
+        for node in results.get("results", [])
+    }
+    thresholds = {}
+    for name, (model, pattern) in _BUILT_THRESHOLDS.items():
+        values = set(re.findall(pattern, compiled.get(model, "")))
+        if len(values) != 1:
+            raise ValueError(f"the dbt build record does not show one value of {name}")
+        thresholds[name] = int(values.pop())
+    # The model's window holds the day itself and the days before it.
+    thresholds["placed_days"] -= 1
+    return thresholds
+
+
+def _threshold_problems(results: Mapping[str, Any], project: Path) -> list[str]:
+    """The project's thresholds, with any --vars on the build, must be the ones it compiled."""
+    try:
+        built = built_thresholds(results)
+    except ValueError as exc:
+        return [str(exc)]
+    configured = yaml.safe_load(project.read_text())["vars"]
+    expected = {**configured, **results.get("args", {}).get("vars", {})}
+    differing = [name for name, value in built.items() if int(expected[name]) != value]
+    if differing:
+        return [f"marts were built with other values of {', '.join(sorted(differing))}"]
+    return []
+
+
+def _dbt_problems(sources: Sources) -> list[str]:
     """Reads dbt's own record of each node, because an exit status can't show what was built."""
     try:
-        results = json.loads(path.read_text())
+        results = json.loads(sources.run_results.read_text())
     except FileNotFoundError:
         return ["dbt has no run_results.json"]
     args = results.get("args", {})
@@ -313,6 +363,7 @@ def _dbt_problems(path: Path) -> list[str]:
         problems.append("dbt build ran no models or no tests")
     if bad := [node["unique_id"] for node in nodes if node["status"] not in _PASSING_NODE]:
         problems.append(f"{len(bad)} dbt nodes did not pass, first {sorted(bad)[0]}")
+    problems += _threshold_problems(results, sources.dbt_project)
     return problems
 
 
@@ -356,7 +407,7 @@ def _labels_disagree(marts: duckdb.DuckDBPyConnection, path: Path) -> list[str]:
 def dbt_tests(
     store: Store, marts: duckdb.DuckDBPyConnection, chains: Sequence[str], sources: Sources
 ) -> CheckResult:
-    problems = _dbt_problems(sources.run_results)
+    problems = _dbt_problems(sources)
     problems += _marts_behind_raw(store, marts, chains)
     problems += _labels_disagree(marts, sources.labels)
     return _result("dbt_tests", problems, "full dbt build passed, over the stored transfers")
@@ -464,7 +515,8 @@ def _plain(value: object) -> str:
 
 
 def data_fingerprint(store: Store, marts: duckdb.DuckDBPyConnection, sources: Sources) -> str:
-    """Identifies the raw state, the marts, the labels and dbt's record that the checks saw."""
+    """Identifies the raw state, the marts, the labels, dbt's record and the project's thresholds
+    that the checks saw."""
     raw = {
         chain: [
             cursor := store.synced_through(chain),
@@ -475,7 +527,7 @@ def data_fingerprint(store: Store, marts: duckdb.DuckDBPyConnection, sources: So
     }
     files = [
         hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in (sources.labels, sources.run_results)
+        for path in (sources.labels, sources.run_results, sources.dbt_project)
     ]
     payload = json.dumps([raw, files, mart_rows(marts)], default=_plain, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()

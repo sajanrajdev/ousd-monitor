@@ -1,6 +1,7 @@
 """The seven blocking checks, each over a world built by the real dbt project."""
 
 import json
+import re
 import shutil
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -159,6 +160,39 @@ def test_chain_supply_reads_the_newest_row_not_any_passing_row(world):
     assert world.run_checks()["chain_supply"].status == "failed"
 
 
+@pytest.mark.parametrize("status", ["fail", "unchecked"])
+def test_chain_supply_believes_the_status_even_when_the_figures_match(world, status):
+    """Every other condition holds here: at the cursor, recorded figures equal, events agree."""
+    world.raw_sql(
+        f"UPDATE reconciliation_checks SET status = '{status}' "
+        "WHERE check_name = 'chain_supply' AND subject = 'tempo'"
+    )
+    result = world.run_checks()["chain_supply"]
+    assert result.status == "failed"
+    assert result.detail == f"tempo: newest supply check is {status}"
+
+
+def test_chain_supply_with_no_row_says_so(world):
+    world.raw_sql("DELETE FROM reconciliation_checks WHERE subject = 'base'")
+    assert world.run_checks()["chain_supply"].detail == "base: no supply check recorded"
+
+
+def test_chain_supply_with_no_height_is_not_at_the_cursor(world):
+    world.raw_sql(
+        "UPDATE reconciliation_checks SET pin_height = NULL "
+        "WHERE check_name = 'chain_supply' AND subject = 'base'"
+    )
+    assert "base: supply checked at None" in world.run_checks()["chain_supply"].detail
+
+
+def test_chain_supply_with_no_reference_value_fails(world):
+    world.raw_sql(
+        "UPDATE reconciliation_checks SET reference_value = NULL, observed_value = NULL "
+        "WHERE check_name = 'chain_supply' AND subject = 'base'"
+    )
+    assert "base: recorded None" in world.run_checks()["chain_supply"].detail
+
+
 # cross_chain_supply
 
 
@@ -194,6 +228,22 @@ def test_cross_chain_fails_on_one_base_unit_recorded(world):
 def test_cross_chain_fails_on_any_part_of_the_record_not_matching(world, tamper):
     world.raw_sql(tamper)
     assert world.run_checks()["cross_chain_supply"].status == "failed"
+
+
+def test_cross_chain_needs_the_comparison_to_be_of_the_recorded_total(world):
+    # The comparison agrees with itself, but is of another total than the check recorded.
+    world.raw_sql(
+        "UPDATE bridge_comparisons SET chains_total = chains_total + 1, "
+        "bridge_total = bridge_total + 1"
+    )
+    assert "does not match" in world.run_checks()["cross_chain_supply"].detail
+
+
+def test_cross_chain_reads_the_final_attempt_of_the_run(world):
+    with world.store() as store:
+        run = store.latest_reconciliation().run_id
+        store.record_check(run, "bridge", "all", 2, "unchecked", "bridge_stale")
+    assert "Bridge result is unchecked" in world.run_checks()["cross_chain_supply"].detail
 
 
 def test_cross_chain_reads_the_newest_finished_run_only(world):
@@ -237,6 +287,13 @@ def test_a_missing_chain_fails_or_is_skipped_with_allow_partial(partial):
     assert loose["reconciliation_gate"].status == "skipped"
     others = [name for name in checks.CHECK_NAMES if name not in checks.SKIPPABLE]
     assert {loose[name].status for name in others} == {"passed"}, loose
+
+
+def test_a_chain_with_a_cursor_and_no_transfers_counts_as_missing(partial):
+    partial.raw_sql("INSERT INTO sync_state VALUES ('base', 100)")
+    with partial.store() as store:
+        assert checks.present_chains(store) == ["tempo", "ethereum"]
+    assert "base, solana" in partial.run_checks(allow_partial=True)["cross_chain_supply"].detail
 
 
 def test_allow_partial_skips_nothing_when_no_chain_is_missing(world):
@@ -316,7 +373,31 @@ def test_sampled_balances_ignores_a_rejected_attempt_but_not_a_final_failure(wor
         "UPDATE reconciliation_checks SET status = 'unchecked' WHERE subject = 'base' "
         "AND check_name = 'sampled_balances' AND attempt = 5"
     )
-    assert "base" in world.run_checks()["sampled_balances"].detail
+    result = world.run_checks()["sampled_balances"]
+    assert result.status == "failed"
+    assert "base: sampled balances check is unchecked" in result.detail
+
+
+@pytest.mark.parametrize("status", ["fail", "unchecked"])
+def test_sampled_balances_believes_the_final_status_even_when_every_wallet_matches(world, status):
+    world.raw_sql(
+        f"UPDATE reconciliation_checks SET status = '{status}' "
+        "WHERE check_name = 'sampled_balances' AND subject = 'ethereum'"
+    )
+    result = world.run_checks()["sampled_balances"]
+    assert result.status == "failed"
+    assert result.detail == f"ethereum: sampled balances check is {status}"
+
+
+def test_samples_with_no_check_row_do_not_count(world):
+    world.raw_sql(
+        "DELETE FROM reconciliation_checks "
+        "WHERE check_name = 'sampled_balances' AND subject = 'ethereum'"
+    )
+    assert (
+        "ethereum: sampled balances check is missing"
+        in world.run_checks()["sampled_balances"].detail
+    )
 
 
 def test_a_recheck_does_not_drop_the_wallets_that_matched_the_first_time(world):
@@ -382,6 +463,14 @@ def test_a_partial_preview_finds_a_chain_samples_in_its_newest_run_that_has_them
     assert results["sampled_balances"].status == "passed", results["sampled_balances"].detail
 
 
+def test_allow_partial_with_no_chain_missing_reads_samples_from_the_gate_run_only(world):
+    """A flag must not loosen a check when nothing is missing, or a real publish could use it."""
+    with world.store() as store:
+        newest = record_run(store, at=RECONCILED_AT + timedelta(minutes=1))
+        store.db.execute("DELETE FROM balance_samples WHERE run_id = ?", [newest])
+    assert world.run_checks(allow_partial=True)["sampled_balances"].status == "failed"
+
+
 def test_sampled_balances_needs_samples_from_the_gate_run(world):
     world.raw_sql("DELETE FROM balance_samples WHERE chain = 'tempo'")
     result = world.run_checks()["sampled_balances"]
@@ -423,6 +512,79 @@ def test_dbt_tests_needs_both_models_and_tests(world, kind, word):
 def test_dbt_tests_fails_with_a_row_missing_below_the_newest_block(world):
     world.raw_sql("DELETE FROM transfers WHERE chain = 'base' AND block_number = 210")
     assert "base: marts were not built" in world.run_checks()["dbt_tests"].detail
+
+
+def built_with(world, **values):
+    """The project file says one thing, after a build that used another."""
+    path = world.sources.dbt_project
+    text = path.read_text()
+    for name, value in values.items():
+        text, count = re.subn(rf"^(  {name}): .*$", rf"\g<1>: {value}", text, flags=re.MULTILINE)
+        assert count == 1
+    path.write_text(text)
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("placed_days", 20),
+        ("placed_min_base_units", 5_000_000_000_000),
+        ("large_transfer_base_units", 5_000_000_000_000),
+        ("clean_tx_min_base_units", 5),
+        ("active_dust_base_units", 5),
+        ("active_secondary_base_units", 5),
+    ],
+)
+def test_dbt_tests_fails_when_the_project_says_other_than_the_build(world, name, value):
+    built_with(world, **{name: value})
+    result = world.run_checks()["dbt_tests"]
+    assert result.status == "failed"
+    assert f"built with other values of {name}" in result.detail
+
+
+def test_dbt_tests_fails_when_vars_claim_what_the_build_did_not_compile(world):
+    path = world.sources.run_results
+    results = json.loads(path.read_text())
+    results["args"]["vars"]["placed_days"] = 20
+    path.write_text(json.dumps(results))
+    assert "other values of placed_days" in world.run_checks()["dbt_tests"].detail
+
+
+def test_thresholds_are_read_from_what_the_build_compiled(world):
+    results = json.loads(world.sources.run_results.read_text())
+    assert checks.built_thresholds(results) == {
+        "placed_days": 14,
+        "placed_min_base_units": 10**12,
+        "large_transfer_base_units": 10**12,
+        "clean_tx_min_base_units": 10**6,
+        "active_dust_base_units": 10**6,
+        "active_secondary_base_units": 10**8,
+    }
+
+
+@pytest.mark.parametrize(
+    "model", ["int_wallet_placed", "mart_supply_journey", "mart_activity_waterfall"]
+)
+def test_a_model_that_no_longer_shows_a_threshold_fails_rather_than_guesses(world, model):
+    path = world.sources.run_results
+    results = json.loads(path.read_text())
+    for node in results["results"]:
+        if node["unique_id"].endswith(f".{model}"):
+            node["compiled_code"] = "select 1"
+    path.write_text(json.dumps(results))
+    assert "does not show one value" in world.run_checks()["dbt_tests"].detail
+
+
+def test_two_values_of_one_threshold_are_not_read_as_either(world):
+    path = world.sources.run_results
+    results = json.loads(path.read_text())
+    for node in results["results"]:
+        if node["unique_id"].endswith(".mart_supply_journey"):
+            node["compiled_code"] += "\nwhere still_value >= 7"
+    path.write_text(json.dumps(results))
+    assert (
+        "does not show one value of placed_min_base_units" in world.run_checks()["dbt_tests"].detail
+    )
 
 
 def test_dbt_tests_fails_with_no_record_of_a_build(world):

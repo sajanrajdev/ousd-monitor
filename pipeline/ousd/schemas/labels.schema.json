@@ -7,6 +7,7 @@
     "schema_version",
     "preview",
     "data",
+    "unnamed_clusters",
     "source_legend",
     "issuer_coverage",
     "chains_without_issuer_row"
@@ -42,10 +43,8 @@
             ]
           },
           "entity": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string",
+            "minLength": 1
           },
           "category": {
             "enum": [
@@ -64,13 +63,12 @@
               "company_docs",
               "official_statement",
               "published_research",
-              "onchain_metadata",
-              "derived_rule"
+              "onchain_metadata"
             ]
           },
           "source_url": {
             "type": "string",
-            "pattern": "^(https://|docs/)"
+            "pattern": "^https://[^?#\\s]+$"
           },
           "confidence": {
             "enum": [
@@ -81,6 +79,60 @@
           "date_checked": {
             "type": "string",
             "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          }
+        }
+      }
+    },
+    "unnamed_clusters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_reference",
+        "rule",
+        "counts"
+      ],
+      "properties": {
+        "rule_reference": {
+          "const": "labels/README.md#how-unnamed-clusters-are-found"
+        },
+        "rule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "counts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "chain",
+              "category",
+              "count"
+            ],
+            "properties": {
+              "chain": {
+                "enum": [
+                  "tempo",
+                  "ethereum",
+                  "base",
+                  "solana"
+                ]
+              },
+              "category": {
+                "enum": [
+                  "issuer",
+                  "issuer_route",
+                  "system",
+                  "dex",
+                  "lending",
+                  "exchange"
+                ]
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
           }
         }
       }

@@ -88,8 +88,8 @@ def test_the_placed_template_follows_the_plan():
     )
     assert verdict.text == (
         "On Tempo, which holds about 67% of OUSD, 76% of supply has sat still for at least 14 "
-        "days in wallets of $1M or more, and transfers under $1M moved $4.6K in the last week, "
-        "0.76% of supply."
+        "days in unlabeled wallets of $1M or more, and transfers under $1M moved $4.6K in the "
+        "last week, 0.76% of supply."
     )
 
 
@@ -102,7 +102,7 @@ def test_thresholds_in_the_sentence_come_from_the_definitions():
     )
     text = build_verdict(rows).text
     assert "at least 30 days" in text
-    assert "wallets of $5M or more" in text
+    assert "unlabeled wallets of $5M or more" in text
     assert "under $100K" in text
 
 
@@ -160,6 +160,24 @@ def test_fact_estimate_and_opinion_stay_apart():
     # The opinion isn't in the sentence, so a reader of `text` alone gets numbers.
     assert "reads" not in verdict.text
     assert any("reads mostly like" in opinion for opinion in verdict.opinions)
+
+
+def test_a_figure_that_rests_on_labels_is_an_estimate_not_a_fact():
+    verdict = build_verdict(inputs(figures(placed=900 * OUSD, everyday=OUSD)))
+    for word in ("Placed", "placed", "everyday", "Everyday"):
+        assert not [fact for fact in verdict.facts if word in fact], verdict.facts
+    assert any(e.startswith("Placed supply is 90.00%") for e in verdict.estimates)
+    assert any(e.startswith("Seven-day everyday volume is 0.10%") for e in verdict.estimates)
+
+
+def test_facts_are_what_reconciliation_proves():
+    verdict = build_verdict(inputs(figures(placed=900 * OUSD)))
+    assert any("Total supply on these chains is $1K" in fact for fact in verdict.facts)
+    assert any("to the base unit" in fact for fact in verdict.facts)
+
+
+def test_the_sentence_says_placed_wallets_are_unlabeled():
+    assert "in unlabeled wallets of" in build_verdict(inputs(figures(placed=900 * OUSD))).text
 
 
 @pytest.mark.parametrize(
@@ -232,9 +250,22 @@ def test_a_chain_on_the_first_placed_day_is_not_too_early():
 
 def test_a_preview_states_no_facts():
     verdict = build_verdict(inputs(figures(placed=900 * OUSD), statuses=PREVIEW))
-    assert verdict.text.startswith("Local preview, not fully reconciled. On Tempo")
+    assert verdict.text.startswith("Local preview, not a finding. On Tempo")
     assert verdict.facts == []
     assert any("cover Tempo" in estimate for estimate in verdict.estimates)
+
+
+def test_a_preview_with_nothing_skipped_is_still_a_preview():
+    every = (figures(chain, placed=600 * OUSD) for chain in REQUIRED_CHAINS)
+    verdict = build_verdict(replace(inputs(*every), preview=True))
+    assert verdict.text.startswith("Local preview, not a finding. On Tempo, Ethereum")
+    assert verdict.facts == []
+
+
+def test_a_preview_without_a_clear_statement_still_says_preview():
+    verdict = build_verdict(replace(inputs(figures(total=0)), preview=True))
+    assert verdict.state == "no_clear_statement"
+    assert verdict.text.startswith("Local preview, not a finding. On Tempo, the data")
 
 
 def test_as_of_is_per_chain_and_the_text_is_built_over_a_range():
@@ -296,6 +327,17 @@ def test_known_limits_carry_the_chains_that_need_them():
     assert "velocity can exceed" in limits["velocity_denominators"]
 
 
+def test_known_limits_say_when_it_is_a_preview():
+    limits = known_limits(
+        10**12,
+        chains_without_issuer_row=[],
+        chains_not_issuer_labeled=[],
+        chains_missing=[],
+        preview=True,
+    )
+    assert "local_preview" in {limit.id for limit in limits}
+
+
 def test_known_limits_leave_out_what_does_not_apply():
     ids = {
         limit.id
@@ -303,4 +345,4 @@ def test_known_limits_leave_out_what_does_not_apply():
             10**12, chains_without_issuer_row=[], chains_not_issuer_labeled=[], chains_missing=[]
         )
     }
-    assert not ids & {"no_issuer_row", "no_issuer_label", "chains_missing"}
+    assert not ids & {"no_issuer_row", "no_issuer_label", "chains_missing", "local_preview"}

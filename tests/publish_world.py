@@ -173,7 +173,7 @@ class World:
             run_results=self.path / "target" / "run_results.json",
             labels=self.path / "labels.csv",
             legend=ROOT / "labels" / "README.md",
-            dbt_project=ROOT / "dbt" / "dbt_project.yml",
+            dbt_project=self.path / "dbt_project.yml",
         )
 
     @contextmanager
@@ -217,7 +217,7 @@ class World:
 
     def copy(self, destination: Path) -> "World":
         destination.mkdir(parents=True, exist_ok=True)
-        for name in ("ousd.duckdb", "marts.duckdb", "labels.csv"):
+        for name in ("ousd.duckdb", "marts.duckdb", "labels.csv", "dbt_project.yml"):
             shutil.copy(self.path / name, destination / name)
         (destination / "target").mkdir(exist_ok=True)
         shutil.copy(self.path / "target" / "run_results.json", destination / "target")
@@ -226,6 +226,7 @@ class World:
 
 def build_world(path: Path, chains: Sequence[str] = REQUIRED_CHAINS) -> World:
     world = World(path)
+    shutil.copy(ROOT / "dbt" / "dbt_project.yml", path / "dbt_project.yml")
     with world.store() as store:
         for chain in chains:
             blocks = {} if chain == "solana" else {tip(chain): f"0xhash{tip(chain)}"}

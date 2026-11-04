@@ -15,6 +15,7 @@ from pathlib import Path
 import duckdb
 import jsonschema
 import pytest
+from dbt_helpers import invoke_dbt
 from ousd import checks, cli
 from ousd import publish as publisher
 from ousd.chains import REQUIRED_CHAINS
@@ -654,7 +655,7 @@ def test_a_preview_verdict_states_no_facts_and_names_its_chains(partial):
     summary = read_json(partial.publish(allow_partial=True), "summary.json")
     verdict = summary["verdict"]
     assert verdict["scope"] == ["tempo", "ethereum"]
-    assert verdict["text"].startswith("Local preview, not fully reconciled. On Tempo and Ethereum")
+    assert verdict["text"].startswith("Local preview, not a finding. On Tempo and Ethereum")
     assert "all chains" not in verdict["text"].lower()
     assert verdict["facts"] == []
     assert "chains_missing" in {limit["id"] for limit in summary["known_limits"]}
@@ -790,10 +791,48 @@ def test_labels_carry_how_we_know_and_no_address_column(published):
         "date_checked",
     }
     with REAL_LABELS.open(newline="") as handle:
-        assert len(labels["data"]) == len(list(csv.DictReader(handle)))
-    unnamed = [row for row in labels["data"] if row["source_type"] == "derived_rule"]
-    assert unnamed and all(row["entity"] is None for row in unnamed)
+        named = [row for row in csv.DictReader(handle) if row["entity"]]
+    assert len(labels["data"]) == len(named)
+    assert all(row["entity"] for row in labels["data"])
     assert any(row["entity"] == "Bridge" and row["category"] == "issuer" for row in labels["data"])
+
+
+def test_unnamed_clusters_publish_a_count_and_their_rule_and_no_address(published):
+    _, folder = published
+    with REAL_LABELS.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    unnamed = [row for row in rows if not row["entity"]]
+    assert unnamed and {row["category"] for row in unnamed} == {"issuer_route"}
+    clusters = read_json(folder, "labels.json")["unnamed_clusters"]
+    assert clusters["rule_reference"] == "labels/README.md#how-unnamed-clusters-are-found"
+    assert "The hub is the wallet a chain's mints go to" in clusters["rule"]
+    assert sum(entry["count"] for entry in clusters["counts"]) == len(unnamed)
+    for entry in clusters["counts"]:
+        expected = [
+            row
+            for row in unnamed
+            if row["chain"] == entry["chain"] and row["category"] == entry["category"]
+        ]
+        assert entry["count"] == len(expected)
+    for name, text in text_of(folder).items():
+        for row in unnamed:
+            assert row["address"] not in text, name
+            assert row["source_url"] == clusters["rule_reference"] or row["source_url"] not in text
+
+
+def test_the_two_unnamed_rows_with_explorer_links_publish_neither(published):
+    _, folder = published
+    for address in (
+        "0x4787ad0324a68152834f150326fe2357af8993cc",
+        "0x1767c61c9ec15126de4eb02cd9a91474584a1873",
+    ):
+        assert address in REAL_LABELS.read_text()
+        assert not [name for name, text in text_of(folder).items() if address in text]
+
+
+def test_no_published_file_leads_to_the_brainstorm(published):
+    _, folder = published
+    assert not [name for name, text in text_of(folder).items() if "brainstorm" in text]
 
 
 def test_a_label_link_can_only_be_one_a_reader_can_open_or_a_rule_here(world):
@@ -804,7 +843,7 @@ def test_a_label_link_can_only_be_one_a_reader_can_open_or_a_rule_here(world):
     assert ",https://" in good
     path.write_text(good.replace(",https://", ",javascript:", 1))
     world.run_checks()
-    with pytest.raises(PublishRefused, match=r"labels\.json fails its schema"):
+    with pytest.raises(PublishRefused, match="plain https link"):
         world.publish()
 
 
@@ -851,7 +890,7 @@ def test_a_readme_without_the_legend_refuses(world, tmp_path):
         legend=readme,
         dbt_project=world.sources.dbt_project,
     )
-    with pytest.raises(PublishRefused, match="no source legend"):
+    with pytest.raises(PublishRefused, match="no section"):
         publisher.publish(RUN, world.marts_file, world.raw, world.out, now=NOW, sources=sources)
 
 
@@ -942,6 +981,18 @@ def test_a_preview_with_no_kpis_for_a_chain_leaves_that_chain_out(world):
     world.run_checks()
     with pytest.raises(PublishRefused, match="chains missing from the dataset: base"):
         world.publish()
+
+
+def test_a_preview_says_which_numbers_are_not_from_the_latest_run(partial):
+    partial.mart_sql(
+        "UPDATE mart_reconciliation SET event_value = event_value - 1 WHERE subject = 'tempo'"
+    )
+    partial.run_checks(allow_partial=True)
+    rows = read_json(partial.publish(allow_partial=True), "reconciliation.json")["data"]
+    by_subject = {row["subject"]: row for row in rows}
+    assert by_subject["tempo"]["run_id"] is None
+    assert by_subject["tempo"]["in_latest_run"] is False
+    assert by_subject["ethereum"]["in_latest_run"] is True
 
 
 # Velocity
@@ -1087,7 +1138,7 @@ def test_no_wallet_address_reaches_a_published_row(published):
     _, folder = published
     with REAL_LABELS.open(newline="") as handle:
         labels = list(csv.DictReader(handle))
-    labeled = {row["address"].lower() for row in labels}
+    named_addresses = {row["address"].lower() for row in labels if row["entity"]}
     for name, text in text_of(folder).items():
         found = EVM_ADDRESS.findall(text)
         if name != "labels.json":
@@ -1096,7 +1147,7 @@ def test_no_wallet_address_reaches_a_published_row(published):
         values = {key: value for key, value in row.items() if key != "source_url"}
         assert not EVM_ADDRESS.search(json.dumps(values))
         for address in EVM_ADDRESS.findall(row["source_url"]):
-            assert address.lower() in labeled, row
+            assert address.lower() in named_addresses, row
 
 
 def test_no_fixture_wallet_on_any_chain_reaches_a_file(published):
@@ -1144,6 +1195,288 @@ def test_a_refusal_never_stores_a_url_in_the_manifest(world, monkeypatch):
         world.publish(now=LATER)
     assert SECRET not in str(refused.value)
     assert SECRET not in (world.out / "latest" / "manifest.json").read_text()
+
+
+# The runtime guard: one bad value refuses the whole dataset
+
+
+HOLDER = "0x" + "a1" * 20
+SOLANA_HOLDER = wallets("solana")["payer"]
+
+
+def assert_guard_refuses(world, match, **kwargs):
+    with pytest.raises(PublishRefused, match=match) as refused:
+        world.publish(**kwargs)
+    assert not world.out.exists() or not [
+        path for path in world.out.iterdir() if path.is_dir() and path.name != "latest"
+    ]
+    return str(refused.value)
+
+
+def edit_label(world, old, new):
+    path = world.sources.labels
+    text = path.read_text()
+    assert old in text
+    path.write_text(text.replace(old, new, 1))
+
+
+@pytest.mark.parametrize(
+    "value",
+    [HOLDER, HOLDER.upper().replace("0X", "0x"), SOLANA_HOLDER],
+    ids=["evm", "evm-upper", "base58"],
+)
+def test_a_wallet_in_a_check_detail_refuses_the_whole_dataset(world, value):
+    world.run_checks()
+    world.raw_sql(
+        "UPDATE check_results SET detail = ? WHERE check_name = 'freshness'", [f"seen {value}"]
+    )
+    message = assert_guard_refuses(world, "wallet-shaped")
+    assert "manifest.json/checks/6/detail" in message
+    assert value not in message
+
+
+def test_a_wallet_as_a_run_id_refuses(world):
+    world.run_checks(run_id=HOLDER)
+    assert_guard_refuses(world, "check_run_id", run_id=HOLDER)
+
+
+@pytest.mark.parametrize("value", [HOLDER, SOLANA_HOLDER], ids=["evm", "base58"])
+def test_a_wallet_in_an_entity_refuses_the_whole_dataset(world, value):
+    edit_label(world, ",LI.FI Diamond,", f",Holder {value},")
+    world.run_checks()
+    message = assert_guard_refuses(world, "wallet-shaped")
+    assert "labels.json/data/" in message
+    assert value not in message
+
+
+def test_a_keyed_url_in_an_entity_refuses(world):
+    edit_label(world, ",LI.FI Diamond,", f",http://rpc.invalid/v2/{SECRET},")
+    world.run_checks()
+    assert SECRET not in assert_guard_refuses(world, "holds a URL")
+
+
+def test_a_provider_value_from_the_environment_refuses_even_without_a_scheme(world, monkeypatch):
+    monkeypatch.setenv("BASE_RPC_URL", f"rpc.invalid/v2/{SECRET}")
+    world.run_checks()
+    world.raw_sql(
+        "UPDATE check_results SET detail = ? WHERE check_name = 'freshness'",
+        [f"read rpc.invalid/v2/{SECRET}"],
+    )
+    assert SECRET not in assert_guard_refuses(world, "provider URL")
+
+
+def test_a_wallet_reaching_only_a_csv_refuses(world, monkeypatch):
+    real = publisher._csv_bytes
+    monkeypatch.setattr(
+        publisher, "_csv_bytes", lambda rows, preview: real(rows, preview) + HOLDER.encode()
+    )
+    world.run_checks()
+    assert_guard_refuses(world, r"\.csv holds a wallet-shaped value")
+
+
+def test_the_guard_also_covers_a_preview(partial):
+    partial.run_checks(allow_partial=True)
+    partial.raw_sql(
+        "UPDATE check_results SET detail = ? WHERE check_name = 'freshness'", [f"seen {HOLDER}"]
+    )
+    with pytest.raises(PublishRefused, match="wallet-shaped"):
+        partial.publish(allow_partial=True)
+    assert not list(partial.preview_root.glob("preview-*"))
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "0x20c0000000000000000000006a37DA5C996874BE",
+        "0x9f6F3991D525015a6F8CaF062C83b62fD3AC4436",
+        "0xB2000000000000000000002fEb517dFeC7415344",
+        "ousd2mJsPEckLHcSCDxyKD7NDGARZcfLbDZkKiatYHB",
+    ],
+    ids=["tempo", "ethereum", "base", "solana"],
+)
+def test_the_token_contracts_stay_allowed(world, token):
+    world.run_checks()
+    world.raw_sql(
+        "UPDATE check_results SET detail = ? WHERE check_name = 'freshness'", [f"token {token}"]
+    )
+    assert world.publish().is_dir()
+
+
+def test_a_hash_or_a_run_id_is_not_a_wallet():
+    assert publisher._wallet_shapes("a" * 64) == []
+    assert publisher._wallet_shapes("0" + "a" * 63) == []
+    assert publisher._wallet_shapes("9f3a7c21d4e8b6f5a1c9e7d3b2f4a6c8") == []
+
+
+LIFI = "0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae"
+LIFI_LINK = f"https://basescan.org/address/{LIFI}"
+
+
+@pytest.mark.parametrize(
+    "link,word",
+    [
+        (f"https://basescan.org/address/{HOLDER}", "another address"),
+        (f"https://basescan.org/address/{LIFI}?a=1", "plain https"),
+        (f"https://basescan.org/address/{LIFI}?", "plain https"),
+        (f"https://basescan.org/address/{LIFI}#code", "plain https"),
+        (f"http://basescan.org/address/{LIFI}", "plain https"),
+        (f"https://user:{SECRET}@basescan.org/address/{LIFI}", "plain https"),
+        (f"https://rpc.provider.invalid/v2/{SECRET}", "host"),
+        (f"https://basescan.org.invalid/address/{LIFI}", "host"),
+        (f"https://crystalintelligence.com/address/{LIFI}", "host"),
+        ("labels/README.md#how-unnamed-clusters-are-found", "plain https"),
+    ],
+    ids=[
+        "other-address",
+        "query",
+        "empty-query",
+        "fragment",
+        "http",
+        "userinfo",
+        "keyed-rpc",
+        "lookalike-host",
+        "wrong-type-host",
+        "local-path",
+    ],
+)
+def test_a_named_label_link_must_be_a_plain_link_to_its_documented_source(world, link, word):
+    edit_label(world, LIFI_LINK, link)
+    world.run_checks()
+    message = assert_guard_refuses(world, word)
+    assert SECRET not in message
+    assert HOLDER not in message
+
+
+def test_a_link_may_hold_its_own_address_in_any_case(world):
+    edit_label(world, LIFI_LINK, f"https://basescan.org/address/0x{LIFI[2:].upper()}")
+    world.run_checks()
+    assert world.publish().is_dir()
+
+
+def test_a_base58_link_must_match_exactly(world):
+    orca = "BqCfmajD8Z67KrVE8i4XN43vyPS9hppFAt5dPZFFaMfu"
+    edit_label(world, f"pools/{orca}", f"pools/{orca.lower()}")
+    world.run_checks()
+    assert_guard_refuses(world, "another address")
+
+
+def test_a_source_type_with_no_listed_host_refuses(world):
+    edit_label(world, "LI.FI Diamond,system,explorer_tag", "LI.FI Diamond,system,company_docs")
+    world.run_checks()
+    assert_guard_refuses(world, "host")
+
+
+# Thresholds come from what the build used
+
+
+def edit_project(world, name, value):
+    path = world.sources.dbt_project
+    text, count = re.subn(rf"^(  {name}): .*$", rf"\g<1>: {value}", path.read_text(), flags=re.M)
+    assert count == 1
+    path.write_text(text)
+
+
+def test_thresholds_changed_after_the_build_refuse_and_are_never_published(world):
+    """The reported case: 20 days and $5M in the project file, over marts built on 14 and $1M."""
+    edit_project(world, "placed_days", 20)
+    edit_project(world, "placed_min_base_units", 5_000_000_000_000)
+    results = world.run_checks()
+    assert results["dbt_tests"].status == "failed"
+    with pytest.raises(PublishRefused, match="dbt_tests is failed"):
+        world.publish()
+    assert not world.out.exists()
+
+
+def test_thresholds_changed_between_check_and_publish_refuse(world):
+    world.run_checks()
+    edit_project(world, "placed_days", 20)
+    with pytest.raises(PublishRefused, match="changed since these checks ran"):
+        world.publish()
+
+
+def test_definitions_come_from_the_build_even_if_the_check_is_bypassed(world):
+    world.run_checks()
+    edit_project(world, "placed_days", 20)
+    definitions = publisher._definitions(world.sources)
+    assert definitions["placed_days"] == 14
+    assert definitions["placed_min_base_units"] == "1000000000000"
+    assert definitions["journey_first_day"] == "2026-10-14"
+
+
+def test_a_real_vars_build_publishes_the_values_it_used(world):
+    labels = [dict(row) for row in csv.DictReader(world.sources.labels.open(newline=""))]
+    result = invoke_dbt(
+        world.path,
+        labels,
+        dbt_vars={"placed_days": 20, "placed_min_base_units": 5_000_000_000_000},
+    )
+    assert result.success
+    results = world.run_checks()
+    assert {r.status for r in results.values()} == {"passed"}, results
+    folder = world.publish()
+    definitions = read_json(folder, "manifest.json")["definitions"]
+    assert definitions["placed_days"] == 20
+    assert definitions["placed_min_base_units"] == "5000000000000"
+    assert definitions["journey_first_day"] == "2026-10-20"
+    text = read_json(folder, "summary.json")["verdict"]["text"]
+    assert "at least 20 days in unlabeled wallets of $5M" in text
+    assert min(row["day"] for row in read_json(folder, "journey.json")["data"]) == "2026-10-20"
+
+
+# Integers are integers
+
+
+def test_a_float_in_an_integer_field_refuses_even_if_whole(world):
+    world.mart_sql("ALTER TABLE mart_activity_kpis ALTER velocity_bps TYPE DOUBLE")
+    world.run_checks()
+    assert_guard_refuses(world, r"\.json fails its schema")
+
+
+def test_a_float_count_refuses(world):
+    world.mart_sql("ALTER TABLE mart_supply_journey ALTER holders TYPE DOUBLE")
+    world.run_checks()
+    assert_guard_refuses(world, r"journey\.json fails its schema")
+
+
+def test_a_boolean_is_not_an_integer(published):
+    _, folder = published
+    payload = read_json(folder, "journey.json")
+    payload["data"][0]["holders"] = True
+    with pytest.raises(PublishRefused, match="fails its schema"):
+        publisher._validate("journey.json", payload)
+
+
+# A preview can't be read as real, even with every chain present
+
+
+def test_a_four_chain_preview_says_so_everywhere(world):
+    world.run_checks(allow_partial=True)
+    folder = world.publish(allow_partial=True)
+    verdict = read_json(folder, "summary.json")["verdict"]
+    assert verdict["text"].startswith("Local preview, not a finding. On Tempo, Ethereum")
+    assert verdict["facts"] == []
+    limits = {limit["id"] for limit in read_json(folder, "summary.json")["known_limits"]}
+    assert "local_preview" in limits
+    for name in CSV_FILES:
+        with (folder / name).open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        assert rows
+        assert {row["preview"] for row in rows} == {publisher.PREVIEW_CSV_MARK}, name
+        assert next(iter(rows[0])) == "preview"
+
+
+def test_a_real_csv_has_no_preview_column(published):
+    _, folder = published
+    for name in CSV_FILES:
+        assert "preview" not in (folder / name).read_text().splitlines()[0]
+        assert publisher.PREVIEW_CSV_MARK not in (folder / name).read_text()
+
+
+def test_manifest_hashes_cover_the_marked_csv(world):
+    world.run_checks(allow_partial=True)
+    folder = world.publish(allow_partial=True)
+    for name, entry in read_json(folder, "manifest.json")["files"].items():
+        assert entry["sha256"] == hashlib.sha256((folder / name).read_bytes()).hexdigest()
 
 
 # Times are UTC, in any zone
