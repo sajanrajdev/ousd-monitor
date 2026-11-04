@@ -14,6 +14,11 @@ describe("the test setup", () => {
     expect(screen.getByText(/Is that turning into money that moves\?/)).toBeTruthy();
   });
 
+  it("keeps id=main-content on main, so the skip link has somewhere to go", () => {
+    const { container } = render(<Home />);
+    expect(container.querySelector("main#main-content")).not.toBeNull();
+  });
+
   it("refuses the network", () => {
     expect(() => fetch("https://example.invalid")).toThrow("a test tried to use the network");
   });

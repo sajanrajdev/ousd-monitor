@@ -51,6 +51,12 @@ function withDoc(change: (doc: string) => string): () => unknown {
 }
 
 describe("the rendered page", () => {
+  it("keeps id=main-content on main, so the skip link has somewhere to go", () => {
+    vi.stubEnv("OUSD_DATASET_DIR", "fixtures/dataset/complete");
+    const { container } = render(<Methodology />);
+    expect(container.querySelector("main#main-content")).not.toBeNull();
+  });
+
   it("has every fixed anchor, once", () => {
     const container = page();
     for (const anchor of DEFINITION_ANCHORS) {

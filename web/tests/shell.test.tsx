@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { describe, expect, it } from "vitest";
@@ -19,6 +21,9 @@ describe("the site shell", () => {
     const footer = screen.getByRole("contentinfo");
     expect(within(header).getByText(INDEPENDENCE_LINE)).toBeTruthy();
     expect(within(footer).getByText(INDEPENDENCE_LINE)).toBeTruthy();
+    expect(
+      within(header).getByRole("link", { name: "Skip to main content" }).getAttribute("href"),
+    ).toBe("#main-content");
   });
 
   it("says in the footer that it is not financial advice and not an attestation", () => {
@@ -58,5 +63,25 @@ describe("the site shell", () => {
     );
     const results = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(results.violations).toEqual([]);
+  });
+});
+
+describe("touch targets", () => {
+  const css = readFileSync(join(process.cwd(), "app/globals.css"), "utf8");
+
+  it("sets a 24px minimum on links that stand alone, and not on links inside a sentence", () => {
+    const rule = /([^{}]*)\{[^}]*min-height:\s*1\.5rem[^}]*\}/.exec(css)!;
+    expect(rule).not.toBeNull();
+    for (const selector of [".target-link", ".site-header nav a"]) {
+      expect(rule[1]).toContain(selector);
+    }
+    expect(rule[1]).not.toMatch(/(^|,)\s*(main\s+)?p\s+a\b/);
+  });
+
+  it("puts target-link on the header's own links", () => {
+    render(<SiteHeader />);
+    expect(screen.getByRole("link", { name: /Open USD Monitor/ }).className).toContain(
+      "target-link",
+    );
   });
 });

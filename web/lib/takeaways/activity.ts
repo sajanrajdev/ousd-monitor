@@ -1,7 +1,9 @@
 import { floorBps } from "../aggregate.ts";
-import type { ActivityRow, ChainName, KpiRow } from "../dataset/rows.ts";
-import { CHAIN_NAMES } from "../definitions.ts";
+import type { ActivityRow, ChainName, KpiRow, ManifestWarning } from "../dataset/rows.ts";
+import { CHAIN_NAMES, DAY_ZERO } from "../definitions.ts";
 import { formatBps, formatCompact, formatUtcDate, UNKNOWN_TEXT } from "../format.ts";
+
+const fromDayZero = (rows: ActivityRow[]) => rows.filter((row) => row.day >= DAY_ZERO);
 
 // The mart's order. The last two are what is left: large transfers are split out, not removed.
 export const REMOVAL_FIELDS = [
@@ -46,7 +48,8 @@ function total(rows: ActivityRow[], field: AmountField): bigint {
 // Day 0 through each chain's newest day, summed over the rows given. Null when there is no headline
 // to measure against, or when the parts don't add back up to it: a number that fails the volume
 // check isn't published.
-export function waterfall(rows: ActivityRow[]): Waterfall | null {
+export function waterfall(allRows: ActivityRow[]): Waterfall | null {
+  const rows = fromDayZero(allRows);
   const headline = total(rows, "headline_value");
   if (rows.length === 0 || headline <= 0n) return null;
   const steps: WaterfallStep[] = [
@@ -114,7 +117,8 @@ export type PerChainPeriod = {
 
 const CHAIN_ORDER = Object.keys(CHAIN_NAMES) as ChainName[];
 
-export function perChain(rows: ActivityRow[]): PerChainPeriod[] {
+export function perChain(allRows: ActivityRow[]): PerChainPeriod[] {
+  const rows = fromDayZero(allRows);
   return CHAIN_ORDER.flatMap((chain) => {
     const mine = rows.filter((row) => row.chain === chain);
     if (mine.length === 0) return [];
@@ -124,7 +128,7 @@ export function perChain(rows: ActivityRow[]): PerChainPeriod[] {
 }
 
 export function historyDays(rows: ActivityRow[]): number {
-  return new Set(rows.map((row) => row.day)).size;
+  return new Set(fromDayZero(rows).map((row) => row.day)).size;
 }
 
 export function historyLabel(rows: ActivityRow[]): string {
@@ -140,7 +144,8 @@ export type Week = { from: string; to: string; everyday: string };
 // Seven-day blocks counted from the first day in the data. A block counts only once every chain
 // has reached its last day, so a chain that is a day behind never makes a week look smaller. A
 // chain that hadn't started yet adds nothing, as it did nothing.
-export function weeklyEveryday(rows: ActivityRow[]): Week[] {
+export function weeklyEveryday(allRows: ActivityRow[]): Week[] {
+  const rows = fromDayZero(allRows);
   if (rows.length === 0) return [];
   const first = Math.min(...rows.map((row) => dayNumber(row.day)));
   const reached = Math.min(...perChain(rows).map((chain) => dayNumber(chain.to)));
@@ -194,5 +199,48 @@ export function velocityTakeaway(kpis: KpiRow[]): string {
   }
   const names = above.map((row) => CHAIN_NAMES[row.chain]);
   const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
-  return `On ${list}, velocity is higher than headline velocity because the two divide by different supplies.`;
+  return `On ${list}, velocity is higher than headline velocity. Velocity is clean volume over circulating supply, and headline velocity is all transfers over total supply.`;
+}
+
+export type VelocityWarning = { chain: ChainName; day: string; text: string };
+
+// One dated sentence pair per manifest warning on circulating supply, the denominator of velocity.
+// Other metrics' warnings aren't about this card. A drop makes that day's velocity unusually high,
+// a rise unusually low, and either way it isn't a trend.
+export function velocityWarnings(warnings: ManifestWarning[]): VelocityWarning[] {
+  return warnings.flatMap((warning) => {
+    if (warning.metric !== "circulating_supply") return [];
+    const fell = BigInt(warning.current) < BigInt(warning.previous);
+    const name = CHAIN_NAMES[warning.chain];
+    return [
+      {
+        chain: warning.chain,
+        day: warning.day,
+        text: `On ${formatUtcDate(warning.day)}, ${name}'s circulating supply, which its velocity divides by, moved sharply: from ${formatCompact(warning.previous)} to ${formatCompact(warning.current)}. Its velocity is unusually ${fell ? "high" : "low"} that day and shouldn't be read as a trend.`,
+      },
+    ];
+  });
+}
+
+export type Day0Scope = { before: string; total: string };
+
+// Flows count from Day 0, but supply counts every mint and burn. The part from before Day 0 is
+// stated only when each chain's mints minus burns, over all the rows, equal its reported total
+// supply to the base unit. Otherwise the rows can't carry the figure and nothing is said.
+export function day0Scope(activity: ActivityRow[], kpis: KpiRow[]): Day0Scope | null {
+  if (kpis.length === 0) return null;
+  let before = 0n;
+  let total = 0n;
+  for (const kpi of kpis) {
+    let all = 0n;
+    for (const row of activity) {
+      if (row.chain !== kpi.chain || row.day > kpi.day) continue;
+      const net = BigInt(row.minted) - BigInt(row.burned);
+      all += net;
+      if (row.day < DAY_ZERO) before += net;
+    }
+    if (all !== BigInt(kpi.total_supply)) return null;
+    total += all;
+  }
+  return before > 0n ? { before: before.toString(), total: total.toString() } : null;
 }

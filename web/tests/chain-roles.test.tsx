@@ -60,7 +60,9 @@ describe("the chain roles view", () => {
     expect(cell("Clean everyday, 30 days (share)")).toBe("$58M (20.86%)");
     expect(cell("Minted, 30 days")).toBe("$189M");
     expect(cell("DEX flow, 30 days (share)")).toBe("$58M (5.69%)");
-    expect(base.querySelector('[data-swatch="base"]')).not.toBeNull();
+    const swatch = base.querySelector<HTMLElement>('[data-swatch="base"]')!;
+    expect(swatch).not.toBeNull();
+    expect(swatch.getAttribute("style")).toContain("border: 1px solid var(--color-maroon)");
   });
 
   it("shows each row's own as-of day and says the days differ", () => {

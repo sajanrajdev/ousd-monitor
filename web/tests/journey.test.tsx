@@ -49,7 +49,14 @@ describe("journey view", () => {
     expect(tempo.textContent).toContain("$800,000,000"); // total
     expect(tempo.textContent).toContain("$320,000,000"); // circulating, from activity
     expect(tempo.textContent).toContain("80.00%"); // top-10 of 800M: 640M
-    expect(container.querySelector('[data-part="placed_supply"]')).toBeTruthy();
+    const placed = container.querySelector<HTMLElement>('[data-part="placed_supply"]')!;
+    expect(placed).toBeTruthy();
+    expect(placed.style.boxShadow).toBe("");
+    // Only ramp steps 3 and 4 (removed, idle) carry the maroon outline; the others are bare.
+    expect(placed.style.border).toBe("1px solid var(--color-maroon)");
+    const free = container.querySelector<HTMLElement>('[data-part="free_floating"]')!;
+    expect(free.style.border).toBe("");
+    expect(free.className).not.toContain("maroon");
   });
 
   it("shows each chain's own day when chains differ", () => {

@@ -7,6 +7,7 @@ import {
   barPosition,
   historyDays,
   historyLabel,
+  perChain,
   velocityTakeaway,
   waterfall,
   waterfallAmount,
@@ -140,6 +141,13 @@ describe("the takeaways", () => {
     expect(velocityTakeaway(kpis)).not.toContain("Ethereum");
   });
 
+  it("says what each velocity divides, without claiming only the supplies differ", () => {
+    const text = velocityTakeaway(kpis);
+    expect(text).toContain("clean volume over circulating supply");
+    expect(text).toContain("all transfers over total supply");
+    expect(text).not.toContain("different supplies");
+  });
+
   it("is unknown when no chain has both velocities", () => {
     expect(velocityTakeaway(kpis.map((row) => ({ ...row, headline_velocity_bps: null })))).toBe(
       UNKNOWN_TEXT,
@@ -171,5 +179,18 @@ describe("weekly everyday volume", () => {
       .filter((row) => row.day <= "2026-10-06")
       .reduce((sum, row) => sum + BigInt(row.clean_everyday), 0n);
     expect(BigInt(weeks[0].everyday)).toBe(first);
+  });
+
+  it("ignores pre-Day-0 rows in waterfall, perChain, historyDays and weeklyEveryday", () => {
+    const preDayZero = zeroRow({
+      day: "2026-04-24",
+      headline_value: "999000000000000",
+      clean_everyday: "999000000000000",
+    });
+    const withPre = [preDayZero, ...activity];
+    expect(waterfall(withPre)).toEqual(waterfall(activity));
+    expect(perChain(withPre)).toEqual(perChain(activity));
+    expect(historyDays(withPre)).toBe(historyDays(activity));
+    expect(weeklyEveryday(withPre)).toEqual(weeklyEveryday(activity));
   });
 });

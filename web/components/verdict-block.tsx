@@ -21,7 +21,7 @@ export function VerdictBlock({ verdict, state }: VerdictBlockProps) {
       <h1 style={{ fontSize: "var(--text-display)" }}>{verdictSentence(verdict)}</h1>
       <p className="mt-3">
         <StatusChip kind="opinion" frameWord={state.frameWord} />{" "}
-        <a href={definitionHref("verdict")} className="underline underline-offset-4">
+        <a href={definitionHref("verdict")} className="target-link underline underline-offset-4">
           How we read this
         </a>
       </p>
