@@ -234,3 +234,39 @@ def test_headline_and_clean_roll_up_over_seven_days(marts):
         [FIRST_DAY + timedelta(days=3), FIRST_DAY + timedelta(days=9)],
     ).fetchone()
     assert kpi(marts, "tempo", 9)["headline_7d"] == headline
+
+
+# Gaps: a calendar window, not seven rows
+
+
+def gap_rows():
+    """Ethereum-like history with no transfers on days 3 to 5, so a row window would stretch."""
+    g = Builder("ethereum")
+    g.fund(HEARTBEAT_FROM, 1_000 * OUSD)
+    g.fund(RECEIVER, 100 * OUSD)
+    for day in (0, 1, 2, 6, 7, 8, 9):
+        g.send(day, [(HEARTBEAT_FROM, RECEIVER, 5 * OUSD)])
+    g.send(10, [(HEARTBEAT_FROM, RECEIVER, 1)])  # makes day 9 the last complete day
+    return g.rows
+
+
+@pytest.fixture(scope="module")
+def gap_marts(tmp_path_factory):
+    conn = build_marts(tmp_path_factory.mktemp("kpis_gap"), gap_rows(), [], {"ethereum": 1000})
+    yield conn
+    conn.close()
+
+
+def test_a_window_with_gap_days_counts_only_the_days_inside_the_calendar_range(gap_marts):
+    day = kpi(gap_marts, "ethereum", 9)
+    # Days 3 to 9 hold transfers on 6, 7, 8 and 9 only. Seven rows would reach back to day 0.
+    assert day["clean_7d"] == 4 * 5 * OUSD
+    assert day["headline_7d"] == 4 * 5 * OUSD
+    assert day["velocity"] == day["clean_7d"] * 10_000 // (7 * day["circulating"])
+
+
+def test_velocity_needs_seven_calendar_days_of_history_not_seven_rows(gap_marts):
+    # Day 6 is the first day with a full week behind it, though it is only the fourth row.
+    assert kpi(gap_marts, "ethereum", 2)["velocity"] is None
+    assert kpi(gap_marts, "ethereum", 6)["velocity"] is not None
+    assert kpi(gap_marts, "ethereum", 6)["clean_7d"] == 4 * 5 * OUSD
