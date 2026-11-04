@@ -1,0 +1,14 @@
+version: 2
+models:
+  - name: int_transfer_classes
+    columns:
+      - name: transfer_class
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [mint, burn, fee, fee_liquidity, issuer_flow, same_entity, remaining]
+  - name: int_tx_decomposition
+    columns:
+      - name: clean_value
+        data_tests: [not_null]
