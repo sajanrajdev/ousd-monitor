@@ -11,6 +11,7 @@ import pytest
 from conftest import make_chain
 from ousd import cli
 from ousd.chains import Chain, missing_rpc_keys
+from ousd.decode import TRANSFER_TOPIC
 from ousd.http import HttpError, PoliteClient
 from ousd.sources import BlockscoutClient, RpcClient, RpcError
 
@@ -265,6 +266,253 @@ def test_a_result_cap_error_on_a_keyed_url_still_splits():
     RpcClient(make_client(handler), url).transfers("0x" + "c" * 40, 1, 4)
 
     assert calls == [("0x1", "0x4"), ("0x1", "0x2"), ("0x3", "0x4")]
+
+
+TOKEN = "0x" + "c" * 40
+TX = "0x" + "a" * 64
+ADDRESS_TOPIC = "0x" + "0" * 24 + "1" * 40
+
+
+def rpc_log(**change) -> dict:
+    log = {
+        "address": TOKEN,
+        "topics": [TRANSFER_TOPIC, ADDRESS_TOPIC, ADDRESS_TOPIC],
+        "data": "0x01",
+        "blockNumber": "0x1",
+        "blockHash": "0x" + "b" * 64,
+        "blockTimestamp": "0x1",
+        "transactionHash": TX,
+        "logIndex": "0x0",
+    }
+    return log | change
+
+
+def blockscout_log(**change) -> dict:
+    log = {
+        "address": TOKEN,
+        "topics": [TRANSFER_TOPIC, ADDRESS_TOPIC, ADDRESS_TOPIC, None],
+        "data": "0x01",
+        "blockNumber": "0x1",
+        "timeStamp": "0x1",
+        "transactionHash": TX,
+        "logIndex": "0x0",
+    }
+    return log | change
+
+
+def v2_item(**change) -> dict:
+    item = {
+        "address": {"hash": TOKEN},
+        "topics": [TRANSFER_TOPIC, ADDRESS_TOPIC, ADDRESS_TOPIC, None],
+        "data": "0x01",
+        "block_number": 1,
+        "index": 0,
+        "transaction_hash": TX,
+    }
+    return item | change
+
+
+def receipt(**change) -> dict:
+    log = {
+        "address": TOKEN,
+        "topics": [TRANSFER_TOPIC, ADDRESS_TOPIC, ADDRESS_TOPIC],
+        "data": "0x01",
+        "logIndex": "0x0",
+    }
+    return {"transactionHash": TX, "blockNumber": "0x1", "logs": [log]} | change
+
+
+def rpc(url: str, result) -> RpcClient:
+    handler = lambda request: httpx.Response(200, json={"id": 1, "result": result})  # noqa: E731
+    return RpcClient(make_client(handler), url)
+
+
+def blockscout(url: str, body) -> BlockscoutClient:
+    return BlockscoutClient(make_client(lambda request: httpx.Response(200, json=body)), url)
+
+
+def blockscout_rows(*rows) -> dict:
+    return {"status": "1", "message": "OK", "result": list(rows)}
+
+
+# Each read that parses a provider reply, fed a reply that makes the parser quote the key.
+POISONED_READS = {
+    "chain_id": lambda url: rpc(url, f"unauthorized {KEY}").chain_id(),
+    "tip": lambda url: rpc(url, f"unauthorized {KEY}").tip(),
+    "finalized": lambda url: rpc(url, {"number": f"zz {KEY}"}).finalized(),
+    "block": lambda url: rpc(url, {"hash": 1, "parentHash": KEY}).block(1),
+    "total_supply": lambda url: rpc(url, f"unauthorized {KEY}").total_supply(TOKEN, 1),
+    "balance_of": lambda url: rpc(url, f"unauthorized {KEY}").balance_of(TOKEN, TOKEN, 1),
+    "block_timestamp": lambda url: rpc(url, {"timestamp": f"zz {KEY}"}).block_timestamp(1),
+    "receipt_data": lambda url: rpc(
+        url, receipt(logs=[receipt()["logs"][0] | {"data": KEY}])
+    ).transaction_receipt(TX, TOKEN),
+    "receipt_hash": lambda url: rpc(url, receipt(transactionHash=KEY)).transaction_receipt(
+        TX, TOKEN
+    ),
+    "receipt_not_a_dict": lambda url: rpc(url, f"unauthorized {KEY}").transaction_receipt(
+        TX, TOKEN
+    ),
+    "rpc_log_data": lambda url: rpc(url, [rpc_log(data=KEY)]).transfers(TOKEN, 1, 1),
+    "rpc_log_topics": lambda url: rpc(url, [rpc_log(topics=[KEY])]).transfers(TOKEN, 1, 1),
+    "rpc_log_address": lambda url: rpc(url, [rpc_log(address=KEY)]).transfers(TOKEN, 1, 1),
+    "rpc_log_stamp": lambda url: rpc(url, [rpc_log(blockTimestamp=KEY)]).transfers(TOKEN, 1, 1),
+    "blockscout_log_data": lambda url: list(
+        blockscout(url, blockscout_rows(blockscout_log(data=KEY))).pages(TOKEN, 1, 2)
+    ),
+    "blockscout_log_topics": lambda url: list(
+        blockscout(url, blockscout_rows(blockscout_log(topics=[KEY]))).pages(TOKEN, 1, 2)
+    ),
+    "blockscout_log_stamp": lambda url: list(
+        blockscout(url, blockscout_rows(blockscout_log(timeStamp=KEY))).pages(TOKEN, 1, 2)
+    ),
+    "blockscout_reply_not_a_dict": lambda url: list(
+        blockscout(url, f"unauthorized {KEY}").pages(TOKEN, 1, 2)
+    ),
+    "v2_log_data": lambda url: blockscout(
+        url, {"items": [v2_item(data=KEY)], "next_page_params": None}
+    ).transaction_logs(TX, TOKEN),
+    "v2_log_hash": lambda url: blockscout(
+        url, {"items": [v2_item(transaction_hash=KEY)], "next_page_params": None}
+    ).transaction_logs(TX, TOKEN),
+    "v2_block_number": lambda url: blockscout(
+        url, {"items": [v2_item(block_number=KEY)], "next_page_params": None}
+    ).transaction_logs(TX, TOKEN),
+}
+
+
+@pytest.mark.parametrize("url", PARAMS)
+@pytest.mark.parametrize("read", POISONED_READS)
+def test_a_parse_failure_on_provider_data_never_shows_the_key(read, url, caplog):
+    with pytest.raises(ValueError) as raised:
+        POISONED_READS[read](url)
+
+    assert "malformed" in str(raised.value)
+    assert_clean(raised.value, caplog)
+
+
+def test_a_parse_failure_leaves_the_failing_reads_other_details_visible():
+    with pytest.raises(ValueError) as raised:
+        rpc(URLS[0], {"timestamp": f"zz {KEY}"}).block_timestamp(7)
+
+    assert "block 7" in str(raised.value)
+    assert "zz" in str(raised.value)
+
+
+def test_a_url_that_cannot_be_parsed_for_scrubbing_shows_no_provider_text(caplog):
+    url = f"http://user:[{KEY}]@rpc.provider.invalid/v2"
+    client = make_client(lambda request: httpx.Response(403, text=f"denied {KEY}"))
+
+    with pytest.raises(HttpError) as raised:
+        client.request_json("POST", url, json={})
+
+    assert str(raised.value).startswith("rpc: HTTP 403: <rpc>")
+    assert "denied" not in str(raised.value)
+    assert_clean(raised.value, caplog)
+
+
+def test_scrub_withholds_all_text_when_the_url_has_no_parts():
+    client = make_client(lambda request: httpx.Response(200))
+
+    result = client.scrub(f"echo {KEY}", f"http://user:[{KEY}]@rpc.provider.invalid/v2")
+
+    assert result.startswith("<rpc>")
+    assert KEY not in result
+
+
+COMPOSITE = [
+    pytest.param(f"http://rpc.provider.invalid/apikey={KEY}", id="path-assignment"),
+    pytest.param(f"http://rpc.provider.invalid/{KEY}.json", id="path-extension"),
+    pytest.param(f"http://rpc.provider.invalid/v2;apikey={KEY}", id="path-parameter"),
+    pytest.param(f"http://rpc.provider.invalid/v2?a=1;apikey={KEY}", id="query-semicolon"),
+    pytest.param(f"http://rpc.provider.invalid/v2#token={KEY}", id="fragment-assignment"),
+    pytest.param(f"http://rpc.provider.invalid/v2/chain,{KEY}", id="path-comma"),
+]
+
+
+@pytest.mark.parametrize("url", COMPOSITE)
+def test_a_key_inside_a_composite_part_is_scrubbed_from_a_bare_echo(url, caplog):
+    client = make_client(lambda request: httpx.Response(403, text=f"denied {KEY}"))
+
+    with pytest.raises(HttpError) as raised:
+        client.request_json("POST", url, json={})
+
+    assert "denied" in str(raised.value)
+    assert_clean(raised.value, caplog)
+
+
+def test_a_result_cap_error_splits_when_the_host_is_a_word_in_the_message():
+    url = f"http://max:8545/v2/{KEY}"
+    calls: list[tuple[str, str]] = []
+
+    def handler(request):
+        query = json.loads(request.content)["params"][0]
+        calls.append((query["fromBlock"], query["toBlock"]))
+        if query["fromBlock"] == "0x1" and query["toBlock"] == "0x4":
+            error = {"code": -32000, "message": "query exceeds max results 20000"}
+            return httpx.Response(200, json={"id": 1, "error": error})
+        return httpx.Response(200, json={"id": 1, "result": []})
+
+    RpcClient(make_client(handler), url).transfers(TOKEN, 1, 4)
+
+    assert calls == [("0x1", "0x4"), ("0x1", "0x2"), ("0x3", "0x4")]
+
+
+def test_a_result_cap_error_that_cannot_split_still_hides_the_url():
+    url = f"http://max:8545/v2/{KEY}"
+    error = {"code": -32000, "message": f"query exceeds max results at {url}"}
+    handler = lambda request: httpx.Response(200, json={"id": 1, "error": error})  # noqa: E731
+
+    with pytest.raises(RpcError) as raised:
+        RpcClient(make_client(handler), url).transfers(TOKEN, 1, 1)
+
+    assert KEY not in str(raised.value)
+
+
+def scrubbed(url: str, echo: str) -> str:
+    return make_client(lambda request: httpx.Response(200)).scrub(f"seen {echo} here", url)
+
+
+def test_scrub_ignores_letter_case():
+    url = "http://AbCdEfGh12.provider.invalid/v2/Zy9XwVuT8sRq"
+
+    assert "zy9xwvut8srq" not in scrubbed(url, "zy9xwvut8srq")
+    assert "ABCDEFGH12" not in scrubbed(url, "ABCDEFGH12")
+
+
+def test_scrub_hides_a_percent_decoded_form_of_a_part():
+    assert "abcd+efghijkl" not in scrubbed(
+        "http://rpc.provider.invalid/v2/abcd%2Befghijkl", "abcd+efghijkl"
+    )
+
+
+def test_scrub_hides_a_percent_encoded_form_of_a_part():
+    url = "http://rpc.provider.invalid/v2?k=abcd+efghijkl"
+
+    assert "abcd%20efghijkl" not in scrubbed(url, "abcd%20efghijkl")
+
+
+def test_scrub_hides_a_form_encoded_form_of_a_part():
+    assert "abcd+efghijkl" not in scrubbed(
+        "http://rpc.provider.invalid/v2?k=abcd%20efghijkl", "abcd+efghijkl"
+    )
+
+
+def test_scrub_hides_a_bare_fragment():
+    assert "Fr4gm3ntKey" not in scrubbed(
+        "http://rpc.provider.invalid/v2#Fr4gm3ntKey", "Fr4gm3ntKey"
+    )
+
+
+def test_scrub_hides_a_bare_host_label():
+    assert "hostkey-abc" not in scrubbed("http://hostkey-abc.provider.invalid/v2", "hostkey-abc")
+
+
+def test_scrub_hides_a_part_of_exactly_eight_characters_and_not_seven():
+    url = "http://rpc.provider.invalid/v2/Ab3dEf7h/Ab3dEf7"
+
+    assert "Ab3dEf7h" not in scrubbed(url, "Ab3dEf7h")
+    assert "Ab3dEf7" in scrubbed(url, "Ab3dEf7")
 
 
 def test_a_failing_sync_through_the_cli_never_shows_the_key(monkeypatch, tmp_path, capsys, caplog):

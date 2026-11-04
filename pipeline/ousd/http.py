@@ -42,29 +42,29 @@ def _server_wait(response: httpx.Response) -> float:
     return 0.0
 
 
-def _url_parts(url: str) -> set[str]:
-    """The pieces of a URL that could carry or reveal a key, longer than a bare word."""
+def _url_parts(url: str) -> set[str] | None:
+    """The pieces of a URL that could carry or reveal a key, longer than a bare word.
+
+    None when the URL can't be taken apart, so the caller can't tell what to hide.
+    """
     try:
         parts = urlsplit(url)
         host = parts.hostname or ""
     except ValueError:
-        return set()
-    found = {host}
-    long_parts = [parts.path, *host.split("."), *parts.path.split("/")]
-    long_parts.append(parts.fragment)
+        return None
+    long_parts = [parts.path, *host.split("."), *parts.path.split("/"), parts.fragment]
     for pair in parts.query.split("&"):
         long_parts += pair.partition("=")[::2]
     for name, value in parse_qsl(parts.query, keep_blank_values=True):
         long_parts += [name, value]
     long_parts += [parts.username or "", parts.password or ""]
-    found.update(part for part in long_parts if len(part) >= MIN_SECRET_PART)
+    # A key can sit inside a larger part: "/apikey=KEY", "/KEY.json", ";apikey=KEY", "#token=KEY".
+    decoded = [unquote(part) for part in long_parts]
+    pieces = [piece for part in (*long_parts, *decoded) for piece in re.split(r"[;=,.]", part)]
+    found = {host, *long_parts, *decoded, *pieces}
     for part in list(found):
-        found.update(
-            variant
-            for variant in (unquote(part), quote(part, safe=""), quote_plus(part))
-            if len(variant) >= MIN_SECRET_PART
-        )
-    return {part for part in found if len(part) > 1}
+        found.update(variant for variant in (quote(part, safe=""), quote_plus(part)))
+    return {part for part in found if len(part) >= MIN_SECRET_PART or part == host}
 
 
 class HttpError(RuntimeError):
@@ -145,7 +145,11 @@ class PoliteClient:
         Longer parts go first and everything is replaced in one pass, so inserted labels are
         never rewritten.
         """
-        secrets = {part for part in (url, *_url_parts(url)) if len(part) > 1}
+        parts = _url_parts(url)
+        if parts is None:
+            # Nothing says what to hide, so none of the text is trusted.
+            return f"<{self._label}> error (details withheld)"
+        secrets = {part for part in (url, *parts) if len(part) > 1}
         if not secrets:
             return text
         pattern = "|".join(re.escape(part) for part in sorted(secrets, key=len, reverse=True))
