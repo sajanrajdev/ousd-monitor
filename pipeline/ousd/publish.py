@@ -81,11 +81,24 @@ _LEGEND_ROW = re.compile(r"^\| `([a-z_]+)` \| (.+?) \| (.+?) \|$")
 _HOST_ROW = re.compile(r"^\| `([a-z_]+)` \| (.+?) \|$")
 _READING_NOTE = re.compile(r"^\*\*Reading a label:\*\* (.+)$", re.MULTILINE)
 _EVM_SHAPE = re.compile(r"0[xX][0-9a-fA-F]{40}")
+# The same address with no prefix. Bounded, so it can't match part of a 64-character hash.
+_BARE_EVM_SHAPE = re.compile(r"(?<![0-9A-Za-z])[0-9a-fA-F]{40}(?![0-9A-Za-z])")
 # Bounded by anything that isn't a letter or digit, so a longer hash can't match part of itself.
 _BASE58_SHAPE = re.compile(r"(?<![0-9A-Za-z])[1-9A-HJ-NP-Za-km-z]{32,44}(?![0-9A-Za-z])")
-# A run id is 32 hex characters, which is also valid base58. A real address is never all hex.
-_ALL_HEX = re.compile(r"[0-9a-f]+")
+# A run id is exactly this, and is also valid base58. Any other length of hex stays suspect.
+_RUN_ID_SHAPE = re.compile(r"[0-9a-f]{32}")
 _URL_SHAPE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+# What a word of a name can be. A dotted word reads as a host, so a real one is listed by name.
+_NAME_WORD = re.compile(r"\(?[A-Za-z0-9&'-]+\)?")
+_PAIR_WORD = re.compile(r"[A-Z0-9]{1,12}/[A-Z0-9]{1,12}")
+_DOTTED_NAMES = frozenset({"LI.FI"})
+# What a link's path segment can't be. `key` alone, so a slug like key-findings stays readable.
+_PLAIN_SEGMENT = re.compile(r"[A-Za-z0-9._-]+")
+_KEY_SEGMENT = re.compile(
+    r"key|secret|password|passwd|bearer|jwt|credentials?"
+    r"|.*(api[-_]?key|access[-_]?token|auth[-_]?token).*",
+    re.IGNORECASE,
+)
 # A label's link, the one place a wallet-shaped value may be, and only after its own check.
 _LABEL_LINK_PLACE = re.compile(r"labels\.json/data/\d+/source_url")
 # Other variables that can hold a provider URL. KEYED_RPC_ENV has the rest.
@@ -329,8 +342,32 @@ def _comparable(address: str) -> str:
 
 def _wallet_shapes(text: str) -> list[str]:
     evm = _EVM_SHAPE.findall(text)
-    base58 = [shape for shape in _BASE58_SHAPE.findall(text) if not _ALL_HEX.fullmatch(shape)]
-    return [*evm, *base58]
+    bare = _BARE_EVM_SHAPE.findall(text)
+    base58 = [shape for shape in _BASE58_SHAPE.findall(text) if not _RUN_ID_SHAPE.fullmatch(shape)]
+    return [*evm, *bare, *base58]
+
+
+def _looks_opaque(text: str) -> bool:
+    """A run of letters and digits too long or too mixed to be a word."""
+    runs = re.split(r"[-_.]", text)
+    return any(len(run) >= 20 or (len(run) >= 12 and any(c.isdigit() for c in run)) for run in runs)
+
+
+def _looks_like_a_name(entity: str) -> bool:
+    """Words only, so a URL, a host or a key with no scheme can't pass as a name."""
+    return all(
+        word in _DOTTED_NAMES
+        or ((_NAME_WORD.fullmatch(word) or _PAIR_WORD.fullmatch(word)) and not _looks_opaque(word))
+        for word in entity.split(" ")
+    )
+
+
+def _is_key_like(segment: str) -> bool:
+    return (
+        not _PLAIN_SEGMENT.fullmatch(segment)
+        or bool(_KEY_SEGMENT.fullmatch(segment))
+        or _looks_opaque(segment)
+    )
 
 
 def _refuse_bad_source(row: Mapping[str, str], hosts: Mapping[str, set[str]]) -> None:
@@ -343,8 +380,12 @@ def _refuse_bad_source(row: Mapping[str, str], hosts: Mapping[str, set[str]]) ->
         raise PublishRefused(f"{where} has a source link that isn't a plain https link")
     if parts.hostname not in hosts.get(row["source_type"], ()):
         raise PublishRefused(f"{where} has a source link on a host its source type doesn't list")
-    if any(_comparable(shape) != _comparable(row["address"]) for shape in _wallet_shapes(link)):
+    own = _comparable(row["address"])
+    if any(_comparable(shape) != own for shape in _wallet_shapes(link)):
         raise PublishRefused(f"{where} has a source link holding another address")
+    for segment in filter(None, parts.path.split("/")):
+        if _comparable(segment) != own and _is_key_like(segment):
+            raise PublishRefused(f"{where} has a source link with a key-like path segment")
 
 
 def _token_contracts() -> set[str]:
@@ -441,6 +482,10 @@ def _labels_payload(
     hosts = _read_source_hosts(readme)
     named = [row for row in labels if row["entity"]]
     for row in named:
+        if not _looks_like_a_name(row["entity"]):
+            raise PublishRefused(
+                f"a label on {row['chain']} has an entity that doesn't look like a name"
+            )
         _refuse_bad_source(row, hosts)
     rows = sorted(
         (

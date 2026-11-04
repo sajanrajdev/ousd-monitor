@@ -1244,14 +1244,21 @@ def test_a_wallet_as_a_run_id_refuses(world):
 def test_a_wallet_in_an_entity_refuses_the_whole_dataset(world, value):
     edit_label(world, ",LI.FI Diamond,", f",Holder {value},")
     world.run_checks()
-    message = assert_guard_refuses(world, "wallet-shaped")
-    assert "labels.json/data/" in message
-    assert value not in message
+    assert value not in assert_guard_refuses(world, "doesn't look like a name")
 
 
 def test_a_keyed_url_in_an_entity_refuses(world):
     edit_label(world, ",LI.FI Diamond,", f",http://rpc.invalid/v2/{SECRET},")
     world.run_checks()
+    assert SECRET not in assert_guard_refuses(world, "doesn't look like a name")
+
+
+def test_the_walk_still_catches_a_url_outside_an_entity(world):
+    world.run_checks()
+    world.raw_sql(
+        "UPDATE check_results SET detail = ? WHERE check_name = 'freshness'",
+        [f"read http://rpc.invalid/v2/{SECRET}"],
+    )
     assert SECRET not in assert_guard_refuses(world, "holds a URL")
 
 
@@ -1364,6 +1371,209 @@ def test_a_source_type_with_no_listed_host_refuses(world):
     edit_label(world, "LI.FI Diamond,system,explorer_tag", "LI.FI Diamond,system,company_docs")
     world.run_checks()
     assert_guard_refuses(world, "host")
+
+
+BARE_HOLDER = "a1" * 20
+
+
+@pytest.mark.parametrize(
+    "value",
+    [BARE_HOLDER, BARE_HOLDER.upper(), "aB" * 20, "01" * 20, "0A" * 20],
+    ids=["lower", "upper", "mixed", "with-zeros", "upper-with-zeros"],
+)
+def test_a_bare_40_hex_address_in_a_detail_refuses(world, value):
+    world.run_checks()
+    world.raw_sql(
+        "UPDATE check_results SET detail = ? WHERE check_name = 'freshness'", [f"seen {value}"]
+    )
+    assert value not in assert_guard_refuses(world, "wallet-shaped")
+
+
+def test_a_bare_40_hex_address_in_an_entity_refuses(world):
+    edit_label(world, ",LI.FI Diamond,", f",Whale {BARE_HOLDER},")
+    world.run_checks()
+    with pytest.raises(PublishRefused) as refused:
+        world.publish()
+    assert BARE_HOLDER not in str(refused.value)
+    assert not [path for path in world.out.glob("2*") if path.is_dir()]
+
+
+def test_a_link_holding_a_bare_address_refuses(world):
+    edit_label(world, LIFI_LINK, f"https://etherscan.io/address/{BARE_HOLDER}")
+    world.run_checks()
+    assert_guard_refuses(world, "another address")
+
+
+def test_a_link_holding_its_own_address_without_the_prefix_refuses(world):
+    edit_label(world, LIFI_LINK, f"https://etherscan.io/address/{LIFI[2:]}")
+    world.run_checks()
+    assert_guard_refuses(world, "another address")
+
+
+@pytest.mark.parametrize(
+    "value,wallet",
+    [
+        ("9f3a7c21d4e8b6f5a1c9e7d3b2f4a6c8", False),
+        ("9f3a7c21d4e8b6f5a1c9e7d3b2f4a6c81", True),
+        ("9f3a7c21d4e8b6f5a1c9e7d3b2f4a6c", False),
+        ("a" * 44, True),
+        ("9F3A7C21D4E8B6F5A1C9E7D3B2F4A6C8", True),
+        ("a" * 40 + "0" * 24, False),
+        ("a" * 64, False),
+    ],
+    ids=["run-id", "one-longer", "one-shorter", "44-hex", "upper-32", "sha-with-zeros", "sha"],
+)
+def test_only_a_32_hex_identifier_is_exempt(value, wallet):
+    assert bool(publisher._wallet_shapes(value)) is wallet
+
+
+def test_a_real_run_id_with_no_zero_still_publishes(world):
+    run_id = "9f3a7c21d4e8b6f5a1c9e7d3b2f4a6c8"
+    world.run_checks(run_id=run_id)
+    assert read_json(world.publish(run_id=run_id), "manifest.json")["check_run_id"] == run_id
+
+
+@pytest.mark.parametrize(
+    "entity",
+    [
+        f"rpc.provider.invalid/v2/{SECRET}",
+        f"Whale rpc.provider.invalid/v2/{SECRET}",
+        "rpc.provider.invalid",
+        "RPC.PROVIDER.INVALID/V2/KEY",
+        "provider.invalid:8545",
+        "host:8545",
+        "RPC/V2/KEY",
+        "user@provider",
+        "provider/v2/abc",
+        "Name v2/abc",
+        SECRET,
+        f"Whale {SECRET[:14]}",
+        "a?b=c",
+        "Name  Two",
+        "Name\tTwo",
+    ],
+    ids=[
+        "scheme-less-url",
+        "in-a-name",
+        "host",
+        "upper-url",
+        "host-port",
+        "name-port",
+        "upper-path",
+        "user-at",
+        "path",
+        "short-path",
+        "token",
+        "short-token",
+        "query",
+        "double-space",
+        "tab",
+    ],
+)
+def test_an_entity_must_look_like_a_name(world, entity):
+    edit_label(world, ",LI.FI Diamond,", f",{entity},")
+    world.run_checks()
+    message = assert_guard_refuses(world, "doesn't look like a name")
+    assert SECRET not in message
+    assert SECRET[:14] not in message
+
+
+@pytest.mark.parametrize(
+    "entity",
+    [
+        "LI.FI Diamond",
+        "LI.FI",
+        "0x Settler",
+        "Orca OUSD/USDC Whirlpool",
+        "Uniswap v3 OUSD/WETH pool",
+        "Sentora OUSD Yield (Morpho vault)",
+        "Tempo ReceivePolicyGuard",
+        "Rock & Roll's Pool-2",
+    ],
+)
+def test_a_real_kind_of_name_is_a_name(entity):
+    assert publisher._looks_like_a_name(entity)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "apikey/abc",
+        "APIKEY/abc",
+        "api-key/abc",
+        "api_key/abc",
+        "myapikey",
+        "access_token/abc",
+        "auth-token/abc",
+        "key/abc",
+        "secret/abc",
+        "password/abc",
+        "passwd/abc",
+        "credentials/abc",
+        "bearer/abc",
+        "jwt/abc",
+        f"v2/{SECRET}",
+        f"address/{SECRET[:14]}",
+        "address/a1b2c3d4e5f6",
+        "address/123456789012",
+        "address/abcdefghijklmnopqrst",
+        "address/key=abc",
+        "address/%6b%65%79",
+        "address/a:b",
+    ],
+)
+def test_a_link_path_must_hold_no_key_like_segment(world, path):
+    edit_label(world, LIFI_LINK, f"https://etherscan.io/{path}")
+    world.run_checks()
+    message = assert_guard_refuses(world, "key-like")
+    assert SECRET not in message
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "stablecoin/ousd-stablecoin-first-week-on-chain-analysis/",
+        "docs/protocols/v4/deployments",
+        "developers/docs/quickstart/predeployed-contracts",
+        "vaults/4217",
+        "chains",
+        "key-findings-of-the-report",
+        "tokens",
+    ],
+)
+def test_an_ordinary_link_path_is_not_key_like(path):
+    row = {
+        "chain": "base",
+        "address": LIFI,
+        "source_type": "explorer_tag",
+        "source_url": f"https://etherscan.io/{path}",
+    }
+    publisher._refuse_bad_source(row, {"explorer_tag": {"etherscan.io"}})
+
+
+def real_labels() -> list[dict[str, str]]:
+    with REAL_LABELS.open(newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+REAL_NAMED = [row for row in real_labels() if row["entity"]]
+
+
+@pytest.mark.parametrize(
+    "row", REAL_NAMED, ids=[f"{row['chain']}-{row['address'][:10]}" for row in REAL_NAMED]
+)
+def test_every_real_label_passes_the_guard(row):
+    """A false refusal here would stop every real publish."""
+    hosts = publisher._read_source_hosts((ROOT / "labels" / "README.md").read_text())
+    assert publisher._looks_like_a_name(row["entity"])
+    publisher._refuse_bad_source(row, hosts)
+
+
+def test_the_real_labels_payload_passes_the_whole_guard():
+    readme = (ROOT / "labels" / "README.md").read_text()
+    payload = publisher._labels_payload(real_labels(), readme, [], False)
+    assert len(payload["data"]) == len(REAL_NAMED)
+    publisher._refuse_unsafe_dataset({"labels.json": payload}, {})
 
 
 # Thresholds come from what the build used

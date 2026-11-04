@@ -152,10 +152,26 @@ def test_an_address_has_one_category_across_chains():
         assert seen.setdefault(row["address"].lower(), row["category"]) == row["category"], row
 
 
-def test_a_wallet_off_the_route_is_unlabeled_on_every_chain():
-    assert not [
-        row for row in ROWS if row["address"] == "0x8458377a025da58e9cb547c979d5002c822a05cb"
-    ]
+@pytest.mark.parametrize(
+    "address",
+    ["0x8458377a025da58e9cb547c979d5002c822a05cb", "0xb0d0b9b8ab03cbac16cdf9e59bc5a1a2ade55da2"],
+)
+def test_a_collection_wallet_is_an_unnamed_route_row_on_each_evm_chain(address):
+    rows = {row["chain"]: row for row in ROWS if row["address"] == address}
+    assert sorted(rows) == ["base", "ethereum", "tempo"]
+    for row in rows.values():
+        assert row["entity"] == ""
+        assert row["category"] == "issuer_route"
+        assert row["source_type"] == "derived_rule"
+        assert row["confidence"] == "medium"
+
+
+def test_the_rule_states_collection_wallets_and_leaves_out_pass_through():
+    rule = publish._read_unnamed_rule((ROOT / "labels" / "README.md").read_text())
+    assert "Collection wallets take money from many senders" in rule
+    assert "send every outgoing transfer to the hub" in rule
+    assert "hold almost no balance" in rule
+    assert "from a single sender stays unlabeled" in rule
 
 
 def test_relay_depository_cites_the_api_its_docs_page_loads():

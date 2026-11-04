@@ -41,7 +41,7 @@ The site and methodology page carry this legend, so keep this section readable o
 
 An unnamed cluster is a set of wallets found from the chain's own transfers by a written rule. No public source names them, so they have no name here, and the rule says nothing about who holds them.
 
-The redemption route (`issuer_route`) has two kinds of wallet. The hub is the wallet a chain's mints go to. The others are the wallets on the fixed path from the hub into burns. A wallet with flows into the route that isn't on that path stays unlabeled, however large the flows. A contract on the path may have a verified name on the chain, but that name doesn't say who runs it, so the label stays unnamed.
+The redemption route (`issuer_route`) has three kinds of wallet. The hub is the wallet a chain's mints go to. Path wallets are on the fixed path from the hub into burns. Collection wallets take money from many senders, send every outgoing transfer to the hub, and hold almost no balance. A wallet that passes money through from a single sender stays unlabeled, as does any other wallet with flows into the route, however large the flows. A contract on the path may have a verified name on the chain, but that name doesn't say who runs it, so the label stays unnamed.
 
 Published data gives a count of these wallets by chain and category, with this rule. Their addresses are only in `labels/labels.csv` in this repository.
 

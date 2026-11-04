@@ -13,6 +13,8 @@ base,0x67d03631fe51b741c0c00c4e16eb662ac84381df,OKX DEX Router,system,explorer_t
 base,0x6ff5693b99212da76ad316178a184ab56d299b43,Uniswap Universal Router,system,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
 base,0x732b729eb508aada950210173ff692456dc5d350,Uniswap v3 OUSD/WETH pool,dex,onchain_metadata,https://basescan.org/address/0x732b729eb508aada950210173ff692456dc5d350,high,2026-11-04
 base,0x7e7094f6b6cacfb0c681ea292d92e10da3449c97,Uniswap v2 pool,dex,onchain_metadata,https://basescan.org/address/0x7e7094f6b6cacfb0c681ea292d92e10da3449c97,medium,2026-11-04
+base,0x8458377a025da58e9cb547c979d5002c822a05cb,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0xb0d0b9b8ab03cbac16cdf9e59bc5a1a2ade55da2,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 base,0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,Relay Router,system,explorer_tag,https://basescan.org/address/0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,high,2026-11-04
 base,0xd6145b2d3f379919e8cdeda7b97e37c4b2ca9c40,Uniswap Universal Router,system,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
 base,0xf37a982d1f6c9d1cc9d792aaba494264e0f315d7,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
@@ -29,8 +31,10 @@ ethereum,0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8,Bridge,issuer,explorer_tag,h
 ethereum,0x4cd00e387622c35bddb9b4c962c136462338bc31,Relay Depository,system,project_docs,https://api.relay.link/chains,high,2026-11-04
 ethereum,0x597758c063efa82c86c3e22d6ac40b8f432fd810,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 ethereum,0x666fedd4cdd4e890a5ad20e7b60975409435a64a,0x Settler,system,onchain_metadata,https://etherscan.io/address/0x666fedd4cdd4e890a5ad20e7b60975409435a64a,medium,2026-11-04
+ethereum,0x8458377a025da58e9cb547c979d5002c822a05cb,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 ethereum,0x8f10b468b06c6fd214b65f87778827f7d113f996,KyberSwap Aggregation Executor,system,explorer_tag,https://etherscan.io/address/0x8f10b468b06c6fd214b65f87778827f7d113f996,high,2026-11-04
 ethereum,0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43,Coinbase,exchange,explorer_tag,https://etherscan.io/address/0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43,high,2026-11-04
+ethereum,0xb0d0b9b8ab03cbac16cdf9e59bc5a1a2ade55da2,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 ethereum,0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,Relay Router,system,explorer_tag,https://etherscan.io/address/0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,high,2026-11-04
 ethereum,0xcd531ae9efcce479654c4926dec5f6209531ca7b,Coinbase,exchange,explorer_tag,https://etherscan.io/address/0xcd531ae9efcce479654c4926dec5f6209531ca7b,high,2026-11-04
 ethereum,0xf70da97812cb96acdf810712aa562db8dfa3dbef,Relay Solver,system,project_docs,https://api.relay.link/chains,high,2026-11-04
@@ -49,6 +53,8 @@ tempo,0x4508a7021dfb7a1afe5ff60169c1778c303389fb,,issuer_route,derived_rule,labe
 tempo,0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8,Bridge,issuer,published_research,https://crystalintelligence.com/stablecoin/ousd-stablecoin-first-week-on-chain-analysis/,medium,2026-11-04
 tempo,0x4cd00e387622c35bddb9b4c962c136462338bc31,Relay Depository,system,project_docs,https://api.relay.link/chains,high,2026-11-04
 tempo,0x5176dfcab18ff5519bc1cfa4c6ef2d8008371d5f,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+tempo,0x8458377a025da58e9cb547c979d5002c822a05cb,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+tempo,0xb0d0b9b8ab03cbac16cdf9e59bc5a1a2ade55da2,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
 tempo,0xb10c000000000000000000000000000000000000,Tempo ReceivePolicyGuard,system,project_docs,https://tempo.xyz/developers/docs/quickstart/predeployed-contracts,high,2026-11-04
 tempo,0xb86b3ccce82f6cb767c45afb9fb032ae5fde3592,Tempo Earn (Morpho vault),lending,project_docs,https://curator.morpho.org/vaults/4217/0xb86b3ccce82f6cb767c45afb9fb032ae5fde3592,medium,2026-11-04
 tempo,0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,Relay Router,system,project_docs,https://api.relay.link/chains,high,2026-11-04
