@@ -27,11 +27,12 @@ def tr(block, log, ts, frm, to, value, block_hash=None, tx=None):
 
 
 ROWS = [
-    ("tempo", tr(1, 0, DAY - 1, ZERO_ADDRESS, ALICE, 5_000_000, block_hash="0x" + "1" * 64)),
-    ("tempo", tr(2, 0, DAY, ALICE, BOB, 1_000_000)),
+    ("tempo", tr(1, 0, DAY - 1, ZERO_ADDRESS, ALICE, 5_000_000 + BIG, block_hash="0x" + "1" * 64)),
+    ("tempo", tr(2, 0, DAY, ALICE, BOB, BIG)),
     ("tempo", tr(3, 0, DAY + 3600, BOB, ALICE, BIG)),
     ("ethereum", tr(10, 0, DAY + 100, ZERO_ADDRESS, ALICE, 7)),
     # Solana: no block hash, base58 addresses that keep their case.
+    ("solana", tr(49, 0, DAY + 100, ZERO_ADDRESS, SOLANA_FROM, 42, tx="4" + "Ab" * 40)),
     ("solana", tr(50, 0, DAY + 200, SOLANA_FROM, SOLANA_TO, 42, tx="5" + "Ab" * 40)),
 ]
 
@@ -78,13 +79,13 @@ def test_null_block_hash_passes_all_tests(marts):
     (nulls,) = marts.execute(
         "select count(*) from stg_transfers where block_hash is null"
     ).fetchone()
-    assert nulls == 4  # a successful build ran every test, including on these rows
+    assert nulls == 5  # a successful build ran every test, including on these rows
 
 
 def test_solana_rows_keep_case_and_have_no_hash(marts):
     row = marts.execute(
         "select from_address, to_address, block_hash, value from stg_transfers "
-        "where chain = 'solana'"
+        "where chain = 'solana' and block_number = 50"
     ).fetchone()
     assert row == (SOLANA_FROM, SOLANA_TO, None, 42)
     assert row[0] != row[0].lower()
