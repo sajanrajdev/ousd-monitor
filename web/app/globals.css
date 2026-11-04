@@ -1,1 +1,241 @@
 @import "tailwindcss";
+@import "./tokens.css";
+
+html {
+  scroll-padding-top: calc(var(--header-budget) + 1rem);
+}
+
+@media (min-width: 768px) {
+  html {
+    scroll-padding-top: calc(var(--header-height) + 1rem);
+  }
+}
+
+body {
+  background: var(--color-off-white);
+  color: var(--color-body-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  font-weight: 450;
+}
+
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-maroon);
+  outline-offset: 2px;
+}
+
+/* Header: sticky at every width. The independence line wraps to a second row and is never cut. */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  min-height: var(--header-height);
+  background: var(--color-off-white);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.site-header__inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1.5rem;
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: 0.5rem var(--page-margin);
+}
+
+.independence-line {
+  font-size: var(--text-small);
+  color: var(--color-body-text);
+}
+
+.site-header__line {
+  flex-basis: 100%;
+  order: 3;
+}
+
+@media (min-width: 768px) {
+  .site-header__line {
+    flex-basis: auto;
+    order: 0;
+    margin-left: auto;
+  }
+}
+
+.site-footer {
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--section-space);
+}
+
+.site-footer__inner {
+  display: grid;
+  gap: 0.5rem;
+  max-width: var(--page-max-width);
+  margin: 0 auto;
+  padding: 2rem var(--page-margin);
+  font-size: var(--text-small);
+}
+
+.status-chip {
+  display: inline-block;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--color-maroon);
+  border-radius: var(--radius-control);
+  font-size: var(--text-meta);
+  font-weight: 650;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.status-chip[data-kind="fact"] {
+  background: var(--color-maroon);
+  color: var(--color-off-white);
+}
+
+.status-chip[data-kind="estimate"] {
+  border-style: dashed;
+}
+
+.status-chip[data-kind="inferred"] {
+  background: var(--color-secondary-strong);
+}
+
+.status-chip[data-kind="opinion"] {
+  border-style: dotted;
+  font-style: italic;
+}
+
+.chart-card {
+  padding: 1.25rem;
+  background: var(--surface-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+}
+
+.chart-card__meta {
+  font-size: var(--text-meta);
+  color: var(--color-meta-text);
+}
+
+/* A fixed height per breakpoint, so nothing shifts. The skeleton shows until Recharts draws. */
+.chart-area {
+  height: var(--chart-height-phone);
+  background: var(--color-secondary);
+  border-radius: var(--radius-control);
+}
+
+.chart-area:has(.recharts-wrapper) {
+  background: none;
+}
+
+@media (min-width: 768px) {
+  .chart-area {
+    height: var(--chart-height-tablet);
+  }
+}
+
+@media (min-width: 1056px) {
+  .chart-area {
+    height: var(--chart-height-desktop);
+  }
+}
+
+.chart-area__needs-js {
+  padding: 1rem;
+  font-size: var(--text-small);
+}
+
+.accordion {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.accordion > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  cursor: pointer;
+  font-weight: 550;
+  list-style: none;
+}
+
+.accordion > summary::-webkit-details-marker {
+  display: none;
+}
+
+.accordion > summary::after {
+  content: "+" / "";
+}
+
+.accordion[open] > summary::after {
+  content: "\2212" / "";
+}
+
+.hairline-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.hairline-table caption {
+  padding-bottom: 0.5rem;
+  text-align: left;
+  font-weight: 550;
+}
+
+.hairline-table th,
+.hairline-table td {
+  padding: 0.625rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.hairline-table [data-numeric] {
+  text-align: right;
+}
+
+/* Below 768 every row stacks as label and value pairs, so no table needs horizontal scroll. */
+@media (max-width: 767.98px) {
+  .hairline-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .hairline-table,
+  .hairline-table tbody,
+  .hairline-table tr {
+    display: block;
+  }
+
+  .hairline-table td {
+    display: grid;
+    grid-template-columns: minmax(6rem, 40%) 1fr;
+    gap: 0.75rem;
+    padding: 0.375rem 0;
+    border-bottom: 0;
+  }
+
+  .hairline-table td::before {
+    content: attr(data-label);
+    font-weight: 550;
+  }
+
+  .hairline-table tr {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+}
