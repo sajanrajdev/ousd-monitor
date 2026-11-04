@@ -10,6 +10,8 @@ from ousd.http import PoliteClient
 
 TOTAL_SUPPLY_SELECTOR = "0x18160ddd"
 BLOCKSCOUT_PAGE_SIZE = 1000
+# Tempo refuses a result set over 20,000 logs with this error rather than truncating it.
+TOO_MANY_RESULTS = "exceeds max results"
 
 
 class RpcError(RuntimeError):
@@ -39,17 +41,21 @@ class RpcClient:
         return block["hash"].lower() if block else None
 
     def transfers(self, token: str, from_block: int, to_block: int) -> list[Transfer]:
-        logs = self._call(
-            "eth_getLogs",
-            [
-                {
-                    "address": token,
-                    "topics": [TRANSFER_TOPIC],
-                    "fromBlock": hex(from_block),
-                    "toBlock": hex(to_block),
-                }
-            ],
-        )
+        query = {
+            "address": token,
+            "topics": [TRANSFER_TOPIC],
+            "fromBlock": hex(from_block),
+            "toBlock": hex(to_block),
+        }
+        try:
+            logs = self._call("eth_getLogs", [query])
+        except RpcError as exc:
+            if TOO_MANY_RESULTS not in str(exc) or from_block == to_block:
+                raise
+            middle = (from_block + to_block) // 2
+            return self.transfers(token, from_block, middle) + self.transfers(
+                token, middle + 1, to_block
+            )
         return [decode_rpc_log(entry) for entry in logs if not entry.get("removed")]
 
     def total_supply(self, token: str, block: int | str) -> int:

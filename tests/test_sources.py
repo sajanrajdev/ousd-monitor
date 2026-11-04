@@ -131,6 +131,33 @@ def test_rpc_error_is_raised_with_the_method_name():
         RpcClient(http_with(handler), "http://rpc.invalid").tip()
 
 
+def test_range_over_the_result_cap_is_split_until_it_fits():
+    logs_by_block = {
+        block: {
+            "blockNumber": hex(block),
+            "blockHash": "0x" + "e" * 64,
+            "blockTimestamp": "0x1",
+            "logIndex": "0x0",
+            "transactionHash": "0x" + "d" * 64,
+            "data": hex(1),
+            "topics": [TRANSFER_TOPIC, "0x" + "0" * 64, "0x" + "a" * 64],
+        }
+        for block in range(1, 9)
+    }
+
+    def handler(request):
+        query = json.loads(request.content)["params"][0]
+        wanted = range(int(query["fromBlock"], 16), int(query["toBlock"], 16) + 1)
+        if len(wanted) > 3:
+            error = {"code": -32602, "message": "query exceeds max results 20000, retry"}
+            return httpx.Response(200, json={"id": 1, "error": error})
+        return httpx.Response(200, json={"id": 1, "result": [logs_by_block[n] for n in wanted]})
+
+    transfers = RpcClient(http_with(handler), "http://rpc.invalid").transfers(TOKEN, 1, 8)
+
+    assert [t.block_number for t in transfers] == list(range(1, 9))
+
+
 def test_total_supply_pins_to_a_block_hash_or_number():
     params = []
 
