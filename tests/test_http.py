@@ -88,6 +88,61 @@ def test_gives_up_after_max_attempts():
         client.request_json("GET", "http://x.invalid")
 
 
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 1_000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class Trickle(httpx.SyncByteStream):
+    """A response body whose chunks each take a while to arrive."""
+
+    def __init__(self, clock: FakeClock, chunks: list[bytes], seconds_per_chunk: float) -> None:
+        self.clock = clock
+        self.chunks = chunks
+        self.seconds_per_chunk = seconds_per_chunk
+
+    def __iter__(self):
+        for chunk in self.chunks:
+            self.clock.now += self.seconds_per_chunk
+            yield chunk
+
+
+def test_a_trickling_response_is_cut_off_at_the_deadline_and_retried():
+    clock = FakeClock()
+    responses = iter(
+        [
+            httpx.Response(200, stream=Trickle(clock, [b"{"] * 100, seconds_per_chunk=5)),
+            httpx.Response(200, json={"ok": True}),
+        ]
+    )
+    client = PoliteClient(
+        min_interval=0,
+        transport=httpx.MockTransport(lambda request: next(responses)),
+        sleep=lambda _: None,
+        clock=clock,
+        deadline=60,
+    )
+
+    assert client.request_json("GET", "http://x.invalid") == {"ok": True}
+    assert clock.now == 1_000 + 65  # Stopped at the first chunk past the deadline.
+
+
+def test_a_slow_response_inside_the_deadline_succeeds():
+    clock = FakeClock()
+    stream = Trickle(clock, [b'{"ok":', b" true}"], seconds_per_chunk=25)
+    client = PoliteClient(
+        min_interval=0,
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=stream)),
+        clock=clock,
+        deadline=60,
+    )
+
+    assert client.request_json("GET", "http://x.invalid") == {"ok": True}
+
+
 def test_suite_cannot_reach_the_network():
     with pytest.raises(RuntimeError, match="tried to open a connection"):
         socket.create_connection(("127.0.0.1", 9))

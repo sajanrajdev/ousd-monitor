@@ -1,5 +1,6 @@
 """An HTTP client that is polite to free APIs: it throttles and retries with backoff."""
 
+import json
 import logging
 import time
 from collections.abc import Callable
@@ -13,6 +14,9 @@ USER_AGENT = "open-usd-monitor/0.1"
 RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
 # Upper bound on honoring a server's "come back later" hint. Blockscout has asked for 36 minutes.
 MAX_SERVER_WAIT = 3600.0
+# Longest one attempt may run. The read timeout only limits the gap between bytes, so without
+# this a server trickling data could hold a request open indefinitely.
+REQUEST_DEADLINE = 120.0
 
 
 def _server_wait(response: httpx.Response) -> float:
@@ -28,6 +32,10 @@ def _server_wait(response: httpx.Response) -> float:
     return 0.0
 
 
+def _snippet(body: bytes) -> str:
+    return body[:200].decode(errors="replace")
+
+
 class HttpError(RuntimeError):
     """A response that retrying will not fix, or the last failure after all retries."""
 
@@ -40,6 +48,8 @@ class PoliteClient:
         backoff: float = 1.0,
         transport: httpx.BaseTransport | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+        deadline: float = REQUEST_DEADLINE,
     ) -> None:
         self._client = httpx.Client(
             headers={"User-Agent": USER_AGENT}, timeout=60.0, transport=transport
@@ -48,6 +58,8 @@ class PoliteClient:
         self._max_attempts = max_attempts
         self._backoff = backoff
         self._sleep = sleep
+        self._clock = clock
+        self._deadline = deadline
         self._last_request = 0.0
         self._pause_next = 0.0
 
@@ -61,7 +73,7 @@ class PoliteClient:
                 self._sleep(delay)
             self._throttle()
             try:
-                response = self._client.request(method, url, **kwargs)
+                response, body = self._fetch(method, url, **kwargs)
             except httpx.TransportError as exc:
                 failure = repr(exc)
                 continue
@@ -72,16 +84,27 @@ class PoliteClient:
                 server_wait = _server_wait(response)
                 continue
             if response.is_error:
-                raise HttpError(f"{url}: HTTP {response.status_code}: {response.text[:200]}")
+                raise HttpError(f"{url}: HTTP {response.status_code}: {_snippet(body)}")
             try:
-                return response.json()
+                return json.loads(body)
             except ValueError:
                 failure = "response was not JSON"
         raise HttpError(f"{url}: gave up after {self._max_attempts} attempts: {failure}")
 
+    def _fetch(self, method: str, url: str, **kwargs: Any) -> tuple[httpx.Response, bytes]:
+        """Read a whole response, raising a retryable timeout once the deadline passes."""
+        started = self._clock()
+        body = bytearray()
+        with self._client.stream(method, url, **kwargs) as response:
+            for chunk in response.iter_bytes():
+                body += chunk
+                if self._clock() - started > self._deadline:
+                    raise httpx.ReadTimeout(f"no full response within {self._deadline:.0f}s")
+        return response, bytes(body)
+
     def _throttle(self) -> None:
-        wait = max(self._pause_next, self._last_request + self._min_interval - time.monotonic())
+        wait = max(self._pause_next, self._last_request + self._min_interval - self._clock())
         self._pause_next = 0.0
         if wait > 0:
             self._sleep(wait)
-        self._last_request = time.monotonic()
+        self._last_request = self._clock()
