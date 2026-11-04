@@ -1,0 +1,62 @@
+version: 2
+models:
+  - name: mart_activity_waterfall
+    columns:
+      - name: chain
+        data_tests: [not_null]
+      - name: day_utc
+        data_tests: [not_null]
+      - name: transfer_count
+        data_tests: [not_null]
+      - name: headline_value
+        data_tests: [not_null]
+      - name: minted
+        data_tests: [not_null]
+      - name: burned
+        data_tests: [not_null]
+      - name: fees
+        data_tests: [not_null]
+      - name: fee_count
+        data_tests: [not_null]
+      - name: fee_liquidity
+        data_tests: [not_null]
+      - name: issuer_flows
+        data_tests: [not_null]
+      - name: same_entity
+        data_tests: [not_null]
+      - name: same_tx_netting
+        data_tests: [not_null]
+      - name: dex_flow
+        data_tests: [not_null]
+      - name: lending_flow
+        data_tests: [not_null]
+      - name: clean_large
+        data_tests: [not_null]
+      - name: clean_everyday
+        data_tests: [not_null]
+      - name: clean_tx_count
+        data_tests: [not_null]
+  - name: mart_activity_kpis
+    columns:
+      - name: chain
+        data_tests: [not_null]
+      - name: day_utc
+        data_tests: [not_null]
+      - name: total_supply
+        data_tests: [not_null]
+      - name: circulating_supply
+        data_tests: [not_null]
+      - name: headline_7d
+        data_tests: [not_null]
+      - name: clean_7d
+        data_tests: [not_null]
+      - name: clean_everyday_7d
+        data_tests: [not_null]
+      - name: active_wallets_7d
+        data_tests: [not_null]
+      - name: active_wallets_over_100_7d
+        data_tests: [not_null]
+      # Velocity is null when the window is short or circulating supply is zero.
+      - name: velocity_bps
+      - name: velocity_everyday_bps
+      - name: headline_velocity_bps
