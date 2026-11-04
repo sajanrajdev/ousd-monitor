@@ -8,7 +8,9 @@ describe("the test setup", () => {
   it("renders a component in the DOM", () => {
     render(<Home />);
 
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Not enough data yet");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+      "At least half of Open USD (OUSD) supply is sitting still.",
+    );
     expect(screen.getByText(/Is that turning into money that moves\?/)).toBeTruthy();
   });
 
