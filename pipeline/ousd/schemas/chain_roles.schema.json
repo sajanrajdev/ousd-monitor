@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "chain_roles.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "preview",
+    "data"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "preview": {
+      "type": "boolean"
+    },
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "chain",
+          "as_of_day",
+          "total_supply",
+          "supply_share_bps",
+          "placed_share_of_chain_bps",
+          "minted_30d",
+          "burned_30d",
+          "dex_flow_30d",
+          "lending_flow_30d",
+          "clean_30d",
+          "clean_everyday_30d",
+          "clean_everyday_share_bps",
+          "dex_flow_share_bps",
+          "leading_for"
+        ],
+        "properties": {
+          "chain": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          },
+          "as_of_day": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "total_supply": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "supply_share_bps": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "placed_share_of_chain_bps": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "minted_30d": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "burned_30d": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "dex_flow_30d": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "lending_flow_30d": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "clean_30d": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "clean_everyday_30d": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "clean_everyday_share_bps": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "dex_flow_share_bps": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "leading_for": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "supply",
+                "issuance",
+                "everyday",
+                "dex_flow",
+                "lending_flow"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,4 +1,4 @@
-.PHONY: check lint types test build models sync reconcile \
+.PHONY: check lint types test build models sync reconcile publish preview \
 	py-lint py-types py-test py-build \
 	web-tools web-install web-lint web-types web-test web-build web-browser web-shots
 
@@ -41,6 +41,21 @@ sync:
 
 reconcile:
 	uv run --locked $(ENV_FILE) ousd reconcile
+
+# Publish runs after a failed check too: it refuses by itself, and marks the last good dataset
+# stale. Only a database in use (exit 2) stops here, as that says nothing about the data. .env is
+# for the database path, as neither step uses a key.
+publish:
+	run_id=$${RUN_ID:-$$(date -u +%Y%m%dT%H%M%SZ)}; \
+	uv run --locked $(ENV_FILE) ousd check --run-id "$$run_id"; \
+	[ $$? -eq 2 ] && exit 2; \
+	uv run --locked $(ENV_FILE) ousd publish --run-id "$$run_id"
+
+# Local preview for site development, never a release. It writes outside data/published.
+preview:
+	run_id=$${RUN_ID:-preview-$$(date -u +%Y%m%dT%H%M%SZ)}; \
+	uv run --locked $(ENV_FILE) ousd check --run-id "$$run_id" --allow-partial; \
+	uv run --locked $(ENV_FILE) ousd publish --run-id "$$run_id" --allow-partial
 
 # Through npx, because a bare or Corepack pnpm can crash. The version's one home is packageManager
 # in web/package.json. These steps never load .env, and web code never reads an RPC variable.

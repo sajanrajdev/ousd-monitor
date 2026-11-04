@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from dbt_helpers import build_marts, failed_tests, invoke_dbt, write_raw
+from ousd import publish
 from ousd.chains import REQUIRED_CHAINS
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -115,10 +116,84 @@ def test_only_derived_rule_rows_lack_a_web_source(row):
 def test_derived_rule_has_no_entity_and_points_at_a_rule_here(row):
     if row["source_type"] == "derived_rule":
         assert not row["entity"]
+        assert row["source_url"] == publish.UNNAMED_RULE_REFERENCE
         path, _, section = row["source_url"].partition("#")
         lines = (ROOT / path).read_text().lower().splitlines()
         slugs = {line.lstrip("#").strip().replace(" ", "-") for line in lines if line[:1] == "#"}
         assert section in slugs
+
+
+def test_no_label_leads_to_a_brainstorm():
+    """That document names a firm and a wallet by inference, so a label can't point there."""
+    assert not [row for row in ROWS if "brainstorm" in row["source_url"]]
+
+
+def test_the_unnamed_cluster_rule_names_nobody():
+    rule = publish._read_unnamed_rule((ROOT / "labels" / "README.md").read_text())
+    named = {row["entity"].split()[0] for row in ROWS if row["entity"]} | ORGANIZATIONS
+    # Tempo is both an entity's first word and a chain, and the rule mentions no chain either.
+    assert not [name for name in named if re.search(rf"\b{re.escape(name)}\b", rule)]
+    assert "hub" in rule
+    assert not publish._wallet_shapes(rule)
+
+
+@each_row
+def test_a_named_label_passes_the_publish_guard(row):
+    if row["entity"]:
+        hosts = publish._read_source_hosts((ROOT / "labels" / "README.md").read_text())
+        publish._refuse_bad_source(row, hosts)
+
+
+def test_an_address_has_one_category_across_chains():
+    """A rule treats an address one way. Being labeled on some chains and not others is coverage,
+    but a different category for one address means two rules were applied."""
+    seen: dict[str, str] = {}
+    for row in ROWS:
+        assert seen.setdefault(row["address"].lower(), row["category"]) == row["category"], row
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["0x8458377a025da58e9cb547c979d5002c822a05cb", "0xb0d0b9b8ab03cbac16cdf9e59bc5a1a2ade55da2"],
+)
+def test_a_collection_wallet_is_an_unnamed_route_row_on_each_evm_chain(address):
+    rows = {row["chain"]: row for row in ROWS if row["address"] == address}
+    assert sorted(rows) == ["base", "ethereum", "tempo"]
+    for row in rows.values():
+        assert row["entity"] == ""
+        assert row["category"] == "issuer_route"
+        assert row["source_type"] == "derived_rule"
+        assert row["confidence"] == "medium"
+
+
+def test_the_rule_states_collection_wallets_and_leaves_out_pass_through():
+    rule = publish._read_unnamed_rule((ROOT / "labels" / "README.md").read_text())
+    assert "Collection wallets take money from many senders" in rule
+    assert "send every outgoing transfer to the hub" in rule
+    assert "hold almost no balance" in rule
+    assert "from a single sender stays unlabeled" in rule
+
+
+def test_relay_depository_cites_the_api_its_docs_page_loads():
+    rows = [row for row in ROWS if row["entity"] == "Relay Depository"]
+    assert len(rows) == 3
+    assert {row["source_url"] for row in rows} == {"https://api.relay.link/chains"}
+
+
+def test_settler_labels_cite_their_creator():
+    readme = (ROOT / "labels" / "README.md").read_text()
+    rows = [row for row in ROWS if row["entity"] == "0x Settler"]
+    assert len(rows) == 3
+    assert all(row["address"] in row["source_url"] for row in rows)
+    assert "deployer.zeroexprotocol.eth" in publish._read_legend(readme)["reading_a_label"]
+
+
+def test_the_legend_asks_for_no_address_it_does_not_publish():
+    legend = publish._read_legend((ROOT / "labels" / "README.md").read_text())
+    how = {row["source_type"]: row["how_to_check"] for row in legend["source_types"]}
+    assert "labels/labels.csv" in how["derived_rule"]
+    assert "address's transfers" not in how["derived_rule"]
+    assert not [row for row in how.values() if "find the address" in row]
 
 
 @each_row

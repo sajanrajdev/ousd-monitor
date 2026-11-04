@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "labels.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "preview",
+    "data",
+    "unnamed_clusters",
+    "source_legend",
+    "issuer_coverage",
+    "chains_without_issuer_row"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "preview": {
+      "type": "boolean"
+    },
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "chain",
+          "entity",
+          "category",
+          "source_type",
+          "source_url",
+          "confidence",
+          "date_checked"
+        ],
+        "properties": {
+          "chain": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          },
+          "entity": {
+            "type": "string",
+            "minLength": 1
+          },
+          "category": {
+            "enum": [
+              "issuer",
+              "issuer_route",
+              "system",
+              "dex",
+              "lending",
+              "exchange"
+            ]
+          },
+          "source_type": {
+            "enum": [
+              "explorer_tag",
+              "project_docs",
+              "company_docs",
+              "official_statement",
+              "published_research",
+              "onchain_metadata"
+            ]
+          },
+          "source_url": {
+            "type": "string",
+            "pattern": "^https://[^?#\\s]+$"
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium"
+            ]
+          },
+          "date_checked": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          }
+        }
+      }
+    },
+    "unnamed_clusters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_reference",
+        "rule",
+        "counts"
+      ],
+      "properties": {
+        "rule_reference": {
+          "const": "labels/README.md#how-unnamed-clusters-are-found"
+        },
+        "rule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "counts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "chain",
+              "category",
+              "count"
+            ],
+            "properties": {
+              "chain": {
+                "enum": [
+                  "tempo",
+                  "ethereum",
+                  "base",
+                  "solana"
+                ]
+              },
+              "category": {
+                "enum": [
+                  "issuer",
+                  "issuer_route",
+                  "system",
+                  "dex",
+                  "lending",
+                  "exchange"
+                ]
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "source_legend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_types",
+        "reading_a_label"
+      ],
+      "properties": {
+        "source_types": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source_type",
+              "meaning",
+              "how_to_check"
+            ],
+            "properties": {
+              "source_type": {
+                "type": "string"
+              },
+              "meaning": {
+                "type": "string"
+              },
+              "how_to_check": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "reading_a_label": {
+          "type": "string"
+        }
+      }
+    },
+    "issuer_coverage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "chain",
+          "issuer_rows",
+          "issuer_route_rows",
+          "has_issuer_row",
+          "issuer_labeled"
+        ],
+        "properties": {
+          "chain": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          },
+          "issuer_rows": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "issuer_route_rows": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "has_issuer_row": {
+            "type": "boolean"
+          },
+          "issuer_labeled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "chains_without_issuer_row": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "tempo",
+          "ethereum",
+          "base",
+          "solana"
+        ]
+      }
+    }
+  }
+}

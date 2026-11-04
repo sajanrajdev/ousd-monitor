@@ -1,4 +1,4 @@
-"""Command line entry point: `ousd sync` and `ousd reconcile`."""
+"""Command line entry point: `ousd sync`, `reconcile`, `check` and `publish`."""
 
 import argparse
 import logging
@@ -7,6 +7,7 @@ import sys
 import time
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from pathlib import Path
 
 import duckdb
 
@@ -18,9 +19,11 @@ from ousd.chains import (
     load_chains,
     missing_rpc_keys,
 )
+from ousd.checks import DEFAULT_MARTS_PATH, run_checks, unacceptable
 from ousd.http import HttpError, PoliteClient
 from ousd.ingest import sync_chain
 from ousd.probes import build_probes, history_for, rpc_for, solana_rpc_for
+from ousd.publish import DEFAULT_PUBLISHED_DIR, PublishRefused, PublishUnavailable, publish
 from ousd.reconcile import (
     FULL_SCOPE,
     PARTIAL_SCOPE,
@@ -285,6 +288,64 @@ def _reconcile(
     return _print_result(result.status, result.exit_code, result.scope, result.outcomes)
 
 
+def _check(run_id: str, allow_partial: bool) -> int:
+    """Run the seven checks over stored data and record them. It needs no key and no network."""
+    raw_path = Path(os.environ.get("OUSD_DB_PATH", DEFAULT_DB_PATH))
+    marts_path = Path(os.environ.get("OUSD_MARTS_DB_PATH", DEFAULT_MARTS_PATH))
+    # Store would create a missing file, and the checks need one that holds the runs.
+    if not raw_path.is_file():
+        print("error: the raw database does not exist; check OUSD_DB_PATH", file=sys.stderr)
+        return 1
+    if not marts_path.is_file():
+        print("error: the marts database does not exist; run dbt first", file=sys.stderr)
+        return 1
+    try:
+        store = Store(raw_path)
+    except duckdb.IOException:
+        print("error: database in use: another process holds it", file=sys.stderr)
+        return 2
+    try:
+        marts = duckdb.connect(str(marts_path), read_only=True)
+    except duckdb.IOException:
+        store.close()
+        print("error: marts in use: another process holds them", file=sys.stderr)
+        return 2
+    try:
+        results = run_checks(store, marts, run_id, allow_partial)
+    finally:
+        marts.close()
+        store.close()
+    for result in results:
+        print(f"{result.name}: {result.status.upper()}: {result.detail}")
+    problems = unacceptable({r.name: r.status for r in results}, allow_partial)
+    skipped = any(result.status == "skipped" for result in results)
+    outcome = (
+        "FAILED" if problems else "LOCAL PREVIEW ONLY, NOT RECONCILED" if skipped else "PASSED"
+    )
+    print(f"RESULT: {outcome}")
+    return 1 if problems else 0
+
+
+def _publish(run_id: str, allow_partial: bool) -> int:
+    try:
+        folder = publish(
+            run_id,
+            Path(os.environ.get("OUSD_MARTS_DB_PATH", DEFAULT_MARTS_PATH)),
+            Path(os.environ.get("OUSD_DB_PATH", DEFAULT_DB_PATH)),
+            Path(os.environ.get("OUSD_PUBLISHED_DIR", DEFAULT_PUBLISHED_DIR)),
+            allow_partial,
+        )
+    except PublishUnavailable as busy:
+        # Not a verdict, so not exit 1, as with `reconcile`.
+        print(f"error: {busy}", file=sys.stderr)
+        return 2
+    except PublishRefused as refusal:
+        print(f"PUBLISH REFUSED: {refusal}")
+        return 1
+    print(f"{'LOCAL PREVIEW, NOT A RELEASE' if allow_partial else 'PUBLISHED'}: {folder}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ousd", description=__doc__)
     parser.add_argument("--chain", action="append", help="limit to this chain (repeatable)")
@@ -300,12 +361,35 @@ def main(argv: list[str] | None = None) -> int:
         metavar="CHAIN",
         help="read every wallet of this chain (repeatable)",
     )
+    for name, summary in (
+        ("check", "run the seven blocking checks over stored data and record them"),
+        ("publish", "write the dataset, only if this run's recorded checks all passed"),
+    ):
+        command = commands.add_parser(
+            name,
+            help=summary,
+            description=summary,
+            epilog="Exit 0 on success, 1 on a failure or refusal, 2 when a database is in use. "
+            "Paths: OUSD_DB_PATH, OUSD_MARTS_DB_PATH, OUSD_PUBLISHED_DIR.",
+        )
+        command.add_argument("--run-id", required=True, help="the run these checks belong to")
+        command.add_argument(
+            "--allow-partial",
+            action="store_true",
+            help="local preview only, never a release: tolerate missing chains",
+        )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
         format="%(asctime)s %(levelname)s %(message)s",
     )
+
+    if args.command in ("check", "publish"):
+        if args.chain:
+            parser.error(f"--chain does not apply to {args.command}: it covers every chain")
+        run = _check if args.command == "check" else _publish
+        return run(args.run_id, args.allow_partial)
 
     # Solana first: its sync is the slowest, and Ethereum's state must still be recent when
     # reconcile reads it.

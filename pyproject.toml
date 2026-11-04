@@ -4,7 +4,14 @@ version = "0.1.0"
 description = "Ingests and reconciles Open USD (OUSD) transfers from raw chain data."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = ["dbt-core>=1.8", "dbt-duckdb>=1.8", "duckdb>=1.1", "httpx>=0.27"]
+dependencies = [
+    "dbt-core>=1.8",
+    "dbt-duckdb>=1.8",
+    "duckdb>=1.1",
+    "httpx>=0.27",
+    "jsonschema>=4",
+    "pyyaml>=6",
+]
 
 [project.scripts]
 ousd = "ousd.cli:main"
@@ -43,3 +50,8 @@ warn_unused_ignores = true
 module = "ousd.*"
 disallow_untyped_defs = true
 warn_return_any = true
+
+# No stubs ship with these, and the stub packages would be dev dependencies for two imports.
+[[tool.mypy.overrides]]
+module = ["jsonschema.*", "yaml.*"]
+ignore_missing_imports = true

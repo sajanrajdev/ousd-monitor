@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "summary.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "preview",
+    "notice",
+    "verdict",
+    "known_limits",
+    "kpis"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "preview": {
+      "type": "boolean"
+    },
+    "notice": {
+      "const": "Independent. Not affiliated with Open Standard or Bridge."
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "scope",
+        "as_of",
+        "text",
+        "facts",
+        "estimates",
+        "opinions"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "mostly_placed",
+            "moving",
+            "mixed",
+            "no_clear_statement"
+          ]
+        },
+        "scope": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          }
+        },
+        "as_of": {
+          "type": "object",
+          "additionalProperties": false,
+          "propertyNames": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          },
+          "patternProperties": {
+            "^(tempo|ethereum|base|solana)$": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            }
+          }
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "facts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "estimates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "opinions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "known_limits": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "text"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "kpis": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "chain",
+          "day",
+          "total_supply",
+          "placed_supply",
+          "placed_share_bps",
+          "circulating_supply",
+          "headline_7d",
+          "clean_7d",
+          "clean_everyday_7d",
+          "velocity_bps",
+          "velocity_everyday_bps",
+          "headline_velocity_bps",
+          "active_wallets_7d",
+          "active_wallets_over_100_7d",
+          "issuer_labeled"
+        ],
+        "properties": {
+          "chain": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          },
+          "day": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "total_supply": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "placed_supply": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "placed_share_bps": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "circulating_supply": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "headline_7d": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "clean_7d": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "clean_everyday_7d": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "velocity_bps": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "velocity_everyday_bps": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "headline_velocity_bps": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "active_wallets_7d": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active_wallets_over_100_7d": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "issuer_labeled": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}
