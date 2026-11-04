@@ -35,7 +35,13 @@ Requirements (R1 to R16) are in `docs/PRD.md`. Structure is in `docs/architectur
 
 **Done when:** one command runs ingest to publish, a failed check stops publishing, and every metric definition is documented and defensible.
 
-**Insight check:** write the verdict sentence from the real data here. If the data doesn't support a clear statement, say so, and adjust the framing rather than the numbers.
+**Build order:** 2.8 before 2.7, so orchestration wraps real functions. Detail is in `docs/plans/2026-11-03-001-insight-models-plan.md`.
+
+**Insight check, on Tempo and part of Ethereum only:**
+
+> On Tempo, which holds about two-thirds of OUSD, 77% of supply has sat still for at least two weeks in wallets of $1M or more, and transfers under $1M moved only $4.6M in the last week, under 1% of supply. So far this looks mostly like balance-sheet supply, with early everyday use rising from a low base.
+
+The data supports this for Tempo, and not yet for all chains: Base and Solana are 19% of supply and were where first-week trading happened. See `docs/brainstorms/2026-11-03-adoption-metrics-requirements.md`.
 
 ## Phase 3: first public version
 
