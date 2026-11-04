@@ -8,10 +8,10 @@ OUSD is a stablecoin issued by Bridge for Open Standard, with launch liquidity c
 
 ## Status
 
-Building. The first public version is not deployed and nothing here is live.
+Building. Nothing is deployed and nothing here is live.
 
 - **Data pipeline:** done. It ingests all four chains, reconciles them against `totalSupply()` and against Bridge's reported total, models the results with dbt, runs seven blocking checks and publishes a versioned dataset. The latest recorded reconciliation is in [the build log](docs/build-log.md), with the time it ran.
-- **Site:** in progress. It is a static site built from a published dataset. A build from the bundled sample data works, and shows it is a sample on every page. The remaining views and acceptance testing are tracked in [the plan](docs/implementation-plan.md).
+- **Site:** built. Its views, the methodology page and browser acceptance are done, and they pass on a local build from a real dataset. The results are in [the build log](docs/build-log.md). Review and release are next, tracked in [the plan](docs/implementation-plan.md).
 
 More: [the PRD](docs/PRD.md), [the architecture](docs/architecture.md) and [the design system](docs/design-system.md).
 
@@ -83,7 +83,7 @@ make web-browser   # download the browser that make web-shots needs
 make web-shots     # local screenshots of the samples
 ```
 
-`make preview` writes a local preview dataset outside `data/published`, for site development. A preview is marked as one and is never a release. `make web-release` needs a real dataset from a run whose checks all passed.
+`make preview` writes a local preview dataset outside `data/published`, for site development. A preview is marked as one and is never a release. `make web-release` needs a real dataset from a run whose checks all passed. If that dataset carries warnings, the release prints each one and refuses until `OUSD_ACK_WARNINGS` is set to the dataset's version.
 
 ## How it works
 
