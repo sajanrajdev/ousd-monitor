@@ -1,22 +1,63 @@
 """Clients for the upstream data sources: JSON-RPC, Blockscout and Bridge."""
 
+import re
 from collections.abc import Iterator
+from datetime import datetime
 from decimal import Decimal, localcontext
 from typing import Any, NamedTuple
 
+import httpx
+
 from ousd.chains import DECIMALS
-from ousd.decode import TRANSFER_TOPIC, Transfer, decode_blockscout_log, decode_rpc_log
+from ousd.decode import (
+    TRANSFER_TOPIC,
+    Transfer,
+    _address_from_topic,
+    decode_blockscout_log,
+    decode_rpc_log,
+)
 from ousd.http import PoliteClient
 
 TOTAL_SUPPLY_SELECTOR = "0x18160ddd"
+BALANCE_OF_SELECTOR = "0x70a08231"
 BLOCKSCOUT_PAGE_SIZE = 1000
 # Tempo refuses a result set over 20,000 logs with this error rather than truncating it.
 TOO_MANY_RESULTS = "exceeds max results"
+# Pages of one transaction's logs. Even a very large batch fits in far fewer.
+MAX_LOG_PAGES = 20
+TX_HASH = re.compile(r"0x[0-9a-f]{64}")
+ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
+# Plain decimal digits only, so NaN, Infinity, exponents, signs and padding are all refused.
+BRIDGE_TOTAL = re.compile(r"[0-9]{1,18}(\.[0-9]+)?")
+RFC3339 = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})"
+)
 
 
 class Block(NamedTuple):
     hash: str
     parent_hash: str
+
+
+class ProofTransfer(NamedTuple):
+    log_index: int
+    from_address: str
+    to_address: str
+    value: int  # Base units.
+
+
+class TransactionProof(NamedTuple):
+    """One transaction's Transfer logs from a single token, as a source reports them."""
+
+    tx_hash: str
+    block_number: int
+    success: bool | None  # None: the source doesn't report a status.
+    transfers: list[ProofTransfer]
+
+
+class BridgeSnapshot(NamedTuple):
+    total: int  # Base units.
+    last_updated: int  # Unix seconds, UTC.
 
 
 class RpcError(RuntimeError):
@@ -74,6 +115,76 @@ class RpcClient:
         at = hex(block) if isinstance(block, int) else {"blockHash": block}
         return int(self._call("eth_call", [{"to": token, "data": TOTAL_SUPPLY_SELECTOR}, at]), 16)
 
+    def balance_of(self, token: str, address: str, block: int | str) -> int:
+        """Read balanceOf(address) at a block number, or at a block hash (EIP-1898)."""
+        if not ADDRESS.fullmatch(address):
+            raise ValueError(f"not an address: {address!r}")
+        data = BALANCE_OF_SELECTOR + address[2:].lower().rjust(64, "0")
+        at = hex(block) if isinstance(block, int) else {"blockHash": block}
+        return int(self._call("eth_call", [{"to": token, "data": data}, at]), 16)
+
+    def block_timestamp(self, number: int) -> int:
+        block = self._call("eth_getBlockByNumber", [hex(number), False])
+        if not block:
+            raise RpcError(f"block {number} not found")
+        return int(block["timestamp"], 16)
+
+    def transaction_receipt(self, tx_hash: str, token: str) -> TransactionProof | None:
+        """The token's Transfer logs in one transaction, or None if the node doesn't know it."""
+        _check_tx_hash(tx_hash)
+        receipt = self._call("eth_getTransactionReceipt", [tx_hash])
+        if receipt is None:
+            return None
+        try:
+            if receipt["transactionHash"].lower() != tx_hash:
+                raise ValueError(f"receipt for {receipt['transactionHash']}, asked for {tx_hash}")
+            status = receipt.get("status")
+            transfers = [
+                transfer
+                for log in receipt["logs"]
+                if (
+                    transfer := _proof_transfer(
+                        log["address"], log["topics"], log["data"], int(log["logIndex"], 16), token
+                    )
+                )
+            ]
+            return TransactionProof(
+                tx_hash,
+                int(receipt["blockNumber"], 16),
+                None if status is None else int(status, 16) == 1,
+                transfers,
+            )
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise ValueError(f"malformed receipt for {tx_hash}: {exc!r}") from exc
+
+
+def _check_tx_hash(tx_hash: str) -> None:
+    if not TX_HASH.fullmatch(tx_hash):
+        raise ValueError(f"not a lowercase transaction hash: {tx_hash!r}")
+
+
+def _proof_transfer(
+    address: str, topics: list[str | None], data: str, log_index: int, token: str
+) -> ProofTransfer | None:
+    """The log as a Transfer, or None if it isn't one from this token.
+
+    The ticker OUSD also belongs to Origin Dollar, so the address is checked here and not left
+    to the server. Blockscout pads the topic list with nulls.
+    """
+    if address.lower() != token.lower():
+        return None
+    present = [topic for topic in topics if topic is not None]
+    if not present or present[0].lower() != TRANSFER_TOPIC:
+        return None
+    if len(present) != 3:
+        raise ValueError(f"not an ERC-20 Transfer log at index {log_index}")
+    return ProofTransfer(
+        log_index,
+        _address_from_topic(present[1]),
+        _address_from_topic(present[2]),
+        int(data, 16),
+    )
+
 
 class BlockscoutClient:
     def __init__(self, http: PoliteClient, url: str) -> None:
@@ -122,6 +233,52 @@ class BlockscoutClient:
             yield [row for row in rows if row.block_number < last_block], last_block - 1
             start = last_block
 
+    def transaction_logs(self, tx_hash: str, token: str) -> TransactionProof:
+        """The token's Transfer logs in one transaction, from Blockscout's v2 API.
+
+        That endpoint reports no status, so the success flag is None.
+        """
+        _check_tx_hash(tx_hash)
+        base = httpx.URL(self._url)
+        first = base.copy_with(path=f"{base.path.rstrip('/')}/v2/transactions/{tx_hash}/logs")
+        url = first
+        transfers: list[ProofTransfer] = []
+        block_numbers: set[int] = set()
+        seen: set[tuple[tuple[str, str], ...]] = set()
+        for _ in range(MAX_LOG_PAGES):
+            body = self._http.request_json("GET", str(url))
+            try:
+                for item in body["items"]:
+                    if item["transaction_hash"].lower() != tx_hash:
+                        raise ValueError(f"log of {item['transaction_hash']}, asked for {tx_hash}")
+                    block_numbers.add(int(item["block_number"]))
+                    transfer = _proof_transfer(
+                        item["address"]["hash"],
+                        item["topics"],
+                        item["data"],
+                        int(item["index"]),
+                        token,
+                    )
+                    if transfer:
+                        transfers.append(transfer)
+                cursor = body["next_page_params"]
+                if cursor is None:
+                    break
+                query = tuple(sorted((str(key), str(value)) for key, value in cursor.items()))
+            except (KeyError, TypeError, AttributeError) as exc:
+                raise ValueError(f"malformed Blockscout logs for {tx_hash}: {exc!r}") from exc
+            if not query or query in seen:
+                raise ValueError(f"Blockscout logs for {tx_hash} repeat a page cursor")
+            seen.add(query)
+            url = first.copy_merge_params(dict(query))
+        else:
+            raise ValueError(f"Blockscout logs for {tx_hash} run past {MAX_LOG_PAGES} pages")
+        if not block_numbers:
+            raise ValueError(f"Blockscout returned no logs for {tx_hash}")
+        if len(block_numbers) != 1:
+            raise ValueError(f"Blockscout logs for {tx_hash} name blocks {sorted(block_numbers)}")
+        return TransactionProof(tx_hash, block_numbers.pop(), None, transfers)
+
 
 def _check_page_order(rows: list[Transfer], from_block: int, to_block: int) -> None:
     """Paging is only safe if each page is the lowest rows of the range, in block order."""
@@ -135,16 +292,49 @@ def _check_page_order(rows: list[Transfer], from_block: int, to_block: int) -> N
         )
 
 
-def bridge_total_base_units(http: PoliteClient, url: str) -> int:
-    """Bridge's reported on-chain total, converted from a decimal string without floats.
-
-    Anything that can't convert exactly is an error, not a rounded number.
-    """
-    amount = http.request_json("GET", url)["total_onchain_amount"]
+def _base_units(amount: object) -> int:
+    """A Bridge decimal string as base units. Anything that can't convert exactly is an error."""
     if not isinstance(amount, str):
         raise ValueError(f"Bridge total should be a decimal string, got {amount!r}")
+    if not BRIDGE_TOTAL.fullmatch(amount):
+        raise ValueError(f"Bridge total is not plain decimal digits: {amount!r}")
     with localcontext(prec=78):
         base_units = Decimal(amount).scaleb(DECIMALS)
     if base_units != base_units.to_integral_value():
         raise ValueError(f"Bridge total {amount} is finer than one base unit")
     return int(base_units)
+
+
+def _unix_seconds(stamp: object) -> int:
+    if not isinstance(stamp, str) or not RFC3339.fullmatch(stamp):
+        raise ValueError(f"Bridge last_updated should be an RFC 3339 time, got {stamp!r}")
+    try:
+        return int(datetime.fromisoformat(stamp).timestamp())
+    except ValueError as exc:
+        raise ValueError(f"Bridge last_updated is not a real time: {stamp!r}") from exc
+
+
+def _bridge_body(http: PoliteClient, url: str) -> dict[str, Any]:
+    body = http.request_json("GET", url)
+    if not isinstance(body, dict):
+        raise ValueError("Bridge response should be an object")
+    return body
+
+
+def bridge_total_base_units(http: PoliteClient, url: str) -> int:
+    """Bridge's reported on-chain total, converted from a decimal string without floats."""
+    body = _bridge_body(http, url)
+    if "total_onchain_amount" not in body:
+        raise ValueError("Bridge response has no total_onchain_amount")
+    return _base_units(body["total_onchain_amount"])
+
+
+def bridge_snapshot(http: PoliteClient, url: str) -> BridgeSnapshot:
+    """Bridge's total with the time it says the figure is from."""
+    body = _bridge_body(http, url)
+    for name in ("total_onchain_amount", "last_updated"):
+        if name not in body:
+            raise ValueError(f"Bridge response has no {name}")
+    return BridgeSnapshot(
+        _base_units(body["total_onchain_amount"]), _unix_seconds(body["last_updated"])
+    )
