@@ -81,6 +81,12 @@ def route(block, tx, legs, chain="tempo", day=0, offset=100):
     ]
 
 
+def fund(chain, block, wallets, amount=10**20):
+    """Mint to every wallet the day before the scenarios, so no balance goes negative."""
+    legs = [(ZERO_ADDRESS, wallet, amount) for wallet in wallets]
+    return route(block, f"fund-{chain}-{block}", legs, chain=chain, day=-1)
+
+
 def filler(chain, block, day):
     """A transfer on the day after the last one under test, so earlier days are complete."""
     return route(block, f"filler-{chain}", [(A, B, 1)], chain=chain, day=day)
@@ -122,9 +128,13 @@ ETHEREUM_TXS = {"eth_fee_address"}
 
 def build_rows():
     rows = []
-    for block, (name, legs) in enumerate(SCENARIOS.items(), start=1):
+    for block, (name, legs) in enumerate(SCENARIOS.items(), start=10):
         chain = "solana" if name in SOLANA_TXS else "ethereum" if name in ETHEREUM_TXS else "tempo"
         rows += route(block, name, legs, chain=chain)
+    rows += fund("tempo", 1, [A, B, C, D, DEX_POOL, LENDING, ISSUER, ROUTE_1, ROUTE_2])
+    rows += fund("tempo", 2, [EXCHANGE, ENTITY_A, ENTITY_B, FEE_MANAGER])
+    rows += fund("ethereum", 1, [A])
+    rows += fund("solana", 1, [SOLANA_A, SOLANA_B, SOLANA_B.lower(), SOLANA_TEMP, SOLANA_DEX, A])
     # Day 1 holds the threshold transactions.
     rows += route(100, "threshold_exact", [(A, B, LARGE)], day=1)
     rows += route(101, "threshold_below", [(C, D, LARGE - 1)], day=1)
@@ -332,7 +342,7 @@ def test_fee_counts_and_totals_on_tempo_day_zero(marts):
 
 def test_amount_above_2_pow_64_survives_the_waterfall(tmp_path):
     big = 2**70 + 12345
-    rows = route(1, "big", [(A, B, big)]) + filler("tempo", 2, day=1)
+    rows = fund("tempo", 0, [A], 2**72) + route(1, "big", [(A, B, big)]) + filler("tempo", 2, day=1)
     conn = build_marts(tmp_path, rows, [], {"tempo": 10})
     try:
         row = conn.execute(
@@ -376,14 +386,16 @@ def random_transactions(seed):
                 value = rng.choice([1, 43, 500, OUSD, 3 * OUSD, LARGE - 1, LARGE, 2 * LARGE])
             legs.append((frm, to, value + rng.randint(0, 7)))
         if legs:
+            day = rng.randint(0, 3)
             rows += route(
-                1000 + index,
+                1000 + day * 1000 + index,  # blocks must grow with time
                 f"rand-{index}",
                 legs,
-                day=rng.randint(0, 3),
+                day=day,
                 offset=rng.randint(0, 999),
             )
-    return rows + filler("tempo", 5000, day=5)
+    funded = fund("tempo", 1, [w for w in wallets if w != ZERO_ADDRESS], 10**24)
+    return funded + rows + filler("tempo", 5000, day=5)
 
 
 def test_random_transactions_keep_the_identity(tmp_path):
@@ -426,14 +438,22 @@ def test_waterfall_identity_test_reports_a_tampered_row():
 
 
 def test_fee_shape_test_fails_when_a_large_transfer_is_caught_as_a_fee(tmp_path):
-    rows = route(1, "big-fee", [(A, FEE_MANAGER, 50 * OUSD)]) + filler("tempo", 2, day=1)
-    result = run_dbt(tmp_path, rows, [], {"tempo": 10}, select=["+assert_fee_rule_shape"])
+    rows = (
+        fund("tempo", 0, [A])
+        + route(1, "big-fee", [(A, FEE_MANAGER, 50 * OUSD)])
+        + filler("tempo", 2, day=1)
+    )
+    result = run_dbt(tmp_path, rows, [], {"tempo": 10})
     assert "assert_fee_rule_shape" in failed_tests(result)
 
 
 def test_fee_shape_test_passes_on_real_sized_fees(tmp_path):
-    rows = route(1, "small-fee", [(A, FEE_MANAGER, 1_070_000)]) + filler("tempo", 2, day=1)
-    result = run_dbt(tmp_path, rows, [], {"tempo": 10}, select=["+assert_fee_rule_shape"])
+    rows = (
+        fund("tempo", 0, [A])
+        + route(1, "small-fee", [(A, FEE_MANAGER, 1_070_000)])
+        + filler("tempo", 2, day=1)
+    )
+    result = run_dbt(tmp_path, rows, [], {"tempo": 10})
     assert result.success
 
 

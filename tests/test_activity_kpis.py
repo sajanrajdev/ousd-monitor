@@ -57,12 +57,13 @@ class Builder:
     def send(self, day, legs, offset=100):
         """One transaction; `legs` is a list of (from, to, value) in log order."""
         self.block += 1
+        block = (day + 1) * 10_000 + self.block  # blocks must grow with time
         for index, (frm, to, value) in enumerate(legs):
             transfer = Transfer(
-                block_number=self.block,
+                block_number=block,
                 block_hash=None,
                 block_timestamp=DAY + day * SECS + offset,
-                tx_hash=f"{self.chain}-{self.block}",
+                tx_hash=f"{self.chain}-{block}",
                 log_index=index,
                 from_address=frm,
                 to_address=to,
