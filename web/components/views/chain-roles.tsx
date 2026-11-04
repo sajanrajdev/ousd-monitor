@@ -18,7 +18,7 @@ export type ChainRolesViewProps = {
 
 function ChainCell({ chain }: { chain: ChainRoleRow["chain"] }) {
   return (
-    <span className="inline-flex items-center gap-2">
+    <span className="inline-flex items-center gap-2" style={{ whiteSpace: "nowrap" }}>
       <span
         aria-hidden="true"
         data-swatch={chain}
