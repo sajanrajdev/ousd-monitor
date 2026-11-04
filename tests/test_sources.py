@@ -24,6 +24,7 @@ def http_with(handler) -> PoliteClient:
 
 def blockscout_row(block: int, index: int) -> dict:
     return {
+        "address": TOKEN,
         "blockNumber": hex(block),
         "logIndex": hex(index),
         "timeStamp": "0x1",
@@ -174,6 +175,7 @@ def test_rpc_error_is_raised_with_the_method_name():
 def test_range_over_the_result_cap_is_split_until_it_fits():
     logs_by_block = {
         block: {
+            "address": TOKEN,
             "blockNumber": hex(block),
             "blockHash": "0x" + "e" * 64,
             "blockTimestamp": "0x1",

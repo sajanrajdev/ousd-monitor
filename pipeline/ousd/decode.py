@@ -23,7 +23,12 @@ def _address_from_topic(topic: str) -> str:
     return "0x" + topic[-40:].lower()
 
 
-def _decode(log: dict[str, Any], block_hash: str | None, timestamp_hex: str) -> Transfer:
+def _decode(
+    log: dict[str, Any], token: str, block_hash: str | None, timestamp_hex: str
+) -> Transfer:
+    # The ticker OUSD also belongs to Origin Dollar, so don't rely on the server's filter alone.
+    if log["address"].lower() != token.lower():
+        raise ValueError(f"log is from {log['address']}, not {token}")
     # Blockscout pads the topic list with nulls.
     topics = [topic for topic in log["topics"] if topic is not None]
     if len(topics) != 3 or topics[0].lower() != TRANSFER_TOPIC:
@@ -40,9 +45,9 @@ def _decode(log: dict[str, Any], block_hash: str | None, timestamp_hex: str) -> 
     )
 
 
-def decode_rpc_log(log: dict[str, Any]) -> Transfer:
-    return _decode(log, log["blockHash"].lower(), log["blockTimestamp"])
+def decode_rpc_log(log: dict[str, Any], token: str) -> Transfer:
+    return _decode(log, token, log["blockHash"].lower(), log["blockTimestamp"])
 
 
-def decode_blockscout_log(log: dict[str, Any]) -> Transfer:
-    return _decode(log, None, log["timeStamp"])
+def decode_blockscout_log(log: dict[str, Any], token: str) -> Transfer:
+    return _decode(log, token, None, log["timeStamp"])

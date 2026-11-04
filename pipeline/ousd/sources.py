@@ -56,7 +56,7 @@ class RpcClient:
             return self.transfers(token, from_block, middle) + self.transfers(
                 token, middle + 1, to_block
             )
-        return [decode_rpc_log(entry) for entry in logs if not entry.get("removed")]
+        return [decode_rpc_log(entry, token) for entry in logs if not entry.get("removed")]
 
     def total_supply(self, token: str, block: int | str) -> int:
         """Read totalSupply() at a block number, or at a block hash (EIP-1898).
@@ -86,7 +86,7 @@ class BlockscoutClient:
             if body["message"].startswith("No logs found"):
                 return []
             raise RuntimeError(f"Blockscout error for {params}: {body}")
-        return [decode_blockscout_log(entry) for entry in body["result"]]
+        return [decode_blockscout_log(entry, token) for entry in body["result"]]
 
     def pages(
         self, token: str, from_block: int, to_block: int
