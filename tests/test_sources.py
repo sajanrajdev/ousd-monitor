@@ -80,6 +80,7 @@ def test_block_split_across_a_page_boundary_loses_and_repeats_nothing():
 
 def test_page_ending_exactly_on_a_block_boundary_loses_nothing():
     # Block 2 ends on row 1000. The client cannot know that, so it asks for block 2 again.
+    # That second page is short but spans two blocks, so block 3 is confirmed by a third request.
     rows = [blockscout_row(1, i) for i in range(500)] + [blockscout_row(2, i) for i in range(500)]
     rows.append(blockscout_row(3, 0))
     fake = FakeBlockscout(rows)
@@ -87,8 +88,8 @@ def test_page_ending_exactly_on_a_block_boundary_loses_nothing():
     transfers, checkpoints = collect(fake, 1, 5)
 
     assert len(transfers) == 1001
-    assert checkpoints == [1, 5]
-    assert fake.requests == [(1, 5), (2, 5)]
+    assert checkpoints == [1, 2, 5]
+    assert fake.requests == [(1, 5), (2, 5), (3, 5)]
 
 
 def test_exactly_full_page_ending_at_the_last_row_requests_once_more():
