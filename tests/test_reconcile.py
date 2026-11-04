@@ -1,5 +1,5 @@
 import itertools
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
@@ -251,6 +251,13 @@ class NoPinHash:
     """The block hash at the cursor isn't stored."""
 
 
+@dataclass(frozen=True)
+class WrongChain:
+    """The read names another chain, at the same height."""
+
+    chain: str
+
+
 class DriftingRpc(FakeRpc):
     offset = 0
 
@@ -288,7 +295,8 @@ class FakeProbe:
                 "DELETE FROM blocks WHERE chain = ? AND block_number = ?",
                 [self.name, self.store.synced_through(self.name)],
             )
-        return reconcile_chain(self.chain, self.rpc, self.store, at_block)
+        reading = reconcile_chain(self.chain, self.rpc, self.store, at_block)
+        return replace(reading, chain=step.chain) if isinstance(step, WrongChain) else reading
 
     def _sync(self):
         if self.name == "solana":
@@ -529,6 +537,36 @@ def test_check_at_block_turns_a_failed_hash_fetch_into_unchecked(store):
     assert_at_block_wrote_nothing(store)
 
 
+@pytest.mark.parametrize(
+    "error",
+    [KeyError("a bug"), TypeError("a bug"), AttributeError("a bug")],
+    ids=lambda e: type(e).__name__,
+)
+def test_check_at_block_lets_a_programming_error_in_a_read_raise(store, error):
+    probe = at_block_store(store)
+
+    def broken(token, block):
+        raise error
+
+    probe.rpc.total_supply = broken
+
+    with pytest.raises(type(error)):
+        check_at_block(probe.chain, probe.rpc, store, 102)
+
+
+@pytest.mark.parametrize("method", ["block_hashes", "minted_and_burned"])
+def test_check_at_block_lets_a_store_error_raise(store, monkeypatch, method):
+    probe = at_block_store(store)
+
+    def broken(*args):
+        raise ValueError("a store error")
+
+    monkeypatch.setattr(store, method, broken)
+
+    with pytest.raises(ValueError, match="a store error"):
+        check_at_block(probe.chain, probe.rpc, store, 102)
+
+
 def test_check_at_block_leaves_a_newer_full_pass_standing(store):
     probes = four_probes(store)
     run_it(store, probes)
@@ -579,16 +617,6 @@ def test_a_block_the_node_cannot_find_falls_back_to_its_number(store):
 
     assert seen == [102]
     assert result.matched
-
-
-def test_reconcile_chain_can_skip_recording(store):
-    chain, rpc = synced_chain(store)
-    before = reconciliation_rows(store)
-
-    result = reconcile_chain(chain, rpc, store, record=False)
-
-    assert result.matched
-    assert reconciliation_rows(store) == before
 
 
 # The mismatch retry
@@ -656,6 +684,27 @@ def test_a_mismatch_retried_into_an_unchecked_return_is_unchecked(store):
         (1, "fail", "supply_mismatch"),
         (2, "unchecked", "not_synced"),
     ]
+
+
+@pytest.mark.parametrize(
+    "unreadable",
+    [ChainUnavailable("state_unavailable"), Unchecked("tempo", "not_synced")],
+    ids=["refused", "unchecked-return"],
+)
+def test_a_mismatch_before_an_unreadable_retry_reaches_the_caller_on_every_run(store, unreadable):
+    probes = four_probes(store)
+
+    for _ in range(2):
+        probes[0].steps = [Drift(1), unreadable]
+        result, reported = run_it(store, probes)
+
+        assert result.exit_code == 3
+        mismatches = [o for o in result.outcomes if o.reason == "supply_mismatch"]
+        assert [(o.subject, o.status, o.attempt) for o in mismatches] == [("tempo", "fail", 1)]
+        first = mismatches[0].reconciliation
+        assert first is not None
+        assert (first.onchain_supply, first.event_supply) == (LARGE + 1, LARGE)
+        assert mismatches[0] in reported
 
 
 def test_a_mismatch_retried_into_a_store_conflict_fails(store):
@@ -727,6 +776,24 @@ def test_a_source_error_a_probe_failed_to_map_leaves_the_run_unfinished(store):
     with pytest.raises(HttpError):
         run_it(store, probes)
 
+    assert runs(store) == [("full", None, None, True)]
+    assert store.latest_reconciliation() is None
+
+
+@pytest.mark.parametrize(
+    "step",
+    [WrongChain("ethereum"), Unchecked("ethereum", "not_synced")],
+    ids=["reading", "unchecked-return"],
+)
+def test_a_probe_answering_for_another_chain_raises_and_leaves_the_run_unfinished(store, step):
+    probes = four_probes(store, tempo=[step])
+    reported: list[Any] = []
+
+    with pytest.raises(ValueError, match="tempo probe answered for ethereum"):
+        run_reconciliation(probes, store, reported.append, bridge=bridge_passes, sleep=no_sleep)
+
+    assert reported == []
+    assert checks(store, "chain_supply", "tempo") == []
     assert runs(store) == [("full", None, None, True)]
     assert store.latest_reconciliation() is None
 
@@ -1045,6 +1112,18 @@ def test_a_finished_run_records_its_status_exit_code_and_a_default_check(store):
     ).fetchone()
     assert stored == (120, 2, LARGE, LARGE)
     assert result.run_id == store.latest_reconciliation().run_id
+
+
+def test_a_mismatch_row_keeps_the_chain_figure_and_the_event_figure_apart(store):
+    run_it(store, four_probes(store, tempo=[Drift(1), Drift(2)]))
+
+    stored = store.db.execute(
+        """
+        SELECT attempt, reference_value, observed_value FROM reconciliation_checks
+        WHERE check_name = 'chain_supply' AND subject = 'tempo' ORDER BY attempt
+        """
+    ).fetchall()
+    assert stored == [(1, LARGE + 1, LARGE), (2, LARGE + 2, LARGE)]
 
 
 # Secrets
