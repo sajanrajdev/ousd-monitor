@@ -55,6 +55,9 @@ MIN_CONTEXT_SLOT_NOT_REACHED = -32016
 # Longest tail a check syncs, about 11 hours. More is a backfill, which would hold the DuckDB lock
 # for hours without warning, so it is left to `ousd sync`.
 MAX_TAIL_SLOTS = 100_000
+# Furthest a balance read may sit below the cursor, about a minute. A comparison stops at the read's
+# slot, so anything older would leave movements after it unchecked and still report a match.
+MAX_READ_LAG_SLOTS = 150
 # Longest provider text kept in an error, after scrubbing.
 _DETAIL_LIMIT = 200
 # Offset of the account type byte in a Token-2022 account. 2 is a mint, 3 a token account.
@@ -80,6 +83,16 @@ class SolanaRpcError(RuntimeError):
     def __init__(self, code: int, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+def _base_units(amount: Any) -> int:
+    """An amount from a raw `amount` field, which the RPC sends as a string of digits.
+
+    `int` alone would cut a JSON 100.9 to 100, and take a sign, spaces or underscores.
+    """
+    if not isinstance(amount, str) or not amount.isascii() or not amount.isdigit():
+        raise ValueError("an amount is not a string of digits")
+    return int(amount)
 
 
 def _flatten(transaction: dict[str, Any]) -> list[dict[str, Any]]:
@@ -109,7 +122,7 @@ def _balances(
             raise SolanaDataError(f"{signature}: token account {account} has no owner in {key}")
         if account in found:
             raise SolanaDataError(f"{signature}: token account {account} twice in {key}")
-        found[account] = (str(owner), int(entry["uiTokenAmount"]["amount"]))
+        found[account] = (str(owner), _base_units(entry["uiTokenAmount"]["amount"]))
     return found
 
 
@@ -223,7 +236,7 @@ def _decode(transaction: dict[str, Any], mint: str) -> list[Transfer]:
             continue
         kind = parsed["type"]
         info = parsed["info"]
-        value = int(info["tokenAmount"]["amount"])
+        value = _base_units(info["tokenAmount"]["amount"])
         if kind == "mintToChecked":
             source, destination = None, str(info["account"])
         elif kind == "burnChecked":
@@ -305,10 +318,14 @@ class SolanaRpc:
         if self._parse(f"{method} response", lambda: "error" in body):
             error = self._parse(f"{method} response", lambda: body["error"])
             code = self._parse(f"{method} error code", lambda: int(error["code"]))
-            # Control characters go first, so none can split a key the scrub would then miss.
-            text = "".join(c for c in f"{method}: {code} {error}" if c.isprintable())
-            raise SolanaRpcError(code, self._http.scrub(text, self._url)[:_DETAIL_LIMIT])
+            raise SolanaRpcError(code, self.scrub(f"{method}: {code} {error}"))
         return self._parse(f"{method} response", lambda: body["result"])
+
+    def scrub(self, text: str) -> str:
+        """Text that may hold provider data, without the URL or its key, and cut to length."""
+        # Control characters go first, so none can split a key the scrub would then miss.
+        printable = "".join(c for c in text if c.isprintable())
+        return self._http.scrub(printable, self._url)[:_DETAIL_LIMIT]
 
     def _parse[T](self, what: str, read: Callable[[], T]) -> T:
         try:
@@ -379,7 +396,9 @@ class SolanaRpc:
         def read() -> SlotReading:
             if int(result["value"]["decimals"]) != DECIMALS:
                 raise ValueError("unexpected decimals")
-            return SlotReading(int(result["context"]["slot"]), int(result["value"]["amount"]))
+            return SlotReading(
+                int(result["context"]["slot"]), _base_units(result["value"]["amount"])
+            )
 
         return self._parse("getTokenSupply result", read)
 
@@ -404,7 +423,9 @@ class SolanaRpc:
                 if parsed["type"] != "account" or info["mint"] != mint:
                     raise ValueError("a row is not a token account of this mint")
                 owner = str(info["owner"])
-                balances[owner] = balances.get(owner, 0) + int(info["tokenAmount"]["amount"])
+                balances[owner] = balances.get(owner, 0) + _base_units(
+                    info["tokenAmount"]["amount"]
+                )
             return BalanceSnapshot(int(result["context"]["slot"]), balances)
 
         return self._parse("getProgramAccounts result", read)
@@ -586,6 +607,11 @@ class _NotReady(Exception):
 _CANT_CHECK = (HttpError, SolanaRpcError, SolanaDataError, _NotReady)
 
 
+def _unchecked(chain: SolanaChain, rpc: SolanaRpc, error: Exception) -> Unchecked:
+    # Errors built here can quote provider fields, such as a signature, that no scrub has seen.
+    return Unchecked(chain.name, rpc.scrub(str(error)))
+
+
 def _require_cursor(chain: SolanaChain, store: Store) -> int:
     cursor = store.synced_through(chain.name)
     if cursor is None:
@@ -598,6 +624,14 @@ def _require_short_tail(chain: SolanaChain, cursor: int, slot: int) -> None:
         raise _NotReady(
             f"{chain.name}: slot {slot} is {slot - cursor} past the cursor, more than a check "
             f"syncs ({MAX_TAIL_SLOTS}), run sync first"
+        )
+
+
+def _require_recent_read(chain: SolanaChain, cursor: int, slot: int) -> None:
+    if cursor - slot > MAX_READ_LAG_SLOTS:
+        raise _NotReady(
+            f"{chain.name}: the balance read at slot {slot} is {cursor - slot} below the cursor, "
+            f"more than a check compares ({MAX_READ_LAG_SLOTS}), read again"
         )
 
 
@@ -624,12 +658,15 @@ def _pin_supply_and_sync(chain: SolanaChain, rpc: SolanaRpc, store: Store) -> Sl
 def _read_balances_and_sync(chain: SolanaChain, rpc: SolanaRpc, store: Store) -> BalanceSnapshot:
     """Read every wallet, then sync through the slot the read reports.
 
-    A read below the cursor needs no retry, unlike supply: its rows are stored, and a comparison
-    only looks at or below the read's slot.
+    A read just below the cursor needs no retry, unlike supply: its rows are stored, and a
+    comparison only looks at or below the read's slot. It can't see movements after that slot, so a
+    miss among them waits for the next run. A read further below than `MAX_READ_LAG_SLOTS` is not
+    compared at all.
     """
     cursor = _require_cursor(chain, store)
     _require_short_tail(chain, cursor, rpc.finalized_slot())
     snapshot = rpc.token_accounts(chain.mint)
+    _require_recent_read(chain, cursor, snapshot.slot)
     # Nobody holding anything can't be told from a refused or truncated answer, and would compare
     # nothing, so it can't be a match.
     if not any(snapshot.balances.values()):
@@ -651,7 +688,7 @@ def reconcile_solana(
     try:
         pin = _pin_supply_and_sync(chain, rpc, store)
     except _CANT_CHECK as error:
-        return Unchecked(chain.name, str(error))
+        return _unchecked(chain, rpc, error)
     minted, burned = store.minted_and_burned(chain.name, pin.slot)
     result = ChainReconciliation(chain.name, pin.slot, minted, burned, pin.amount)
     store.record_reconciliation(chain.name, pin.slot, minted, burned, pin.amount, result.matched)
@@ -674,7 +711,7 @@ def read_sampled_balances(
             return []
         snapshot = _read_balances_and_sync(chain, rpc, store)
     except _CANT_CHECK as error:
-        return Unchecked(chain.name, str(error))
+        return _unchecked(chain, rpc, error)
     wanted = sorted(snapshot.balances) if owners is None else owners
     return [
         BalanceReading(owner, snapshot.slot, snapshot.balances.get(owner, 0)) for owner in wanted
@@ -695,7 +732,7 @@ def check_all_balances(
     try:
         snapshot = _read_balances_and_sync(chain, rpc, store)
     except _CANT_CHECK as error:
-        return Unchecked(chain.name, str(error))
+        return _unchecked(chain, rpc, error)
     wallets = sorted(snapshot.balances.keys() | set(store.wallets(chain.name, snapshot.slot)))
     stored = store.balances_at(chain.name, wallets, snapshot.slot)
     differences = tuple(

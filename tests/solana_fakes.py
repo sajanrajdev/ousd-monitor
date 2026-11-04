@@ -80,6 +80,9 @@ class FakeSolanaRpc(SolanaRpc):
         self.transactions[row.signature] = tx
         return tx
 
+    def scrub(self, text: str) -> str:
+        return text
+
     def genesis_hash(self) -> str:
         self.calls.append("genesis")
         return self.genesis

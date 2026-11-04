@@ -16,6 +16,7 @@ from ousd.http import HttpError, PoliteClient
 from ousd.reconcile import ChainReconciliation
 from ousd.solana import (
     GENESIS_HASH,
+    MAX_READ_LAG_SLOTS,
     MAX_TAIL_SLOTS,
     MINT_CREATION_SIGNATURE,
     OUSD_MINT,
@@ -25,10 +26,12 @@ from ousd.solana import (
     BalanceSnapshot,
     SlotReading,
     SolanaChain,
+    SolanaDataError,
     SolanaRpc,
     SolanaRpcError,
     Unchecked,
     check_all_balances,
+    decode_transaction,
     read_sampled_balances,
     reconcile_solana,
     sync_solana,
@@ -115,6 +118,11 @@ CHECKS: dict[str, Callable[[SolanaRpc, Store], Any]] = {
     "census": lambda rpc, store: read_sampled_balances(CHAIN, rpc, store, None),
 }
 every_check = pytest.mark.parametrize("check", CHECKS.values(), ids=CHECKS.keys())
+every_balance_check = pytest.mark.parametrize(
+    "check",
+    [CHECKS["balances"], CHECKS["sampled"], CHECKS["census"]],
+    ids=["balances", "sampled", "census"],
+)
 
 
 # Supply.
@@ -172,6 +180,17 @@ def test_a_mint_above_the_pin_is_not_counted_or_stored(store):
     assert result.minted == MINTED
     assert "too-new" not in fake.transaction_requests
     assert store.db.execute("SELECT count(*) FROM transfers").fetchone() == (2,)
+
+
+def test_a_stored_mint_above_the_pin_is_not_counted(store):
+    fake = synced_node(store)
+    store.write_range("solana", rows_at(CURSOR + 51, (ZERO_ADDRESS, ALICE, 7)), {}, CURSOR)
+    at(fake, CURSOR + 50)
+
+    result = reconcile_solana(CHAIN, fake, store)
+
+    assert result == ChainReconciliation("solana", CURSOR + 50, MINTED, BURNED, MINTED - BURNED)
+    assert recorded(store) == [("solana", CURSOR + 50, MINTED, BURNED, MINTED - BURNED, True)]
 
 
 def test_a_mint_in_the_tail_is_counted_at_the_pin(store):
@@ -263,6 +282,20 @@ def break_transaction(fake: FakeSolanaRpc) -> None:
     fake.null_for["missing"] = 99
 
 
+def transfer_amount(tx: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        i["parsed"]["info"]["tokenAmount"]
+        for i in tx["transaction"]["message"]["instructions"]
+        if i.get("parsed", {}).get("type") == "transferChecked"
+    )
+
+
+def break_amount(fake: FakeSolanaRpc) -> None:
+    tx = movement("fractional", CURSOR + 5, 1, 100)
+    transfer_amount(tx)["amount"] = 100.9
+    fake.add(tx)
+
+
 def break_row(fake: FakeSolanaRpc) -> None:
     tx = fake.add(movement("shifted", CURSOR + 5, 1))
     tx["transactionIndex"] += 1
@@ -283,6 +316,7 @@ def break_read(fake: FakeSolanaRpc) -> None:
     [
         (break_context_slot, "Minimum context slot"),
         (break_invariant, "broken"),
+        (break_amount, "malformed transaction"),
         (break_history, "ended"),
         (break_genesis, "mainnet"),
         (break_transaction, "no transaction"),
@@ -494,6 +528,118 @@ def test_an_owner_with_two_real_token_accounts_is_summed(store):
     assert result == BalanceCheck("solana", ACCOUNTS_SLOT, 1, ())
 
 
+def test_the_supply_is_the_raw_amount_and_not_a_ui_field(store):
+    store.write_range(
+        "solana", rows_at(SUPPLY_SLOT, (ZERO_ADDRESS, ALICE, SUPPLY_AMOUNT)), {}, SUPPLY_SLOT
+    )
+    supply = load("token_supply")
+    # Both still parse, so reading either gives a wrong amount and not a malformed read.
+    supply["value"]["uiAmount"] = 123.0
+    supply["value"]["uiAmountString"] = "123"
+    rpc = real_client(
+        {
+            "getSlot": {"result": SUPPLY_SLOT},
+            "getTokenSupply": {"result": supply},
+            "getGenesisHash": {"result": GENESIS_HASH},
+        }
+    )
+
+    result = reconcile_solana(CHAIN, rpc, store)
+
+    assert result == ChainReconciliation("solana", SUPPLY_SLOT, SUPPLY_AMOUNT, 0, SUPPLY_AMOUNT)
+
+
+def test_a_balance_is_the_raw_amount_and_not_a_ui_field(store):
+    accounts = load("token_accounts_one_owner")
+    amount = accounts["value"][0]["account"]["data"]["parsed"]["info"]["tokenAmount"]
+    amount["uiAmount"] = 123.0
+    amount["uiAmountString"] = "123"
+    store.write_range(
+        "solana", rows_at(ACCOUNTS_SLOT, (ZERO_ADDRESS, ACCOUNTS_OWNER, 490_000)), {}, ACCOUNTS_SLOT
+    )
+    rpc = real_client(
+        {
+            "getSlot": {"result": ACCOUNTS_SLOT},
+            "getProgramAccounts": {"result": accounts},
+            "getGenesisHash": {"result": GENESIS_HASH},
+        }
+    )
+
+    result = check_all_balances(CHAIN, rpc, store)
+
+    assert result == BalanceCheck("solana", ACCOUNTS_SLOT, 1, ())
+
+
+# Each would read as 100, or as a number near it, if `int` were left to decide.
+NOT_AMOUNTS = [
+    100.9,
+    100.0,
+    100,
+    True,
+    None,
+    "100.9",
+    "-100",
+    "+100",
+    " 100",
+    "100\n",
+    "1_00",
+    "1e2",
+    "",
+    "\u0661\u0660\u0660",
+]
+not_amounts = pytest.mark.parametrize("amount", NOT_AMOUNTS, ids=repr)
+
+
+@not_amounts
+def test_a_supply_amount_that_is_not_a_string_of_digits_is_unchecked(store, amount):
+    store.write_range("solana", rows_at(SUPPLY_SLOT, (ZERO_ADDRESS, ALICE, 100)), {}, SUPPLY_SLOT)
+    supply = load("token_supply")
+    supply["value"]["amount"] = amount
+    # No genesis answer: a read that isn't refused goes on to sync, and fails this test loudly.
+    rpc = real_client({"getSlot": {"result": SUPPLY_SLOT}, "getTokenSupply": {"result": supply}})
+
+    result = reconcile_solana(CHAIN, rpc, store)
+
+    assert isinstance(result, Unchecked)
+    assert "malformed getTokenSupply result" in result.reason
+    assert recorded(store) == []
+
+
+@not_amounts
+@every_balance_check
+def test_a_balance_amount_that_is_not_a_string_of_digits_is_unchecked(store, check, amount):
+    store.write_range(
+        "solana", rows_at(ACCOUNTS_SLOT, (ZERO_ADDRESS, ALICE, 100)), {}, ACCOUNTS_SLOT
+    )
+    accounts = load("token_accounts_one_owner")
+    info = accounts["value"][0]["account"]["data"]["parsed"]["info"]
+    info["owner"] = ALICE
+    info["tokenAmount"]["amount"] = amount
+    rpc = real_client(
+        {"getSlot": {"result": ACCOUNTS_SLOT}, "getProgramAccounts": {"result": accounts}}
+    )
+
+    result = check(rpc, store)
+
+    assert isinstance(result, Unchecked)
+    assert "malformed getProgramAccounts result" in result.reason
+
+
+@not_amounts
+@pytest.mark.parametrize("where", ["movement", "pre", "post"])
+def test_a_transaction_amount_that_is_not_a_string_of_digits_stops_the_decode(where, amount):
+    tx = movement("tx", CURSOR + 5, 1, 100)
+    entry = {
+        "movement": transfer_amount(tx),
+        "pre": tx["meta"]["preTokenBalances"][0]["uiTokenAmount"],
+        "post": tx["meta"]["postTokenBalances"][0]["uiTokenAmount"],
+    }[where]
+    entry["amount"] = amount
+
+    with pytest.raises(SolanaDataError, match="malformed transaction"):
+        decode_transaction(tx, OUSD_MINT)
+
+
 KEY = "SECRETKEYMARKER123"
 KEYED_URLS = [
     f"http://{KEY}.rpc.invalid/v2",
@@ -549,6 +695,74 @@ def test_no_reason_holds_the_url_or_the_key(store, check, method, case, url):
     assert KEY not in repr(result)
     assert url not in result.reason
     assert "rpc.invalid" not in result.reason
+
+
+def signature_row(signature: str, slot: int, index: int = 1) -> dict[str, Any]:
+    return {"signature": signature, "slot": slot, "transactionIndex": index}
+
+
+def echo_out_of_order(echo: str, slot: int) -> dict[str, Any]:
+    rows = [signature_row("first", slot), signature_row(echo, slot)]
+    return {"getSignaturesForAddress": {"result": rows}}
+
+
+def echo_with_a_row(echo: str, slot: int, transaction: Any) -> dict[str, Any]:
+    # The second row is below the re-read window, which ends the walk.
+    rows = [signature_row(echo, slot), signature_row("old", 1)]
+    return {
+        "getSignaturesForAddress": {"result": rows},
+        "getTransaction": {"result": transaction},
+    }
+
+
+def echo_no_transaction(echo: str, slot: int) -> dict[str, Any]:
+    return echo_with_a_row(echo, slot, None)
+
+
+def echo_other_transaction(echo: str, slot: int) -> dict[str, Any]:
+    return echo_with_a_row(echo, slot, {"slot": slot + 1, "transactionIndex": 1})
+
+
+def echo_in_decode(echo: str, slot: int) -> dict[str, Any]:
+    tx = {"slot": slot, "transactionIndex": 1, "transaction": {"signatures": [echo]}}
+    return echo_with_a_row(echo, slot, tx)
+
+
+@pytest.mark.parametrize("url", KEYED_URLS)
+@pytest.mark.parametrize(
+    "echo",
+    ["{url} {key}", "{split}"],
+    ids=["whole", "split-by-a-control-character"],
+)
+@pytest.mark.parametrize(
+    ("fault", "expected"),
+    [
+        (echo_out_of_order, "out of order"),
+        (echo_no_transaction, "no transaction"),
+        (echo_other_transaction, "differs from its signature row"),
+        (echo_in_decode, "no blockTime"),
+    ],
+)
+@every_check
+def test_no_reason_holds_a_key_echoed_in_a_signature(store, check, fault, expected, echo, url):
+    store.write_range("solana", [], {}, ACCOUNTS_SLOT - 10)
+    signature = echo.format(url=url, key=KEY, split=f"{KEY[:6]}\n{KEY[6:]}")
+    answers: dict[str, Any] = {
+        "getSlot": {"result": ACCOUNTS_SLOT},
+        "getTokenSupply": {"result": load("token_supply")},
+        "getProgramAccounts": {"result": load("token_accounts_one_owner")},
+        "getGenesisHash": {"result": GENESIS_HASH},
+        **fault(signature, ACCOUNTS_SLOT - 5),
+    }
+
+    result = check(real_client(answers, url), store)
+
+    assert isinstance(result, Unchecked)
+    assert expected in result.reason
+    printable = "".join(c for c in result.reason if c.isprintable())
+    assert KEY not in printable
+    assert url not in printable
+    assert "rpc.invalid" not in printable
 
 
 # Balances.
@@ -688,6 +902,76 @@ def test_a_row_above_the_read_does_not_count(store):
     # The read is below the cursor, so the rows at its slot are all stored and it needs no retry.
     assert result == BalanceCheck("solana", CURSOR - 5, 1, ())
     assert store.synced_through("solana") == CURSOR
+
+
+def read_at(store: Store, slot: int) -> FakeSolanaRpc:
+    """Rows that match a read at `slot`, with the cursor at CURSOR, so only the lag can stop it."""
+    store.write_range("solana", rows_at(slot - 5, (ZERO_ADDRESS, ALICE, 100)), {}, CURSOR)
+    fake = FakeSolanaRpc(CURSOR)
+    fake.snapshot = BalanceSnapshot(slot, {ALICE: 100})
+    return fake
+
+
+@every_balance_check
+def test_a_read_exactly_at_the_lag_limit_is_compared_at_its_slot(store, check):
+    fake = read_at(store, CURSOR - MAX_READ_LAG_SLOTS)
+
+    result = check(fake, store)
+
+    assert not isinstance(result, Unchecked)
+    assert "genesis" in fake.calls
+    assert store.synced_through("solana") == CURSOR
+
+
+def test_a_read_exactly_at_the_lag_limit_matches_at_that_slot(store):
+    fake = read_at(store, CURSOR - MAX_READ_LAG_SLOTS)
+
+    result = check_all_balances(CHAIN, fake, store)
+
+    assert result == BalanceCheck("solana", CURSOR - MAX_READ_LAG_SLOTS, 1, ())
+
+
+@every_balance_check
+@pytest.mark.parametrize(
+    "slot", [CURSOR - MAX_READ_LAG_SLOTS - 1, 10], ids=["one-past-the-limit", "slot-10"]
+)
+def test_a_read_past_the_lag_limit_is_unchecked_and_syncs_nothing(store, check, slot):
+    fake = read_at(store, slot)
+
+    result = check(fake, store)
+
+    assert isinstance(result, Unchecked)
+    assert result.chain == "solana"
+    assert f"slot {slot}" in result.reason
+    assert f"{CURSOR - slot} below the cursor" in result.reason
+    assert "genesis" not in fake.calls
+    assert fake.calls.count("accounts") == 1
+    assert store.synced_through("solana") == CURSOR
+
+
+def test_a_missed_transfer_above_a_read_past_the_limit_is_not_called_a_match(store):
+    # The read predates the missed transfer, so without the limit this compares as a match.
+    fake = read_at(store, CURSOR - MAX_READ_LAG_SLOTS - 60)
+
+    result = check_all_balances(CHAIN, fake, store)
+
+    assert isinstance(result, Unchecked)
+
+
+def test_a_missed_transfer_above_a_read_inside_the_limit_waits_for_the_next_run(store):
+    # The limit this choice accepts: a read at C-60 can't see a transfer missed at C-50.
+    fake = read_at(store, CURSOR - 60)
+
+    assert check_all_balances(CHAIN, fake, store) == BalanceCheck("solana", CURSOR - 60, 1, ())
+
+    fake.snapshot = BalanceSnapshot(CURSOR, {ALICE: 60, BOB: 40})
+    result = check_all_balances(CHAIN, fake, store)
+
+    assert isinstance(result, BalanceCheck)
+    assert result.differences == (
+        BalanceDifference(ALICE, 60, 100),
+        BalanceDifference(BOB, 40, 0),
+    )
 
 
 def test_a_movement_above_the_read_in_the_node_is_not_stored(store):
