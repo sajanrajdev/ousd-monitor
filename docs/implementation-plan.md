@@ -3,58 +3,72 @@
 **Goal:** a first public version.
 **Rule:** if time runs short, cut views. Never cut reconciliation, tests or honesty.
 
-Requirements (R1 to R16) are in `docs/PRD.md`. Structure is in `docs/architecture.md`.
+Requirements (R1 to R16) are in `docs/PRD.md`. Structure is in `docs/architecture.md`. The PRD's phase table numbers phases differently; this file is the one to follow for what is built when.
 
-## Phase 1: trustworthy core
+| Phase | Status |
+|---|---|
+| 1. Trustworthy core | Done |
+| 2. Insight models | Done |
+| 3. First public version | In progress. Not deployed |
+| 4. Review and release | Not started |
+| 5. After the first release | Not started |
+
+## Phase 1: trustworthy core (done)
 
 **Delivers:** all four chains ingested and reconciled.
 
-| Unit | Paths |
+| Unit | |
 |---|---|
-| 1.1 Ingestion foundation: sources, store, reorg repair, per-chain reconciliation | `pipeline/`, `tests/`, `Makefile`, `pyproject.toml` |
-| 1.2 Base source, using `BASE_RPC_URL` | `pipeline/ousd/sources.py`, `chains.py`, `http.py`, `cli.py`, `README.md`, tests |
-| 1.3 Solana source, using `SOLANA_RPC_URL` | `pipeline/ousd/solana.py`, `cli.py`, `README.md`, `tests/fixtures/solana/`, `docs/build-log.md`, tests |
-| 1.4 Full cross-chain reconciliation against Bridge | `pipeline/ousd/reconcile.py`, `probes.py`, `store.py`, `sources.py`, `chains.py`, `cli.py`, `solana.py`, `README.md`, `docs/build-log.md`, tests |
+| 1.1 Ingestion foundation: sources, store, reorg repair, per-chain reconciliation | Done |
+| 1.2 Base source, using `BASE_RPC_URL` | Done |
+| 1.3 Solana source, using `SOLANA_RPC_URL` | Done |
+| 1.4 Full cross-chain reconciliation against Bridge | Done |
 
 **Done when:** every chain reconciles to the base unit, the cross-chain check passes within a stated tolerance, and `make check` passes in CI.
 
-## Phase 2: insight models
+**Result:** the first full reconciliation passed on 2026-11-04 at 09:24 UTC, with every difference 0 base units on all four chains and Bridge's total matching on the first attempt. A second run passed a minute later. The figures, the problems found on the way and the known limits are in `docs/build-log.md`.
+
+## Phase 2: insight models (done)
 
 **Delivers:** the marts behind the first three views, and an orchestrated run.
 
-| Unit | Paths |
+| Unit | |
 |---|---|
-| 2.1 Test the PRD's metric definitions against real data, and settle thresholds | `docs/brainstorms/` |
-| 2.2 dbt project and staging models | `dbt/` staging |
-| 2.3 Labels file from published sources | `labels/` |
-| 2.4 `mart_supply_journey` | `dbt/` marts |
-| 2.5 `mart_activity_waterfall`, including the fee rule | `dbt/` marts |
-| 2.6 `mart_chain_roles` and `mart_reconciliation` | `dbt/` marts |
-| 2.7 Dagster assets, schedule and blocking checks | `pipeline/dagster/` |
-| 2.8 Publish step and dataset schema | `pipeline/ousd/publish.py` |
+| 2.1 Test the PRD's metric definitions against real data, and settle thresholds | Done |
+| 2.2 dbt project and staging models | Done |
+| 2.3 Labels file from published sources | Done |
+| 2.4 `mart_supply_journey` | Done |
+| 2.5 `mart_activity_waterfall`, including the fee rule | Done |
+| 2.6 `mart_chain_roles` and `mart_reconciliation` | Done |
+| 2.7 Dagster assets, schedule and blocking checks | Done |
+| 2.8 Publish step and dataset schema | Done |
 
 **Done when:** one command runs ingest to publish, a failed check stops publishing, and every metric definition is documented and defensible.
 
-**Build order:** 2.8 before 2.7, so orchestration wraps real functions. Detail is in `docs/plans/2026-11-03-001-insight-models-plan.md`.
+**Result:** `make run` runs the whole path, and the seven checks block publishing, tested with failing inputs. Metric definitions and thresholds are in `docs/PRD.md` section 7 and `docs/methodology.md`. Detail is in `docs/plans/2026-11-03-001-insight-models-plan.md`. The Dagster schedule ships stopped. A week of scheduled runs is not part of this phase's result, as nothing is hosted yet.
 
-**Insight check, on Tempo and part of Ethereum only:**
+**Insight check, read on 2026-11-03, on Tempo and part of Ethereum only:**
 
 > On Tempo, which holds about two-thirds of OUSD, 77% of supply has sat still for at least two weeks in wallets of $1M or more, and transfers under $1M moved only $4.6M in the last week, under 1% of supply. So far this looks mostly like balance-sheet supply, with early everyday use rising from a low base.
 
-The data supports this for Tempo, and not yet for all chains: Base and Solana are 19% of supply and were where first-week trading happened. See `docs/brainstorms/2026-11-03-adoption-metrics-requirements.md`.
+The data supports this for Tempo, and not yet for all chains: Base and Solana were 19% of supply and were where first-week trading happened. These figures will have moved since. See `docs/brainstorms/2026-11-03-adoption-metrics-requirements.md`.
 
-## Phase 3: first public version
+## Phase 3: first public version (in progress)
 
-**Delivers:** the site with verdict, trust strip, views A, B and E, and methodology.
+**Delivers:** the site with verdict, trust strip, views A, B and E, and methodology. The plan, with the acceptance checks for each unit, is `docs/plans/2026-11-04-001-first-public-version-plan.md`.
 
-| Unit | Paths |
+| Unit | Status |
 |---|---|
-| 3.1 Next.js scaffold, tokens and dataset loader | `web/` foundation |
-| 3.2 Verdict block, KPI row and trust strip | `web/` components |
-| 3.3 Views A, B and E | `web/` views |
-| 3.4 Methodology page | `web/`, `docs/methodology.md` |
-| 3.5 README and repo polish for outside readers | `README.md`, `docs/` |
-| 3.6 Mobile, accessibility and browser acceptance | Fixes only |
+| 3.1a Scaffold and tooling | Done |
+| 3.1b Tokens, shell and shared components | Done |
+| 3.1c Dataset loader, sample data, states and page frame | Done |
+| 3.2 Verdict block, KPI row and trust strip | Not merged yet |
+| 3.3a View A, supply journey | Not merged yet |
+| 3.3b View B, real activity | Done |
+| 3.3c View E, chain roles | Not merged yet |
+| 3.4 Methodology page | Done |
+| 3.5 README and docs for outside readers | In review |
+| 3.6 Mobile, accessibility and browser acceptance | Not started |
 
 **Done when:** it builds and renders from a published dataset, passes on mobile, and matches `docs/design-system.md`.
 
