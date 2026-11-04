@@ -9,8 +9,8 @@ Requirements (R1 to R16) are in `docs/PRD.md`. Structure is in `docs/architectur
 |---|---|
 | 1. Trustworthy core | Done |
 | 2. Insight models | Done |
-| 3. First public version | In progress. Not deployed |
-| 4. Review and release | Not started |
+| 3. First public version | Done. Not deployed |
+| 4. Review and release | Next |
 | 5. After the first release | Not started |
 
 ## Phase 1: trustworthy core (done)
@@ -53,7 +53,7 @@ Requirements (R1 to R16) are in `docs/PRD.md`. Structure is in `docs/architectur
 
 The data supports this for Tempo, and not yet for all chains: Base and Solana were 19% of supply and were where first-week trading happened. These figures will have moved since. See `docs/brainstorms/2026-11-03-adoption-metrics-requirements.md`.
 
-## Phase 3: first public version (in progress)
+## Phase 3: first public version (done)
 
 **Delivers:** the site with verdict, trust strip, views A, B and E, and methodology. The plan, with the acceptance checks for each unit, is `docs/plans/2026-11-04-001-first-public-version-plan.md`.
 
@@ -62,17 +62,19 @@ The data supports this for Tempo, and not yet for all chains: Base and Solana we
 | 3.1a Scaffold and tooling | Done |
 | 3.1b Tokens, shell and shared components | Done |
 | 3.1c Dataset loader, sample data, states and page frame | Done |
-| 3.2 Verdict block, KPI row and trust strip | Not merged yet |
-| 3.3a View A, supply journey | Not merged yet |
+| 3.2 Verdict block, KPI row and trust strip | Done |
+| 3.3a View A, supply journey | Done |
 | 3.3b View B, real activity | Done |
-| 3.3c View E, chain roles | Not merged yet |
+| 3.3c View E, chain roles | Done |
 | 3.4 Methodology page | Done |
-| 3.5 README and docs for outside readers | In review |
-| 3.6 Mobile, accessibility and browser acceptance | Not started |
+| 3.5 README and docs for outside readers | Done |
+| 3.6 Mobile, accessibility and browser acceptance | Done |
 
 **Done when:** it builds and renders from a published dataset, passes on mobile, and matches `docs/design-system.md`.
 
-## Phase 4: review and release
+**Result:** it builds and renders from a real dataset on a local build, and passes the browser acceptance checks at phone and desktop widths. The figures and the problems found are in `docs/build-log.md`. Nothing is deployed.
+
+## Phase 4: review and release (next)
 
 1. Trace each public claim to data or a source.
 2. Review the whole codebase.

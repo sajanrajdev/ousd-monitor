@@ -224,7 +224,7 @@ Two soft rules keep the fan-out clean. New dependencies don't get added in the f
 
 ---
 
-- [ ] **Unit 3.1a: Scaffold and tooling**
+- [x] **Unit 3.1a: Scaffold and tooling**
 
 **Goal:** a static Next.js app that `make check` lints, type-checks, tests and builds, in CI and locally.
 
@@ -293,7 +293,7 @@ Also install `ajv`, `ajv-formats`, `marked`, `@fontsource-variable/inter` and `@
 
 ---
 
-- [ ] **Unit 3.1b: Tokens, shell and shared components**
+- [x] **Unit 3.1b: Tokens, shell and shared components**
 
 **Goal:** every token and shared component in the design system, including a chart card that can't be used without its required parts.
 
@@ -336,7 +336,7 @@ Also install `ajv`, `ajv-formats`, `marked`, `@fontsource-variable/inter` and `@
 
 ---
 
-- [ ] **Unit 3.1c: Dataset loader, sample data, states and page frame**
+- [x] **Unit 3.1c: Dataset loader, sample data, states and page frame**
 
 **Goal:** the one way into the data, plus the page frame that every later unit fills in.
 
@@ -404,7 +404,7 @@ The components under `components/` that later units own start as stubs that rend
 
 ---
 
-- [ ] **Unit 3.2: Verdict block, KPI row and trust strip**
+- [x] **Unit 3.2: Verdict block, KPI row and trust strip**
 
 **Goal:** the first screen answers the question, and the trust strip visibly changes state.
 
@@ -448,7 +448,7 @@ The components under `components/` that later units own start as stubs that rend
 
 ---
 
-- [ ] **Unit 3.3a: View A, supply journey**
+- [x] **Unit 3.3a: View A, supply journey**
 
 **Goal:** of the supply there is, how much is placed, in venues, free-floating or with the issuer.
 
@@ -479,7 +479,7 @@ The components under `components/` that later units own start as stubs that rend
 
 ---
 
-- [ ] **Unit 3.3b: View B, real activity**
+- [x] **Unit 3.3b: View B, real activity**
 
 **Goal:** how much of the headline volume is left after each removal, and what velocity means here.
 
@@ -513,7 +513,7 @@ The components under `components/` that later units own start as stubs that rend
 
 ---
 
-- [ ] **Unit 3.3c: View E, chain roles**
+- [x] **Unit 3.3c: View E, chain roles**
 
 **Goal:** what leads on each chain, without claiming more than the data shows.
 
@@ -542,7 +542,7 @@ The components under `components/` that later units own start as stubs that rend
 
 ---
 
-- [ ] **Unit 3.4: Methodology page and `docs/methodology.md`**
+- [x] **Unit 3.4: Methodology page and `docs/methodology.md`**
 
 **Goal:** a skeptical stranger can trace any number to its definition and source, and can see how we know any label.
 
@@ -603,7 +603,7 @@ Engineering limits with no bearing on a reader's numbers, such as secret scrubbi
 
 ---
 
-- [ ] **Unit 3.5: README and repo polish**
+- [x] **Unit 3.5: README and repo polish**
 
 **Goal:** a stranger can read the repo and run the site.
 
@@ -624,7 +624,7 @@ Test expectation: none. Docs only, and `make check` covers formatting. This PR t
 
 ---
 
-- [ ] **Unit 3.6: Mobile, accessibility and browser acceptance**
+- [x] **Unit 3.6: Mobile, accessibility and browser acceptance**
 
 **Goal:** prove the whole site, and fix what that finds.
 

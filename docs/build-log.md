@@ -133,3 +133,33 @@ These were found before any real run, by reviews that reproduced each one agains
 
 - **No hosted schedule.** The Dagster schedule ships stopped, and nothing rebuilds the site by itself.
 - **Recharts' behavior in a real browser is proved by tests and sample builds only** until the acceptance unit (3.6) runs it at phone and desktop widths.
+
+### Acceptance
+
+Acceptance ran on a local build from real dataset 20261104T163224Z and from the samples, at 320, 390, 768, 1056 and 1440 px.
+
+- **Numbers:** a script compared the rendered pages with the dataset's JSON. 107 values match, 0 mismatch and 7 are observed only. A negative control, which tampers with values on purpose, was caught 4 times out of 4.
+- **Accessibility:** axe found 0 serious or critical violations across 5 states, 2 pages and 5 widths.
+- **Layout:** no page scrolls horizontally.
+- **Also checked:** keyboard use, the skip link, a stale page by a fake clock and by a marked copy, reduced motion, JavaScript off, and no third-party requests.
+
+### What went wrong in acceptance
+
+- **The first report's number table was wrong, though the page was right.** It held values that are not in the dataset and marked them as matching. An independent rebuild caught it, and the comparison was redone by script.
+- **Touch targets were too small.** Targets under 24 px in the header and on the methodology source links numbered 2 and up to 68 per page. They now number 0.
+- **View A's dividers broke the design rule.** They were corrected.
+- **Ethereum's velocity read 88.22% a day.** That is on a $2.8M circulating supply that burns had shrunk, so the figure misleads on its own. The page now carries a note taken from the dataset's warnings.
+- **$454.5M of the $888.3M supply predates Day 0.** The page now says so.
+
+### Earlier lessons
+
+- **A held-out PR with conflicts gets no CI.** A worker waiting on its checks waits forever.
+- **A 502 on merge can still have merged.** Check the result before retrying.
+- **GitHub returned intermittent 5xx errors on 2026-11-04.**
+
+### Not run
+
+- A real screen reader.
+- A physical touch device.
+- A live refused publish on real data. That a failed check stops publishing is proved by tests and by a marked copy.
+- Credits actually charged by the Solana provider are unknown.
