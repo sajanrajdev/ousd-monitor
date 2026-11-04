@@ -283,3 +283,16 @@ def test_sync_ends_near_the_tip_after_a_long_history_backfill(store):
     assert result.tip == 170
     assert store.synced_through("testnet") == 170
     assert max(store.block_hashes("testnet")) == 170
+
+
+def test_log_a_lagging_node_missed_is_healed_even_after_the_tip_moves_on(store):
+    chain = make_chain()
+    rpc = FakeRpc(tip=120)
+    sync_chain(chain, rpc, store)
+
+    # Served late, and by the next run the tip is far past the hash window.
+    rpc.add_transfer(119, 5)
+    rpc.extend(160)
+    sync_chain(chain, rpc, store)
+
+    assert [row[0] for row in rows(store)] == [119]

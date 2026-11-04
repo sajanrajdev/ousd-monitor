@@ -33,7 +33,12 @@ def sync_chain(
 
     window_start = _window_start(chain, tip, finalized)
     cursor = store.synced_through(chain.name)
-    next_block = chain.start_block if cursor is None else min(cursor + 1, window_start)
+    next_block = chain.start_block
+    if cursor is not None:
+        # Read the newest stored blocks again, wherever the tip is now. A load balanced node can
+        # serve a block's hash while another returns no logs for it yet, and only a later read
+        # finds those. Rows are keyed, so this repeats nothing.
+        next_block = min(max(chain.start_block, cursor + 1 - chain.reorg_lookback), window_start)
 
     if history is not None:
         # Blockscout rows carry no block hash, so it may only serve blocks that can't reorg.
