@@ -58,9 +58,10 @@ def _url_parts(url: str) -> set[str] | None:
     for name, value in parse_qsl(parts.query, keep_blank_values=True):
         long_parts += [name, value]
     long_parts += [parts.username or "", parts.password or ""]
-    # A key can sit inside a larger part: "/apikey=KEY", "/KEY.json", ";apikey=KEY", "#token=KEY".
+    # A key can sit inside a larger part: "/apikey=KEY", "/KEY.json", ";apikey=KEY", "#token=KEY",
+    # "/token:KEY", "/tok|KEY". Not "-" or "_": those would break up hyphenated text and UUID keys.
     decoded = [unquote(part) for part in long_parts]
-    pieces = [piece for part in (*long_parts, *decoded) for piece in re.split(r"[;=,.]", part)]
+    pieces = [piece for part in (*long_parts, *decoded) for piece in re.split(r"[;=,.:|]", part)]
     found = {host, *long_parts, *decoded, *pieces}
     for part in list(found):
         found.update(variant for variant in (quote(part, safe=""), quote_plus(part)))

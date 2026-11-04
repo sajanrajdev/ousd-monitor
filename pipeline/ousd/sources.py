@@ -70,8 +70,9 @@ class RpcError(RuntimeError):
 
 # What reading a provider's data raises when a field is missing, mistyped or not a number.
 _MALFORMED = (ValueError, KeyError, TypeError, AttributeError, IndexError, ArithmeticError)
-# Longest stretch of a provider's reply kept in an error, after scrubbing.
-_DETAIL_LIMIT = 400
+# Longest stretch of a provider's reply kept in an error, after scrubbing. A whole log has to fit,
+# because its tx hash, block and data come after the topics.
+_DETAIL_LIMIT = 2000
 
 
 def _parse[T](http: PoliteClient, url: str, what: str, read: Callable[[], T]) -> T:
@@ -243,9 +244,8 @@ class BlockscoutClient:
             "topic0": TRANSFER_TOPIC,
         }
         body = self._http.request_json("GET", self._url, params=params)
-        status, message = self._parse("response", lambda: (body["status"], body["message"]))
-        if status != "1":
-            if self._parse("response", lambda: message.startswith("No logs found")):
+        if self._parse("response", lambda: body["status"]) != "1":
+            if self._parse("response", lambda: body["message"].startswith("No logs found")):
                 return []
             raise RuntimeError(
                 self._http.scrub(f"Blockscout error for {params}: {body}", self._url)[

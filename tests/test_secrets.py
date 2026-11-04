@@ -16,6 +16,8 @@ from ousd.http import HttpError, PoliteClient
 from ousd.sources import BlockscoutClient, RpcClient, RpcError
 
 KEY = "k3y9aZ7QwErTyUiOpAsDfGhJkLzXcVbNm1234567890abcdefghijklmnopqr"
+# Where sources.py cuts a provider's reply in an error.
+DETAIL_LIMIT = 2000
 URLS = [
     f"http://base-rpc.provider.invalid/v2/{KEY}",
     f"http://rpc.provider.invalid/v2?apikey={KEY}",
@@ -392,13 +394,79 @@ def test_a_parse_failure_on_provider_data_never_shows_the_key(read, url, caplog)
 
 
 @pytest.mark.parametrize("url", PARAMS)
-def test_an_overflowing_number_in_a_reply_is_a_clean_value_error(url, caplog):
-    body = {"items": [v2_item(block_number=float("inf"))], "next_page_params": None}
+@pytest.mark.parametrize("field", ["block_number", "index"])
+def test_an_overflowing_number_in_a_reply_is_a_clean_value_error(field, url, caplog):
+    # json.loads reads 1e999 as infinity, and int() of that raises OverflowError.
+    body = {"items": [v2_item(**{field: "HUGE"})], "next_page_params": None}
+    raw = json.dumps(body).replace('"HUGE"', "1e999")
+    client = make_client(lambda request: httpx.Response(200, content=raw))
 
     with pytest.raises(ValueError) as raised:
-        blockscout(url, body).transaction_logs(TX, TOKEN)
+        BlockscoutClient(client, url).transaction_logs(TX, TOKEN)
 
+    assert "malformed" in str(raised.value)
     assert_clean(raised.value, caplog)
+
+
+def test_a_blockscout_page_that_reports_success_needs_no_message():
+    body = {"status": "1", "result": []}
+
+    assert list(blockscout(URLS[0], body).pages(TOKEN, 1, 2)) == [([], 2)]
+
+
+def test_a_log_with_four_topics_keeps_its_hash_block_and_data_in_the_error():
+    topics = [TRANSFER_TOPIC, ADDRESS_TOPIC, ADDRESS_TOPIC, ADDRESS_TOPIC]
+    log = rpc_log(topics=topics, data="0xfeed", blockNumber="0x1234")
+
+    with pytest.raises(ValueError) as raised:
+        rpc(URLS[0], [log]).transfers(TOKEN, 1, 1)
+
+    assert TX in str(raised.value)
+    assert "0x1234" in str(raised.value)
+    assert "0xfeed" in str(raised.value)
+
+
+def test_a_long_blockscout_error_keeps_its_tail():
+    body = {"status": "0", "message": "denied", "result": "x" * 600 + " retry later"}
+
+    with pytest.raises(RuntimeError) as raised:
+        list(blockscout(URLS[0], body).pages(TOKEN, 1, 2))
+
+    assert "retry later" in str(raised.value)
+
+
+def parse_failure_quoting(url: str, text: str) -> None:
+    rpc(url, receipt(transactionHash=text)).transaction_receipt(TX, TOKEN)
+
+
+def blockscout_error_quoting(url: str, text: str) -> None:
+    body = {"status": "0", "message": text, "result": None}
+    list(blockscout(url, body).pages(TOKEN, 1, 2))
+
+
+CUT_ERRORS = [
+    pytest.param(parse_failure_quoting, ValueError, id="parse"),
+    pytest.param(blockscout_error_quoting, RuntimeError, id="blockscout"),
+]
+
+
+@pytest.mark.parametrize("url", PARAMS)
+@pytest.mark.parametrize(("fail", "error"), CUT_ERRORS)
+def test_a_key_across_the_detail_cut_leaves_no_usable_prefix(fail, error, url):
+    # The step is shorter than the key, so one of these puts the key across the cut.
+    for padding in range(DETAIL_LIMIT - 600, DETAIL_LIMIT, 40):
+        with pytest.raises(error) as raised:
+            fail(url, "z" * padding + KEY)
+
+        assert not any(prefix in str(raised.value) for prefix in shown(KEY))
+
+
+@pytest.mark.parametrize(("fail", "error"), CUT_ERRORS)
+def test_a_provider_error_is_cut_at_the_detail_limit(fail, error):
+    with pytest.raises(error) as raised:
+        fail(URLS[0], "z" * (DETAIL_LIMIT * 2))
+
+    assert len(str(raised.value)) == DETAIL_LIMIT
 
 
 def test_a_bad_port_in_a_blockscout_url_is_clean_for_transaction_logs(caplog):
@@ -446,6 +514,13 @@ COMPOSITE = [
     pytest.param(f"http://rpc.provider.invalid/v2?a=1;apikey={KEY}", id="query-semicolon"),
     pytest.param(f"http://rpc.provider.invalid/v2#token={KEY}", id="fragment-assignment"),
     pytest.param(f"http://rpc.provider.invalid/v2/chain,{KEY}", id="path-comma"),
+    pytest.param(f"http://rpc.provider.invalid/v2/token:{KEY}", id="path-colon"),
+    pytest.param(f"http://rpc.provider.invalid/v2/tok|{KEY}", id="path-pipe"),
+    pytest.param(f"http://rpc.provider.invalid/v2/tok%7C{KEY}", id="path-encoded-pipe"),
+    pytest.param(f"http://rpc.provider.invalid/v2?auth=tok:{KEY}", id="query-colon"),
+    pytest.param(f"http://rpc.provider.invalid/v2?auth=tok|{KEY}", id="query-pipe"),
+    pytest.param(f"http://user:tok:{KEY}@rpc.provider.invalid/v2", id="password-colon"),
+    pytest.param(f"http://user:tok|{KEY}@rpc.provider.invalid/v2", id="password-pipe"),
 ]
 
 
@@ -532,6 +607,44 @@ def test_scrub_hides_a_part_of_exactly_eight_characters_and_not_seven():
 
     assert "Ab3dEf7h" not in scrubbed(url, "Ab3dEf7h")
     assert "Ab3dEf7" in scrubbed(url, "Ab3dEf7")
+
+
+@pytest.mark.parametrize("separator", [":", "|"])
+def test_a_colon_or_pipe_piece_keeps_the_eight_character_floor(separator):
+    url = f"http://rpc.provider.invalid/v2/token{separator}Ab3dEf7h/token{separator}Ab3dEf7"
+
+    assert "Ab3dEf7h" not in scrubbed(url, "Ab3dEf7h")
+    assert "Ab3dEf7" in scrubbed(url, "Ab3dEf7")
+    assert "token" in scrubbed(url, "token")
+
+
+@pytest.mark.parametrize(
+    ("url", "whole", "piece"),
+    [
+        pytest.param(
+            "http://base-ethereum.provider.invalid/v2",
+            "base-ethereum",
+            "ethereum",
+            id="hyphenated-host",
+        ),
+        pytest.param(
+            "http://rpc.provider.invalid/v2/123e4567-e89b-12d3-a456-426614174000",
+            "123e4567-e89b-12d3-a456-426614174000",
+            "426614174000",
+            id="uuid-key",
+        ),
+        # The recorded limit: a bare key echoed from "tok_KEY" or "key-KEY" survives.
+        pytest.param(
+            "http://rpc.provider.invalid/v2/tok_Ab3dEf7hIj",
+            "tok_Ab3dEf7hIj",
+            "Ab3dEf7hIj",
+            id="underscore-limit",
+        ),
+    ],
+)
+def test_scrub_hides_hyphen_and_underscore_parts_whole_but_does_not_split_them(url, whole, piece):
+    assert whole not in scrubbed(url, whole)
+    assert piece in scrubbed(url, piece)
 
 
 def test_a_failing_sync_through_the_cli_never_shows_the_key(monkeypatch, tmp_path, capsys, caplog):
