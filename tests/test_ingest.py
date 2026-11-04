@@ -2,9 +2,11 @@ from collections.abc import Iterator
 
 import pytest
 from conftest import ALICE, BOB, FakeRpc, make_chain, rows
+from ousd.chains import load_chains
 from ousd.decode import ZERO_ADDRESS, Transfer
 from ousd.ingest import ReorgError, sync_chain
 from ousd.sources import BlockscoutClient
+from ousd.store import StoreConflict
 
 
 class FakeHistory(BlockscoutClient):
@@ -328,3 +330,63 @@ def test_node_behind_every_stored_block_does_not_advise_a_rebuild(store):
         sync_chain(chain, rpc, store)
     assert "fresh database" not in str(failure.value)
     assert rows(store) == before
+
+
+def test_a_shifted_log_index_stops_the_sync_and_stores_nothing_new(store, monkeypatch):
+    chain = make_chain()
+    rpc = FakeRpc(tip=120)
+    rpc.add_transfer(118, 1)
+    sync_chain(chain, rpc, store)
+    before = rows(store)
+    real_transfers = rpc.transfers
+
+    def shifted(token, low, high):
+        found = real_transfers(token, low, high)
+        return [Transfer(**{**t.__dict__, "log_index": t.log_index + 1}) for t in found]
+
+    monkeypatch.setattr(rpc, "transfers", shifted)
+    rpc.extend(125)
+
+    with pytest.raises(StoreConflict, match="index scheme has changed"):
+        sync_chain(chain, rpc, store)
+
+    assert rows(store) == before
+    assert store.synced_through("testnet") == 120
+
+
+def test_ethereum_keeps_a_daily_top_up_on_rpc():
+    assert load_chains({})["ethereum"].rpc_tail_blocks == 9_000
+
+
+def behind_start(tip, behind):
+    return tip - behind + 1 - 5  # The cursor, less the 5 block lookback.
+
+
+@pytest.mark.parametrize(("behind", "history_calls"), [(7_200, 0), (10_000, 1)])
+def test_a_top_up_within_the_tail_makes_no_history_call(store, behind, history_calls):
+    chain = make_chain(rpc_tail_blocks=9_000, max_log_range=1_000)
+    rpc = FakeRpc(tip=20_000)
+    store.write_range("testnet", [], {}, 20_000 - behind)
+    history = FakeHistory([])
+
+    sync_chain(chain, rpc, store, history)
+
+    assert len(history.ranges) == history_calls
+    if history_calls:
+        assert history.ranges == [(behind_start(20_000, behind), 11_000)]
+
+
+def test_a_shifted_log_index_from_the_history_source_stops_the_sync(store):
+    chain = make_chain(rpc_tail_blocks=10)
+    rpc = FakeRpc(tip=150)
+    row = Transfer(120, None, 1_120, "0xabc", 0, ALICE, BOB, 1)
+    sync_chain(chain, rpc, store, FakeHistory([row]))
+    before = rows(store)
+    store.write_range("testnet", [], {}, 119)  # Back the cursor up so history is read again.
+
+    shifted = Transfer(**{**row.__dict__, "log_index": 1})
+    with pytest.raises(StoreConflict, match="index scheme has changed"):
+        sync_chain(chain, rpc, store, FakeHistory([shifted]))
+
+    assert rows(store) == before
+    assert store.synced_through("testnet") == 119

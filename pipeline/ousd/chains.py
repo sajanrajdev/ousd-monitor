@@ -58,7 +58,9 @@ def load_chains(env: Mapping[str, str] = os.environ) -> dict[str, Chain]:
             # Finality lags about 76 blocks. Sync widens this if finality stalls.
             reorg_lookback=128,
             blockscout_url=env.get("ETHEREUM_BLOCKSCOUT_URL", "https://eth.blockscout.com/api"),
-            rpc_tail_blocks=2_000,
+            # A daily top-up is about 7,200 blocks. Keep it on RPC, which serves up to about
+            # 10,000 blocks of logs, rather than on Blockscout, which lags the tip.
+            rpc_tail_blocks=9_000,
         ),
     )
     return {chain.name: chain for chain in chains}
