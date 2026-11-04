@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "error": {
+    "code": -32016,
+    "message": "Minimum context slot has not been reached",
+    "data": {
+      "contextSlot": 465170751
+    }
+  },
+  "id": 1
+}

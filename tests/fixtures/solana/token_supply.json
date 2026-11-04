@@ -1,0 +1,12 @@
+{
+  "context": {
+    "apiVersion": "4.4.0",
+    "slot": 465170684
+  },
+  "value": {
+    "amount": "79686600186640",
+    "decimals": 6,
+    "uiAmount": 79686600.18664,
+    "uiAmountString": "79686600.18664"
+  }
+}
