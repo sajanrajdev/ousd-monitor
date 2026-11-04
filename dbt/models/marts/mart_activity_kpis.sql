@@ -14,9 +14,13 @@ rolled as (
         sum(headline_value) over w as headline_7d,
         sum(clean_large + clean_everyday) over w as clean_7d,
         sum(clean_everyday) over w as clean_everyday_7d,
-        count(*) over w as days_in_window
+        day_utc - min(day_utc) over (partition by chain) >= 6 as has_full_window
     from {{ ref('mart_activity_waterfall') }}
-    window w as (partition by chain order by day_utc rows between 6 preceding and current row)
+    -- A calendar range, so a day with no transfers counts as a day with no volume.
+    window w as (
+        partition by chain order by day_utc
+        range between interval 6 days preceding and current row
+    )
 ),
 
 senders as (
@@ -62,17 +66,17 @@ select
     cast(r.clean_everyday_7d as hugeint) as clean_everyday_7d,
     case
         when
-            r.days_in_window = 7 and j.circulating_supply > 0
+            r.has_full_window and j.circulating_supply > 0
             then cast(r.clean_7d * 10000 // (7 * j.circulating_supply) as integer)
     end as velocity_bps,
     case
         when
-            r.days_in_window = 7 and j.circulating_supply > 0
+            r.has_full_window and j.circulating_supply > 0
             then cast(r.clean_everyday_7d * 10000 // (7 * j.circulating_supply) as integer)
     end as velocity_everyday_bps,
     case
         when
-            r.days_in_window = 7 and j.total_supply > 0
+            r.has_full_window and j.total_supply > 0
             then cast(r.headline_7d * 10000 // (7 * j.total_supply) as integer)
     end as headline_velocity_bps,
     coalesce(a.active_wallets_7d, 0) as active_wallets_7d,

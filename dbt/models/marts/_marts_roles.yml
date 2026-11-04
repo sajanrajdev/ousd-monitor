@@ -1,0 +1,28 @@
+version: 2
+models:
+  - name: mart_chain_roles
+    description: >
+      One row per chain at its own latest complete day (`as_of_day`). Shares are integer basis
+      points from floor division, so they sum to at most 10000.
+    columns:
+      - name: chain
+        data_tests: [not_null, unique]
+      - name: as_of_day
+        data_tests: [not_null]
+      - name: total_supply
+        data_tests: [not_null]
+  - name: mart_reconciliation
+    description: >
+      The newest recorded result per chain and the newest Bridge comparison, beside the newest
+      finished run. A Bridge row says which run it belongs to (`run_id`) and whether that is
+      the latest run (`in_latest_run`); a chain row has neither, as `reconciliations` records
+      no run.
+    columns:
+      - name: kind
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [chain, bridge]
+      - name: subject
+        data_tests: [not_null]
