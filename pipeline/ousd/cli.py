@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import sys
+from collections.abc import Sequence
 
 from ousd.chains import (
     DECIMALS,
@@ -16,10 +17,22 @@ from ousd.chains import (
 from ousd.http import PoliteClient
 from ousd.ingest import sync_chain
 from ousd.reconcile import ChainReconciliation, compare_with_bridge, reconcile_chain
+from ousd.solana import (
+    RPC_INTERVAL,
+    BalanceCheck,
+    SolanaChain,
+    SolanaRpc,
+    Unchecked,
+    check_all_balances,
+    load_solana,
+    reconcile_solana,
+    sync_solana,
+)
 from ousd.sources import BlockscoutClient, RpcClient, bridge_total_base_units
-from ousd.store import Store
+from ousd.store import Store, StoreConflict
 
 BLOCKSCOUT_INTERVAL = 0.25
+MAX_SHOWN_DIFFERENCES = 10
 
 
 def format_units(base_units: int) -> str:
@@ -34,8 +47,20 @@ def _rpc_for(chain: Chain) -> RpcClient:
     return RpcClient(http, chain.rpc_url)
 
 
-def _sync(chains: list[Chain], store: Store) -> int:
+def _solana_rpc(chain: SolanaChain) -> SolanaRpc:
+    http = PoliteClient(label=f"{chain.name}-rpc", min_interval=RPC_INTERVAL)
+    return SolanaRpc(http, chain.rpc_url)
+
+
+def _sync(chains: Sequence[Chain | SolanaChain], store: Store) -> int:
     for chain in chains:
+        if isinstance(chain, SolanaChain):
+            solana = sync_solana(chain, _solana_rpc(chain), store)
+            print(
+                f"{solana.chain}: synced to slot {solana.tip}, "
+                f"{solana.transfers_stored} transfers stored"
+            )
+            continue
         history = None
         if chain.blockscout_url:
             http = PoliteClient(label=f"{chain.name}-blockscout", min_interval=BLOCKSCOUT_INTERVAL)
@@ -59,12 +84,54 @@ def _print_reconciliation(result: ChainReconciliation) -> None:
     print(f"  difference     {format_units(result.difference)} ({result.difference} base units)")
 
 
-def _reconcile(chains: list[Chain], store: Store, at_block: int | None) -> int:
+def _print_unchecked(result: Unchecked) -> None:
+    print(f"{result.chain}: UNCHECKED: {result.reason}")
+
+
+def _print_solana_balances(check: BalanceCheck | Unchecked) -> bool:
+    if isinstance(check, Unchecked):
+        _print_unchecked(check)
+        return False
+    verdict = "MATCH" if check.matched else "MISMATCH"
+    print(
+        f"{check.chain} balances at slot {check.slot}: {verdict} ({check.wallets_checked} wallets)"
+    )
+    for difference in check.differences[:MAX_SHOWN_DIFFERENCES]:
+        print(
+            f"  {difference.owner}  on-chain {format_units(difference.onchain)}"
+            f"  stored {format_units(difference.stored)}"
+        )
+    if len(check.differences) > MAX_SHOWN_DIFFERENCES:
+        print(f"  ... {len(check.differences)} wallets differ in all")
+    return check.matched
+
+
+def _reconcile_solana(chain: SolanaChain, store: Store) -> tuple[ChainReconciliation | None, bool]:
+    rpc = _solana_rpc(chain)
+    # Balances first, so the supply row is the one left at the cursor.
+    balances_ok = _print_solana_balances(check_all_balances(chain, rpc, store))
+    supply = reconcile_solana(chain, rpc, store)
+    if isinstance(supply, Unchecked):
+        _print_unchecked(supply)
+        return None, False
+    _print_reconciliation(supply)
+    return supply, balances_ok and supply.matched
+
+
+def _reconcile(chains: Sequence[Chain | SolanaChain], store: Store, at_block: int | None) -> int:
     results = []
+    all_ok = True
     for chain in chains:
         # Print as we go, so one chain's failure doesn't hide what the others found.
+        if isinstance(chain, SolanaChain):
+            solana, ok = _reconcile_solana(chain, store)
+            all_ok &= ok
+            if solana is not None:
+                results.append(solana)
+            continue
         results.append(reconcile_chain(chain, _rpc_for(chain), store, at_block))
         _print_reconciliation(results[-1])
+        all_ok &= results[-1].matched
 
     if at_block is None:
         url = os.environ.get("BRIDGE_API_URL", DEFAULT_BRIDGE_URL)
@@ -79,7 +146,7 @@ def _reconcile(chains: list[Chain], store: Store, at_block: int | None) -> int:
         print(f"  Bridge total     {format_units(comparison.bridge_total)}")
         print(f"  difference       {format_units(comparison.difference)}")
 
-    return 0 if all(result.matched for result in results) else 1
+    return 0 if all_ok else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -97,7 +164,9 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    available = load_chains()
+    # Solana first: its sync is the slowest, and Ethereum's state must still be recent when
+    # reconcile reads it.
+    available: dict[str, Chain | SolanaChain] = {"solana": load_solana(), **load_chains()}
     unknown = set(args.chain or []) - set(available)
     if unknown:
         parser.error(f"unknown chain: {', '.join(sorted(unknown))}")
@@ -105,6 +174,12 @@ def main(argv: list[str] | None = None) -> int:
     # Block numbers mean nothing across chains.
     if args.command == "reconcile" and args.at_block is not None and len(chains) != 1:
         parser.error("--at-block needs exactly one --chain")
+    if (
+        args.command == "reconcile"
+        and args.at_block is not None
+        and isinstance(chains[0], SolanaChain)
+    ):
+        parser.error("--at-block is not available for solana: getTokenSupply has no past-slot read")
     missing = missing_rpc_keys([chain.name for chain in chains], os.environ)
     if missing:
         parser.error(f"set {', '.join(missing)} in .env, or limit the run with --chain")
@@ -114,6 +189,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "sync":
             return _sync(chains, store)
         return _reconcile(chains, store, args.at_block)
+    except StoreConflict as conflict:
+        # Proven disagreement with stored rows: stop, never pass.
+        print(f"error: {conflict}", file=sys.stderr)
+        return 1
     finally:
         store.close()
 

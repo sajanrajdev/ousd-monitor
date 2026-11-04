@@ -4,23 +4,23 @@ An independent dashboard asking one question: is Open USD (OUSD) supply turning 
 
 Not affiliated with Open Standard, Bridge or any partner. Not financial advice, and not a reserve attestation.
 
-**Status:** the data pipeline's first slice works for Tempo, Ethereum and Base. Solana and the dashboard are not built. See [the PRD](docs/PRD.md), [the plan](docs/implementation-plan.md), [the design system](docs/design-system.md) and [the build log](docs/build-log.md).
+**Status:** the data pipeline's first slice works for Tempo, Ethereum, Base and Solana. The dashboard is not built. See [the PRD](docs/PRD.md), [the plan](docs/implementation-plan.md), [the design system](docs/design-system.md) and [the build log](docs/build-log.md).
 
 ## Run the pipeline
 
 You need [uv](https://docs.astral.sh/uv/). It installs Python 3.12 and the dependencies.
 
 ```sh
-make check       # lint and tests, with no chain access
+make check       # lint, types and tests, with no chain access
 make sync        # ingest transfers to the tip, repairing any reorg
 make reconcile   # compare events with totalSupply(), then with Bridge
 ```
 
-`make reconcile` exits non-zero if any chain it checked differs by even one base unit. Exit 0 says only that: the Bridge comparison is printed and does not affect the exit code, and Solana is not checked yet. Run it straight after `make sync`, because public Ethereum nodes only serve about 100 blocks of past state.
+`make reconcile` exits non-zero if any chain it checked differs by even one base unit. Exit 0 says only that: the Bridge comparison is printed and does not affect the exit code. On Solana it checks every wallet's balance and the supply, and a check that could not run prints `UNCHECKED` and exits non-zero. Run it straight after `make sync`, because public Ethereum nodes only serve about 100 blocks of past state.
 
 The first Ethereum sync can take hours. Blockscout's free tier allows few requests per window, and the client waits each window out, logging every pause of 5 seconds or more. An interrupted sync resumes from where it stopped.
 
-Data goes to `data/ousd.duckdb`, which git ignores. Tempo and Ethereum settings are optional and have a public default. Base has no public endpoint, so `make sync` and `make reconcile` need `BASE_RPC_URL`. For public chains alone, run `uv run --locked ousd --chain tempo --chain ethereum sync`, and the same for `reconcile`. Solana is still pending. To use your own provider, copy `.env.example` to `.env`.
+Data goes to `data/ousd.duckdb`, which git ignores. Tempo and Ethereum settings are optional and have a public default. Base and Solana have no public endpoint, so `make sync` and `make reconcile` need `BASE_RPC_URL` and `SOLANA_RPC_URL`. `SOLANA_RPC_URL` is a Solana mainnet RPC URL, key included, and a devnet URL is refused. Solana reads only finalized data, runs first when no `--chain` is given, and does not support `reconcile --at-block`. For public chains alone, run `uv run --locked ousd --chain tempo --chain ethereum sync`, and the same for `reconcile`. To use your own provider, copy `.env.example` to `.env`.
 
 ## How it works
 
