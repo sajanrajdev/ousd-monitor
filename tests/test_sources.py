@@ -6,7 +6,7 @@ import httpx
 import pytest
 from conftest import ALICE, BOB, FakeRpc
 from ousd.decode import TRANSFER_TOPIC, ZERO_ADDRESS
-from ousd.http import PoliteClient
+from ousd.http import HttpError, PoliteClient
 from ousd.sources import (
     BLOCKSCOUT_PAGE_SIZE,
     BlockscoutClient,
@@ -379,6 +379,7 @@ def test_transaction_logs_parses_the_fixture_to_the_ousd_positions():
 
     proof = serving_pages([blockscout_logs()], seen).transaction_logs(TX, OUSD)
 
+    assert proof is not None
     assert proof.tx_hash == TX
     assert proof.block_number == 26330904
     assert proof.success is None
@@ -398,6 +399,7 @@ def test_transaction_logs_matches_the_receipt():
     from_scout = serving_pages([blockscout_logs()]).transaction_logs(TX, OUSD)
 
     assert from_receipt is not None
+    assert from_scout is not None
     assert from_scout.transfers == from_receipt.transfers
     assert from_scout.block_number == from_receipt.block_number
 
@@ -413,6 +415,7 @@ def test_transaction_logs_follows_a_second_page():
 
     proof = serving_pages([first, second], seen).transaction_logs(TX, OUSD)
 
+    assert proof is not None
     assert [t.log_index for t in proof.transfers] == OUSD_POSITIONS
     assert seen[1].params["index"] == "178"
     assert seen[1].params["apikey"] == "SECRETKEY"
@@ -424,7 +427,10 @@ def test_transaction_logs_excludes_another_contracts_logs():
         if item["address"]["hash"].lower() == OUSD:
             item["address"] = dict(item["address"], hash=ORIGIN_DOLLAR)
 
-    assert serving_pages([page]).transaction_logs(TX, OUSD).transfers == []
+    proof = serving_pages([page]).transaction_logs(TX, OUSD)
+
+    assert proof is not None
+    assert proof.transfers == []
 
 
 def test_transaction_logs_malformed_hash_raises_before_any_request():
@@ -555,9 +561,75 @@ def test_fake_rpc_balances_agree_with_its_own_transfers():
         rpc.block_timestamp(99)
 
 
-def test_transaction_logs_with_no_logs_raises():
-    with pytest.raises(ValueError, match="no logs"):
-        serving_pages([{"items": [], "next_page_params": None}]).transaction_logs(TX, OUSD)
+def test_transaction_logs_with_no_logs_is_none():
+    page: dict = {"items": [], "next_page_params": None}
+
+    assert serving_pages([page]).transaction_logs(TX, OUSD) is None
+
+
+def answering(*responses: httpx.Response) -> BlockscoutClient:
+    remaining = iter(responses)
+    return BlockscoutClient(
+        http_with(lambda request: next(remaining)), "https://scout.invalid/api?apikey=SECRETKEY"
+    )
+
+
+def test_transaction_logs_for_a_transaction_blockscout_doesnt_know_is_none():
+    client = answering(httpx.Response(404, json={"message": "Not found"}))
+
+    assert client.transaction_logs(TX, OUSD) is None
+
+
+def test_transaction_logs_404_on_a_later_page_is_a_broken_read_and_raises():
+    page = dict(blockscout_logs(), next_page_params={"index": 1})
+    client = answering(httpx.Response(200, json=page), httpx.Response(404, text="gone"))
+
+    with pytest.raises(HttpError, match="HTTP 404"):
+        client.transaction_logs(TX, OUSD)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(403, text="forbidden"),
+        # A body can say anything, so only the status PoliteClient reports counts.
+        httpx.Response(403, text="rpc: HTTP 404: not found"),
+        httpx.Response(410, text="HTTP 404:"),
+    ],
+    ids=["refused", "refused-quoting-404", "gone-quoting-404"],
+)
+def test_transaction_logs_any_other_refusal_stays_an_outage(response):
+    with pytest.raises(HttpError):
+        answering(response).transaction_logs(TX, OUSD)
+
+
+def test_transaction_logs_server_error_after_retries_stays_an_outage():
+    client = BlockscoutClient(
+        PoliteClient(
+            min_interval=0,
+            transport=httpx.MockTransport(lambda request: httpx.Response(503)),
+            sleep=lambda _: None,
+        ),
+        "https://scout.invalid/api",
+    )
+
+    with pytest.raises(HttpError, match="gave up"):
+        client.transaction_logs(TX, OUSD)
+
+
+def test_transaction_logs_timeout_after_retries_stays_an_outage():
+    def times_out(request):
+        raise httpx.ConnectTimeout("timed out", request=request)
+
+    client = BlockscoutClient(
+        PoliteClient(
+            min_interval=0, transport=httpx.MockTransport(times_out), sleep=lambda _: None
+        ),
+        "https://scout.invalid/api",
+    )
+
+    with pytest.raises(HttpError, match="gave up"):
+        client.transaction_logs(TX, OUSD)
 
 
 def test_transaction_logs_naming_two_blocks_raises():

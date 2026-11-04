@@ -186,7 +186,7 @@ A new `same_looking` check runs per chain, through the final pin, on every attem
 | Chain | Proof, in order | Recorded as |
 |---|---|---|
 | Tempo, Base | `eth_getTransactionReceipt` | `receipt` |
-| Ethereum | The receipt, then Blockscout's per-transaction logs if the node returns null, since it does beyond about 15,000 to 50,000 blocks | `receipt`, `blockscout` |
+| Ethereum | The receipt, then Blockscout's per-transaction logs if the node returns null, since it does beyond about 15,000 to 50,000 blocks, or a JSON-RPC error | `receipt`, `blockscout` |
 | Solana | `rpc.transaction(signature)` and `decode_transaction` from unit 1.3 | `transaction` |
 
 A proof must be for the transaction asked about, in the stored block. If it isn't, it counts as unavailable.
@@ -378,7 +378,7 @@ In `chains.py`, Ethereum's `rpc_tail_blocks` goes from 2,000 to 9,000, with a co
 - `run_reconciliation(probes, store, report, ...)` starts a run, loops chains, records every check, finishes the run, and returns a `RunResult`. `report` is called with each outcome as it happens, and at each Bridge wait, so a long run isn't silent. The sleep and clock are parameters. Any of `REQUIRED_CHAINS` with no probe is `unchecked`, reason `not_configured`.
 - Around one chain, it catches only `ChainUnavailable` and `StoreConflict`. A programming error still raises, and the probes map source errors, so the catch stays narrow.
 - `reconcile_chain` keeps its signature and return, as units 1.2 and 1.3 rely on it, except that it fetches a missing hash with `rpc.block(number)`, falling back to the number if the block is missing.
-- `check_at_block(chain, rpc, store, block)` is the `--at-block` path. It reads like `reconcile_chain` with no write to `reconciliations` and no run row, and returns a `CheckOutcome`: nothing synced, a block above the cursor, or a source error is `unchecked`, and a difference is `fail`. So `reconcile_chain` gains a `record` flag defaulting to true.
+- `check_at_block(chain, rpc, store, block)` is the `--at-block` path. It reads like `reconcile_chain` with no write to `reconciliations` and no run row, and returns a `CheckOutcome`: nothing synced, a block above the cursor, or a source error is `unchecked`, and a difference is `fail`. **Override:** `reconcile_chain` has no `record` flag. `check_at_block` shares `_read_supply` with it and never calls it, so the flag wasn't needed.
 - `compare_with_bridge` stays for the informational print in partial runs.
 - **Mismatch path:** as in "Run order". Two `chain_supply` rows, attempts 1 and 2, with the final status from the second.
 
@@ -487,15 +487,23 @@ In `chains.py`, Ethereum's `rpc_tail_blocks` goes from 2,000 to 9,000, with a co
 **Schema and migration:** none.
 
 **Approach:**
-- `EvmProbe(chain, rpc, store, history)`: `supply_check` runs `sync_chain`, then `reconcile_chain`. **All source-error mapping is here:** `HttpError`, `RpcError`, `ReorgError`, `RuntimeError` and `ValueError` around the sync become `ChainUnavailable("sync_failed")`, and around the read `ChainUnavailable("state_unavailable")`. `StoreConflict` is checked first and passes through. `read_balances` reads `balance_of` at the stored hash. `read_transaction_proof` uses the receipt, then Blockscout if configured. A `None` cursor raises `ChainUnavailable("not_synced")` before any sync, so reconcile never backfills. `needs_census` is true when `blockscout_url` is set.
-- `SolanaProbe(chain, rpc, store)`: `supply_check` calls `reconcile_solana`, `read_balances` calls `read_sampled_balances`, and `read_transaction_proof` calls `rpc.transaction` and `decode_transaction`, marking status from the transaction's error field. `SolanaRpcError`, `SolanaDataError` and `HttpError` become `ChainUnavailable`, or `None` for a proof. It checks the cursor first, so a code rather than free text reaches the runbook. `needs_census` is false.
+- `EvmProbe(chain, rpc, store, history)`: `supply_check` runs `sync_chain`, then `reconcile_chain`. **All source-error mapping is here:** `HttpError`, `RpcError`, `ReorgError`, `RuntimeError` and `ValueError` around the sync become `ChainUnavailable("sync_failed")`, and around the read `ChainUnavailable("state_unavailable")`. `StoreConflict` is checked first and passes through. `read_balances` reads `balance_of` at the stored hash. `read_transaction_proof` uses the receipt, then Blockscout if configured, when the receipt is null or the node answers with a JSON-RPC error, since either means that source has no answer. An `HttpError` or a malformed reply is an outage and raises `ChainUnavailable`. `transaction_logs` returns `None` for a 404 on its first page or for no logs at all, so one transaction Blockscout doesn't know can't hide a group that isn't real behind it. A `None` cursor raises `ChainUnavailable("not_synced")` before any sync, so reconcile never backfills. `needs_census` is true when `blockscout_url` is set.
+- `SolanaProbe(chain, rpc, store)`: `supply_check` calls `reconcile_solana`, `read_balances` calls `read_sampled_balances`, and `read_transaction_proof` calls `rpc.transaction` and `decode_transaction`, marking status from the transaction's error field. `SolanaRpcError`, `SolanaDataError` and `HttpError` become `ChainUnavailable`. **Override:** a proof outage raises too, where this plan first said `None`, so a run stops asking a source that is down. `None` means only that no source has the transaction. `needs_census` is false.
+- **Solana's fixed codes:** provider text is never stored, as "How results are recorded" says, so an `Unchecked` doesn't reach the run as text. `SolanaProbe` raises `ChainUnavailable` with a code, and logs the scrubbed text with `log.warning`, so the operator still sees "run sync first". The solana.py cursor check comes first, so nothing is asked of the node without a cursor.
+
+  | Condition | Code | `detail` |
+  |---|---|---|
+  | No cursor, or a tail too long for a check to sync | `not_synced` | Empty |
+  | A supply pin stuck below the cursor, or a stale balance read | `pin_behind_cursor` | Empty |
+  | A provider or data failure | `source_error` | The error's class name |
+
 - `build_probes(chains: Sequence[Chain | SolanaChain], store)` is the only place that branches on `SolanaChain`. `BLOCKSCOUT_INTERVAL` and the client builders move here from `cli.py`, and `cli._sync` imports them, so there is one copy of each and no import cycle.
 
 **Test scenarios:**
 - `EvmProbe`, over `FakeRpc`: order is sync then read, and the read uses the synced block's hash. No cursor raises `not_synced` with no sync call. A balance is read at the pinned hash.
 - **Error mapping:** a bare `RuntimeError` or `HttpError` in the sync gives `sync_failed`. A 403 or `RpcError` on the supply read gives `state_unavailable`, not a mismatch. `StoreConflict` isn't mapped. A `KeyError` isn't mapped.
-- `read_transaction_proof`: receipt used when present, and no Blockscout call. Null receipt falls to Blockscout. Null with no Blockscout configured returns `None`.
-- `SolanaProbe`, over a fake with unit 1.3's surface: passes results through. `Unchecked` passes through. `read_balances` maps `BalanceReading` to `(address, height, amount)`. A proof from a failed transaction isn't success. A null transaction gives `None`. A `getBlockTime` error gives `ChainUnavailable`.
+- `read_transaction_proof`: receipt used when present, and no Blockscout call. A null receipt or a JSON-RPC error falls to Blockscout, including a reply with a next page. Either with no Blockscout configured returns `None`. A first transaction Blockscout doesn't know leaves the next one asked, so one that isn't real still fails the run.
+- `SolanaProbe`, over a fake with unit 1.3's surface: passes results through. Each `Unchecked` is recorded with the code in the table above, and its text is logged and never stored. `read_balances` maps `BalanceReading` to `(address, height, amount)`. A proof from a failed transaction isn't success. A null transaction gives `None`. A `getBlockTime` error gives `ChainUnavailable`.
 - `build_probes`: a key in the URL never appears in `repr` or a label. The token and mint come from config, so a read can't target the Origin Dollar contract.
 
 **Verification:** `reconcile.py` still imports neither `solana.py` nor `probes.py`, checked in a test on its source.
@@ -646,7 +654,7 @@ Checked against `dev` at `eb7b878` and the unmerged drafts of the 1.2 and 1.3 pl
 
 - Once U8 lands, `ousd --chain base reconcile` and `ousd --chain solana reconcile` that match **exit 3, not 0**, and print `MATCH`. Their real-run steps come before this lands. If they run after, they should read the printed line and the 3.
 - An unsynced chain is `unchecked`, exit 3, and no longer raises `RuntimeError`. Unit 1.2 asked that this not become a pass, and it doesn't.
-- `reconcile_chain` keeps its positional signature, adding an optional `record` flag. `--at-block` stops writing `reconciliations`.
+- `reconcile_chain` keeps its positional signature, with no `record` flag, as U4's override says. `--at-block` goes through `check_at_block`, which doesn't write `reconciliations`.
 - `Unchecked` is defined in `reconcile.py` from U4. 1.3's own stays in `solana.py` until U7 replaces it, and nothing consumes either until U8.
 - A tip mismatch reruns once after a resync. That answers the question unit 1.2 left open.
 
