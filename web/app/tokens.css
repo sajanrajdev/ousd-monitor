@@ -1,0 +1,63 @@
+/* Every token in docs/design-system.md, and nothing else. Add a token there first. */
+@theme static {
+  --color-maroon: #390922;
+  --color-maroon-dark: #250013;
+  --color-maroon-light: #e0d3cc;
+  --color-off-white: #f3e9e3;
+  --color-secondary: color-mix(in srgb, var(--color-maroon) 5%, transparent);
+  --color-secondary-strong: color-mix(in srgb, var(--color-maroon) 10%, transparent);
+  --color-border: #3909222e;
+  --color-subdued: color-mix(in oklch, var(--color-maroon), var(--color-off-white));
+
+  --surface-card: #f7f2ee;
+  --surface-inverse: #390922;
+
+  --color-body-text: var(--color-maroon-dark);
+  --color-meta-text: var(--ramp-2);
+  --color-banner-bg: var(--color-maroon-dark);
+  --color-banner-text: var(--color-off-white);
+
+  --ramp-1: #390922;
+  --ramp-2: #7a4a62;
+  --ramp-3: #a97f92;
+  --ramp-4: #cdb3bc;
+
+  --meaning-active: #390922;
+  --meaning-circulating: #7a4a62;
+  --meaning-idle: #cdb3bc;
+  --meaning-removed: #a97f92;
+  --meaning-positive: #2f6b4f;
+  --meaning-negative: #a23b3b;
+
+  --font-display: "Newsreader Variable", Georgia, serif;
+  --font-sans: "Inter Variable", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  --text-display: clamp(2.5rem, 5vw, 4rem);
+  --text-h2: clamp(1.5rem, 2.5vw, 2rem);
+  --text-kpi: clamp(1.75rem, 3vw, 2.25rem);
+  --text-body: clamp(1rem, 0.95rem + 0.25vw, 1.125rem);
+  --text-small: 0.875rem;
+  --text-meta: 0.75rem;
+
+  --width-reflow: 320px;
+  --width-phone: 390px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1056px;
+  --breakpoint-xl: 1440px;
+
+  --page-max-width: 1440px;
+  --page-content-width: 1056px;
+  --page-margin: clamp(1rem, 4.5vw, 4rem);
+  --section-space: clamp(3.5rem, 4.1vw + 2.5rem, 6.25rem);
+  --header-height: 60px;
+  --header-budget: 88px;
+
+  --radius-control: 4px;
+  --radius-input: 6px;
+  --radius-card: 12px;
+
+  --chart-height-phone: 240px;
+  --chart-height-tablet: 300px;
+  --chart-height-desktop: 340px;
+}
