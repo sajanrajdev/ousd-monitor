@@ -76,6 +76,21 @@ The data supports this for Tempo, and not yet for all chains: Base and Solana we
 
 ## Phase 4: review and release (next)
 
+**Before the review: dashboard refurbish.** On review, the maintainer found the site too wordy and not intuitive. This step turns the main page into a dashboard with legends, keeping every finding visible and changing no number. It comes first because the review should read the page people will see. The plan, with the acceptance checks for each unit, is `docs/plans/2026-11-04-002-dashboard-refurbish-plan.md`.
+
+| Unit | Status |
+|---|---|
+| U1 Shared components: card, info popover, pins and notes, data toggle, chain filter, marker and legend | Not started |
+| U2 First screen, then a maintainer review stop | Not started |
+| U3 Supply views, with the chain filter mounted | Not started |
+| U4 Activity views | Not started |
+| U5 Velocity and chain views | Not started |
+| U6 Acceptance | Not started |
+
+**Done when:** U6's scripted checks pass on a real dataset, and the maintainer has reviewed U2. The headline's final wording is the maintainer's call, and stays open until then.
+
+Then:
+
 1. Trace each public claim to data or a source.
 2. Review the whole codebase.
 3. Fix what those find.
