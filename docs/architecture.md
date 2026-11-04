@@ -21,6 +21,7 @@ Prefer a small system that's clearly correct over a big one that looks impressiv
 | Modeling | dbt with dbt-duckdb | Standard for analytics. Tests and lineage come with it |
 | Orchestration | Dagster assets, with asset checks | Asset model suits data work. Checks can block publishing |
 | Site | Static Next.js with TypeScript, Tailwind and Recharts, on Vercel's free tier | No database calls from visitors |
+| Site packages | pnpm, always through `npx` at the version in `web/package.json`'s `packageManager` | Needs only Node and npm, which CI already has. A bare or Corepack `pnpm` can crash |
 | Quality | ruff, mypy, pytest, sqlfluff, ESLint, Prettier, Vitest | Enforced by `make check` |
 
 **Cost:** designed to run on free tiers.
@@ -36,7 +37,7 @@ pipeline/ousd/      Python package: chains, sources, ingest, store, reconcile, p
 pipeline/dagster/   Dagster definitions, schedules and asset checks
 dbt/                dbt project: staging, intermediate, marts, tests
 labels/             Versioned entity labels, each with source type, source and confidence
-web/                Static site. Reads only from the published dataset
+web/                Static site. Reads the published dataset, its schemas and the methodology doc
 tests/              Python tests. No network, ever
 docs/               PRD, architecture, plans, design system, methodology, build log
 data/               Local DuckDB and published output. Not in git
@@ -132,7 +133,7 @@ Marts map to PRD questions. Definitions are in PRD section 7, and these are the 
 
 ## Site
 
-- Follows `docs/design-system.md`. Reads only from the published dataset.
+- Follows `docs/design-system.md`. Reads the published dataset, plus its schemas and `docs/methodology.md`, at build. Visitors' browsers read nothing else.
 - Every chart has a takeaway sentence, source, as-of time and definition link.
 - Shows "Independent. Not affiliated with Open Standard or Bridge."
 
@@ -152,4 +153,8 @@ Marts map to PRD questions. Definitions are in PRD section 7, and these are the 
 
 ## Commands
 
-`make check` runs lint, types and tests with no network. `make build` builds what's buildable. `make test` runs tests. These are the only commands CI calls.
+`make check` runs lint, types and tests for the Python code, then, once `web/package.json` exists, installs the site's packages and runs Prettier, ESLint, `tsc`, Vitest and a site build. It has no chain access, though a clean install reaches package registries. It's the only command CI calls.
+
+`make build` builds what's buildable and `make test` runs tests. `make web-install` installs the site's packages, and `make web-shots` captures local screenshots and is never part of `make check`.
+
+If Node or npm is missing or out of range, the site's steps fail with a message saying what to install. They never skip, and they never load `.env`.

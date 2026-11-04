@@ -1,0 +1,5 @@
+.shots/
+.build/
+.release/
+next-env.d.ts
+*.tsbuildinfo

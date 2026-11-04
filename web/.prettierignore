@@ -1,0 +1,7 @@
+.next/
+out/
+.build/
+.release/
+.shots/
+next-env.d.ts
+pnpm-lock.yaml
