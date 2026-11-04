@@ -1,16 +1,20 @@
 """The key check: do stored events explain the supply each chain reports?"""
 
+import hashlib
 import itertools
 import math
 import time
-from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass, field
-from typing import NamedTuple, Protocol
+from collections import Counter
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
+from typing import Literal, NamedTuple, Protocol
 
 from ousd.chains import REQUIRED_CHAINS, Chain
+from ousd.decode import ZERO_ADDRESS, Transfer
 from ousd.http import HttpError
-from ousd.sources import BridgeSnapshot, RpcClient, RpcError, TransactionProof
-from ousd.store import Status, Store, StoreConflict
+from ousd.sources import BridgeSnapshot, ProofTransfer, RpcClient, RpcError, TransactionProof
+from ousd.store import BalanceSample, SameLookingGroup, Status, Store, StoreConflict
 
 FULL_SCOPE = "full"
 PARTIAL_SCOPE = "partial"
@@ -39,6 +43,15 @@ BRIDGE_SAME_SNAPSHOT_TRIES = 5
 # Solana reads only finalized blocks, so it stores no block hashes. Store.latest_reconciliation
 # accepts a missing pin hash for these chains and no others.
 CHAINS_WITHOUT_BLOCK_HASHES = frozenset({"solana"})
+# Each sampled balance check reads this many wallets. The top count matches unit 2.8's.
+TOP_WALLETS = 20
+RANDOM_WALLETS = 30
+# One read returns every wallet at one slot, so a sample would save nothing. Blocking check 3 has
+# these chains check every wallet.
+CHAINS_READ_WHOLE = frozenset({"solana"})
+# These chains' group proofs are decoded transactions. Every other chain's are receipts, or
+# Blockscout's listing, the only source that reports no status.
+CHAINS_PROVEN_BY_TRANSACTION = frozenset({"solana"})
 EXIT_CODES: Mapping[Status, int] = {"pass": 0, "fail": 1, "unchecked": 3}
 
 # Every reason a check can record. Provider text is never stored, as a key echoed in an error
@@ -46,6 +59,7 @@ EXIT_CODES: Mapping[Status, int] = {"pass": 0, "fail": 1, "unchecked": 3}
 REASONS = frozenset(
     {
         "above_cursor",
+        "balance_mismatch",
         "bridge_malformed",
         "bridge_mismatch",
         "bridge_same_snapshot",
@@ -56,6 +70,7 @@ REASONS = frozenset(
         "chains_not_passed",
         "coverage_gap",
         "diagnostic_only",
+        "group_not_real",
         "group_proof_unavailable",
         "not_configured",
         "not_synced",
@@ -146,9 +161,17 @@ class ChainProbe(Protocol):
         """Unix seconds of this block or slot. A failed read raises ChainUnavailable."""
         ...
 
-    def read_balances(self, addresses: Sequence[str], height: int) -> list[BalanceRead]: ...
+    def read_balances(self, addresses: Sequence[str], height: int) -> list[BalanceRead] | Unchecked:
+        """Each wallet's balance, at the height each reading reports.
 
-    def read_transaction_proof(self, tx_hash: str) -> TransactionProof | None: ...
+        A chain with no past-state read answers at a height of its own and syncs through it, so
+        this can move the cursor. A read that fails raises ChainUnavailable or returns Unchecked.
+        """
+        ...
+
+    def read_transaction_proof(self, tx_hash: str) -> TransactionProof | None:
+        """The token's Transfer logs in one transaction, or None if no source has it."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -179,6 +202,38 @@ class BridgeFigures:
     snapshot: BridgeSnapshot
     fetched_at: float  # Unix seconds.
     comparison: BridgeComparison
+
+
+@dataclass(frozen=True)
+class BalanceFinding:
+    """A wallet the chain and the model disagree on. Addresses reach only the terminal and the
+    raw tables, so this never goes in a check's detail."""
+
+    chain: str
+    attempt: int
+    address: str
+    height: int
+    model_balance: int
+    observed_balance: int
+
+
+GroupVerdict = Literal["real", "not_real", "unavailable"]
+
+
+@dataclass(frozen=True)
+class GroupFinding:
+    """A transaction someone should look at: not real, unproven, or mixing hashed and unhashed
+    rows, which is the signature of an index mismatch."""
+
+    chain: str
+    tx_hash: str
+    verdict: GroupVerdict
+    stored_positions: tuple[int, ...]
+    proven_positions: tuple[int, ...]
+    mixed_hash: bool
+
+
+Report = Callable[[CheckOutcome | BridgeWait | BridgeFigures | BalanceFinding | GroupFinding], None]
 
 
 @dataclass(frozen=True)
@@ -315,7 +370,7 @@ class _RunRecorder:
         self,
         store: Store,
         run_id: str,
-        report: Callable[[CheckOutcome | BridgeWait | BridgeFigures], None],
+        report: Report,
     ) -> None:
         self._store = store
         self._run_id = run_id
@@ -332,15 +387,18 @@ class _RunRecorder:
         *,
         cause: BaseException | None = None,
         reading: ChainReconciliation | None = None,
+        pin: int | None = None,
         reference: int | None = None,
         observed: int | None = None,
         detail: Mapping[str, object] | None = None,
+        samples: Sequence[BalanceSample] = (),
     ) -> CheckOutcome:
         attempt = self._attempts.get((check_name, subject), 0) + 1
         self._attempts[check_name, subject] = attempt
         fixed = reason if reason is None or reason in REASONS else "source_error"
         # The class name only: an exception's message can hold a URL with a key in it.
         error = {"error": type(cause).__name__} if cause else {}
+        height = reading.block_number if reading else pin
         self._store.record_check(
             self._run_id,
             check_name,
@@ -348,14 +406,13 @@ class _RunRecorder:
             attempt,
             status,
             fixed,
-            pin_height=reading.block_number if reading else None,
-            pin_hash=self._store.block_hashes(subject).get(reading.block_number)
-            if reading
-            else None,
-            transfer_count=self._store.transfer_count(subject) if reading else None,
+            pin_height=height,
+            pin_hash=None if height is None else self._store.block_hashes(subject).get(height),
+            transfer_count=None if height is None else self._store.transfer_count(subject),
             reference_value=reading.onchain_supply if reading else reference,
             observed_value=reading.event_supply if reading else observed,
             detail={**(detail or {}), **error},
+            samples=samples,
         )
         outcome = CheckOutcome(check_name, subject, status, fixed, attempt, reading)
         self.outcomes.append(outcome)
@@ -417,6 +474,395 @@ def _check_census(probe: ChainProbe, store: Store, recorder: _RunRecorder) -> St
     if probe.needs_census and not store.census_complete(probe.name):
         return recorder.record("balance_census", probe.name, "unchecked", "census_missing").status
     return "pass"
+
+
+def sample_seed(chain: str, date: str) -> str:
+    return f"v1|{chain}|{date}"
+
+
+def choose_sample(
+    chain: str, date: str, candidates: Iterable[str], top: Sequence[str], census: bool = False
+) -> dict[str, str]:
+    """The wallets to read, each with its stratum, in the order the strata are listed.
+
+    `candidates` is every address through the pin, and `date` is a UTC date. Ranked by hash, so the
+    same date and rows give the same wallets on any Python, and a new wallet barely changes the
+    rest. A wallet in `top` isn't also drawn, so `random` keeps its full count.
+    """
+    seed = sample_seed(chain, date)
+    eligible = set(candidates) - {ZERO_ADDRESS}
+    chosen = {address: "top" for address in top if address in eligible}
+    ranked = sorted(
+        eligible - chosen.keys(),
+        key=lambda address: hashlib.sha256(f"{seed}|{address}".encode()).hexdigest(),
+    )
+    chosen.update(dict.fromkeys(ranked[:RANDOM_WALLETS], "random"))
+    if census:
+        chosen.update(dict.fromkeys(ranked[RANDOM_WALLETS:], "census"))
+    return chosen
+
+
+@dataclass(frozen=True)
+class _ChainRun:
+    """What the checks on one chain share."""
+
+    probe: ChainProbe
+    store: Store
+    recorder: _RunRecorder
+    report: Report
+    run_id: str
+
+
+@dataclass(frozen=True)
+class _Coverage:
+    """How far a chain's wallets are checked, kept across Bridge retries, which don't read the
+    sample again."""
+
+    seed: str
+    through: int
+    # The block hash at `through`, so a fork below it shows. None on a chain that stores none.
+    through_hash: str | None
+
+
+@dataclass(frozen=True)
+class _WalletRead:
+    status: Status
+    reason: str | None = None
+    # The wallets that differed, with their strata. Non-empty only for a proven difference.
+    mismatched: Mapping[str, str] = field(default_factory=dict)
+    # How far this read covers. Only a pass sets these, and 0 would just mean reading more.
+    covers: int = 0
+    covers_hash: str | None = None
+
+
+def _pin(supply: CheckOutcome) -> int:
+    if supply.reconciliation is None:
+        raise ValueError(f"{supply.subject}: a chain_supply outcome with no reading has no pin")
+    return supply.reconciliation.block_number
+
+
+def _read_wallets(
+    run: _ChainRun, wallets: Mapping[str, str], seed: str, pin: int, kind: str
+) -> _WalletRead:
+    """Compare each wallet with the model at the height its reading reports, and record it."""
+    name = run.probe.name
+
+    def unusable(status: Status, reason: str, cause: BaseException | None = None) -> _WalletRead:
+        run.recorder.record("sampled_balances", name, status, reason, cause=cause, pin=pin)
+        return _WalletRead(status, reason)
+
+    try:
+        reads = run.probe.read_balances(list(wallets), pin)
+    except ChainUnavailable as exc:
+        return unusable("unchecked", exc.reason, exc.__cause__)
+    except StoreConflict as exc:
+        return unusable("fail", "store_conflict", exc)
+    if isinstance(reads, Unchecked):
+        return unusable("unchecked", reads.reason)
+    if not reads or sorted(read.address for read in reads) != sorted(wallets):
+        return unusable("unchecked", "sample_incomplete")
+    # Rows above the cursor aren't stored, so a model at that height would be short of them.
+    cursor = run.store.synced_through(name)
+    if cursor is None or any(read.height > cursor for read in reads):
+        return unusable("unchecked", "above_cursor")
+
+    by_height: dict[int, list[str]] = {}
+    for read in reads:
+        by_height.setdefault(read.height, []).append(read.address)
+    model = {
+        (height, address): balance
+        for height, addresses in by_height.items()
+        for address, balance in run.store.balances_at(name, addresses, height).items()
+    }
+    samples = [
+        BalanceSample(
+            read.address,
+            wallets[read.address],
+            seed,
+            read.height,
+            model[read.height, read.address],
+            read.amount,
+        )
+        for read in reads
+    ]
+    differing = [sample for sample in samples if sample.model_balance != sample.observed_balance]
+    status: Status = "fail" if differing else "pass"
+    outcome = run.recorder.record(
+        "sampled_balances",
+        name,
+        status,
+        "balance_mismatch" if differing else None,
+        pin=pin,
+        # Counts only, as an address must not reach this table.
+        detail={
+            "kind": kind,
+            "seed": seed,
+            "wallets": len(samples),
+            "mismatched": len(differing),
+            "strata": dict(Counter(sample.stratum for sample in samples)),
+            "lowest_height": min(by_height),
+            "highest_height": max(by_height),
+        },
+        samples=samples,
+    )
+    for sample in differing:
+        run.report(
+            BalanceFinding(
+                name,
+                outcome.attempt or 0,
+                sample.address,
+                sample.height,
+                sample.model_balance,
+                sample.observed_balance,
+            )
+        )
+    # No further than the pin, even when the read landed past it. Rows above the pin can hold a
+    # wallet this read wasn't asked about.
+    covers = min(*by_height, pin)
+    return _WalletRead(
+        status,
+        outcome.reason,
+        {sample.address: sample.stratum for sample in differing},
+        covers,
+        # Taken now, so a fork in the resync that a mismatch sets off still shows.
+        run.store.block_hashes(name).get(covers),
+    )
+
+
+def _read_with_retry(
+    run: _ChainRun, wallets: Mapping[str, str], seed: str, supply: CheckOutcome, kind: str
+) -> tuple[_WalletRead, CheckOutcome]:
+    """A mismatch gets one resync, a supply check and a read of only the wallets that differed,
+    as a lagging node heals and a real loss doesn't. Solana's read and sync are one call, so it
+    gets the same."""
+    first = _read_wallets(run, wallets, seed, _pin(supply), kind)
+    if not first.mismatched:
+        return first, supply
+    supply = _check_supply(run.probe, run.store, run.recorder)
+    if supply.status != "pass":
+        return _WalletRead(supply.status, supply.reason), supply
+    second = _read_wallets(run, first.mismatched, seed, _pin(supply), "recheck")
+    # The wallets that matched keep their first reading, so coverage stays with it. With hashes, a
+    # lower second read can only mean a shorter fork, and keeping the first is what makes that show.
+    # With none, a lagging read really is the lower bound.
+    kept = first if first.covers_hash else min(first, second, key=lambda read: read.covers)
+    return replace(second, covers=kept.covers, covers_hash=kept.covers_hash), supply
+
+
+def _read_sample(
+    run: _ChainRun, supply: CheckOutcome, census: bool, clock: Callable[[], float]
+) -> tuple[str, _WalletRead, CheckOutcome]:
+    name = run.probe.name
+    pin = _pin(supply)
+    date = datetime.fromtimestamp(clock(), UTC).date().isoformat()
+    seed = sample_seed(name, date)
+    top = [address for address, _ in run.store.top_wallets(name, pin, TOP_WALLETS)]
+    wallets = choose_sample(name, date, run.store.wallets(name, pin), top, census)
+    read, supply = _read_with_retry(run, wallets, seed, supply, "census" if census else "sample")
+    if census:
+        # After the mismatch retry, so one row says how the whole read ended.
+        run.recorder.record(
+            "balance_census",
+            name,
+            read.status,
+            read.reason,
+            pin=pin,
+            detail={"wallets": len(wallets)},
+        )
+    return seed, read, supply
+
+
+def _rows_replaced(store: Store, chain: str, covered: _Coverage) -> bool:
+    """Did a fork replace rows at or below the covered height? A delta only reads above it.
+
+    A fork below a block changes that block's hash. A hash that's gone was pruned as final, unless
+    the chain is now shorter than it.
+    """
+    if covered.through_hash is None:
+        return False
+    cursor = store.synced_through(chain)
+    if cursor is None or cursor < covered.through:
+        return True
+    current = store.block_hashes(chain).get(covered.through)
+    return current is not None and current != covered.through_hash
+
+
+def _check_balances(
+    run: _ChainRun,
+    supply: CheckOutcome,
+    coverage: dict[str, _Coverage],
+    census: bool,
+    clock: Callable[[], float],
+) -> tuple[Status, CheckOutcome]:
+    """Blocking check 3, ending with the last supply check's pin equal to the cursor and every
+    wallet touched since the sample read at that pin.
+
+    The sample is read once a run, unless a fork replaced the rows it was compared with. Every
+    later pin, whether from a Bridge retry or from a read that moved the cursor, is covered by the
+    wallets its rows touched, in up to PIN_ROUNDS rounds. Returns the balance status and the newest
+    supply outcome.
+
+    A wallet with no row since keeps its reading. So a transfer lost between two wallets with no
+    later row exits 0 with the gate usable, and a later run catches it only if one of them is
+    drawn, about 3% a run on Tempo. The plan accepts this limit.
+    """
+    name = run.probe.name
+
+    def settled() -> bool:
+        pin = _pin(supply)
+        return (
+            run.store.synced_through(name) == pin
+            and coverage[name].through >= pin
+            and not _rows_replaced(run.store, name, coverage[name])
+        )
+
+    if name not in coverage:
+        seed, read, supply = _read_sample(run, supply, census, clock)
+        if read.status != "pass":
+            return read.status, supply
+        coverage[name] = _Coverage(seed, read.covers, read.covers_hash)
+
+    for _ in range(PIN_ROUNDS):
+        if settled():
+            return "pass", supply
+        if run.store.synced_through(name) != _pin(supply):
+            supply = _check_supply(run.probe, run.store, run.recorder)
+            if supply.status != "pass":
+                return supply.status, supply
+        pin = _pin(supply)
+        covered = coverage[name]
+        if _rows_replaced(run.store, name, covered):
+            seed, read, supply = _read_sample(run, supply, census, clock)
+        elif covered.through >= pin:
+            continue
+        else:
+            seed = covered.seed
+            touched = run.store.wallets_touched(name, covered.through, pin)
+            if touched:
+                read, supply = _read_with_retry(
+                    run, dict.fromkeys(touched, "delta"), seed, supply, "delta"
+                )
+            else:
+                run.recorder.record(
+                    "sampled_balances",
+                    name,
+                    "pass",
+                    pin=pin,
+                    detail={"kind": "delta", "seed": seed, "wallets": 0},
+                )
+                read = _WalletRead("pass", None, {}, pin, run.store.block_hashes(name).get(pin))
+        if read.status != "pass":
+            return read.status, supply
+        coverage[name] = _Coverage(seed, read.covers, read.covers_hash)
+    # The last round's read may have settled it, and no further round can.
+    if settled():
+        return "pass", supply
+    status = run.recorder.record(
+        "sampled_balances", name, "unchecked", "pin_behind_cursor", pin=_pin(supply)
+    ).status
+    return status, supply
+
+
+def _proof_source(chain: str, proof: TransactionProof) -> str:
+    if proof.success is None:
+        return "blockscout"
+    return "transaction" if chain in CHAINS_PROVEN_BY_TRANSACTION else "receipt"
+
+
+def _is_real(rows: Sequence[Transfer], proof: TransactionProof) -> bool:
+    """The transaction succeeded, and its logs are the stored rows: a row too many or too few, or
+    one at another position, is not real. A source that reports no status is judged on the rows."""
+    stored = [
+        ProofTransfer(row.log_index, row.from_address, row.to_address, row.value) for row in rows
+    ]
+    return (
+        proof.success is not False
+        and sorted(stored) == sorted(proof.transfers)
+        and all(row.block_number == proof.block_number for row in rows)
+    )
+
+
+def _check_groups(run: _ChainRun, through: int) -> Status:
+    """Is every same-looking group a real set of transfers? Only the transaction can say: a loop
+    between two wallets nets to zero, so losing rows from it leaves every balance unchanged.
+
+    Each verdict commits as it's reached, so a stopped run resumes. Rows that aren't real stay
+    where they are, as nothing here changes `transfers`, and the maintainer decides what happens.
+    """
+    name = run.probe.name
+    transactions: dict[str, list[SameLookingGroup]] = {}
+    for group in run.store.same_looking_groups(name, through):
+        transactions.setdefault(group.tx_hash, []).append(group)
+
+    verdicts: Counter[str] = Counter()
+    sources: Counter[str] = Counter()
+    mixed_groups = 0
+
+    def note(tx_hash: str, verdict: GroupVerdict, stored: list[int], proven: list[int]) -> None:
+        nonlocal mixed_groups
+        mixed = sum(
+            0 < group.null_hash_count < len(group.positions) for group in transactions[tx_hash]
+        )
+        mixed_groups += mixed
+        verdicts[verdict] += 1
+        if verdict != "real" or mixed:
+            run.report(
+                GroupFinding(name, tx_hash, verdict, tuple(stored), tuple(proven), mixed > 0)
+            )
+
+    cause: BaseException | None = None
+    for tx_hash, groups in transactions.items():
+        block = groups[0].block_number
+        rows = run.store.transaction_rows(name, tx_hash)
+        # Every position in the transaction, as the skip list compares all of them. Only the group's
+        # would bring a transaction with other rows back on every run.
+        stored = [row.log_index for row in rows]
+        try:
+            proof = run.probe.read_transaction_proof(tx_hash)
+        except ChainUnavailable as exc:
+            # The source is down, and every transaction left would wait out its retries too.
+            cause = exc.__cause__
+            note(tx_hash, "unavailable", stored, [])
+            break
+        # Any stored block will do. Rows that span two blocks can't all match, which is not_real.
+        stored_blocks = {row.block_number for row in rows}
+        if proof is None or proof.tx_hash != tx_hash or proof.block_number not in stored_blocks:
+            note(tx_hash, "unavailable", stored, [])
+            continue
+        source = _proof_source(name, proof)
+        proven = sorted(transfer.log_index for transfer in proof.transfers)
+        verdict: Literal["real", "not_real"] = "real" if _is_real(rows, proof) else "not_real"
+        run.store.record_group_audit(
+            name, tx_hash, block, verdict, source, stored, proven, run.run_id
+        )
+        sources[source] += 1
+        note(tx_hash, verdict, stored, proven)
+
+    status: Status = "pass"
+    reason = None
+    if verdicts["not_real"]:
+        status, reason = "fail", "group_not_real"
+    elif verdicts["unavailable"]:
+        status, reason = "unchecked", "group_proof_unavailable"
+    return run.recorder.record(
+        "same_looking",
+        name,
+        status,
+        reason,
+        cause=cause,
+        pin=through,
+        # Counts only. The transactions themselves are in transfer_group_audits and the report.
+        detail={
+            "transactions": len(transactions),
+            "real": verdicts["real"],
+            "not_real": verdicts["not_real"],
+            "unavailable": verdicts["unavailable"],
+            # Left when a source went down, so a stop on the first can be told from one on the last.
+            "not_attempted": len(transactions) - sum(verdicts.values()),
+            "proof_sources": dict(sources),
+            "mixed_hash_groups": mixed_groups,
+        },
+    ).status
 
 
 def bridge_window(last_updated: int, pin_time: int) -> tuple[int, int]:
@@ -510,7 +956,7 @@ def _judge_bridge(
     store: Store,
     run_id: str,
     recorder: _RunRecorder,
-    report: Callable[[CheckOutcome | BridgeWait | BridgeFigures], None],
+    report: Report,
 ) -> BridgeCheck:
     """Compare one attempt's snapshot with the events through this attempt's pins, and record it.
 
@@ -590,9 +1036,10 @@ def _finish_run(
 def run_reconciliation(
     probes: Sequence[ChainProbe],
     store: Store,
-    report: Callable[[CheckOutcome | BridgeWait | BridgeFigures], None],
+    report: Report,
     *,
     bridge: Callable[[], BridgeSnapshot] | None = None,
+    census: Collection[str] = (),
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.time,
 ) -> RunResult:
@@ -601,16 +1048,19 @@ def run_reconciliation(
     `report` hears each outcome as it happens. Only a chain that can't be read, or a store
     conflict, is caught around a chain. Anything else is a bug, so it raises, and the run row
     stays unfinished so it can't read as a pass. `bridge` fetches Bridge's snapshot, and raises
-    HttpError or ValueError when it can't.
+    HttpError or ValueError when it can't. `census` names the chains to read every wallet of.
     """
     names = [probe.name for probe in probes]
     if len(set(names)) != len(names):
         raise ValueError(f"more than one probe for a chain: {names}")
+    if unknown := set(census) - set(names):
+        raise ValueError(f"a census of a chain with no probe: {sorted(unknown)}")
     # From the probes, so a run can't claim a scope it didn't check.
     scope = FULL_SCOPE if set(REQUIRED_CHAINS) <= set(names) else PARTIAL_SCOPE
     run_id = store.start_run(scope)
     recorder = _RunRecorder(store, run_id, report)
 
+    coverage: dict[str, _Coverage] = {}
     chains: dict[str, Status] = {}
     for name in REQUIRED_CHAINS:
         if name not in names:
@@ -636,10 +1086,20 @@ def run_reconciliation(
         # One chain being unchecked doesn't stop the others, so a failure can't hide what the
         # rest found. A retry repeats every chain, so a final pin never holds unchecked rows.
         for probe in probes:
+            run = _ChainRun(probe, store, recorder, report, run_id)
             supply = _check_supply(probe, store, recorder)
-            chains[probe.name] = _worst(supply.status, _check_census(probe, store, recorder))
-            if supply.reconciliation:
-                readings[probe.name] = supply.reconciliation
+            reading = supply.reconciliation
+            balances: Status = "pass"
+            if supply.status == "pass":
+                every_wallet = probe.name in census or probe.name in CHAINS_READ_WHOLE
+                balances, supply = _check_balances(run, supply, coverage, every_wallet, clock)
+                reading = supply.reconciliation or reading
+            parts = [supply.status, balances, _check_census(probe, store, recorder)]
+            # With a failed supply too, as a duplicated mint shows up here and in nothing else.
+            if reading:
+                readings[probe.name] = reading
+                parts.append(_check_groups(run, reading.block_number))
+            chains[probe.name] = _worst(*parts)
 
         if any(status != "pass" for status in chains.values()):
             if fetched and fetched.snapshot:

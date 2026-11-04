@@ -41,7 +41,8 @@ MINT_CREATION_SIGNATURE = (
 )
 SIGNATURE_PAGE = 1000
 COMMIT_EVERY = 200
-# Slots below the cursor read again on every run: a node can list a transaction late.
+# Slots below the cursor read again: a node can list a transaction late. Every plain sync does
+# this, and a reconciliation run does it once. See TailReread.
 REREAD_SLOTS = 2_000
 # Seconds between requests to the RPC.
 RPC_INTERVAL = 0.125
@@ -431,13 +432,30 @@ class SolanaRpc:
         return self._parse("getProgramAccounts result", read)
 
 
+@dataclass
+class TailReread:
+    """One reconciliation run's healing re-read of the tail, shared by that run's syncs.
+
+    A run's final pin needs a window with no new rows between two reads, and refetching the tail
+    makes every window as long as that refetch. So only the first sync that walks re-reads it.
+    Spent only once that sync has finished, so a failed sync doesn't use it up.
+    """
+
+    spent: bool = False
+
+
 def sync_solana(
-    chain: SolanaChain, rpc: SolanaRpc, store: Store, through_slot: int | None = None
+    chain: SolanaChain,
+    rpc: SolanaRpc,
+    store: Store,
+    through_slot: int | None = None,
+    reread: TailReread | None = None,
 ) -> SyncResult:
     """Store the mint's transactions through a slot (default: the finalized head), oldest first.
 
     Everything at or below `synced_through` is stored, so a crash or a stop leaves a cursor that is
-    still true. Only `finalized` data is read, so there is no reorg to repair.
+    still true. Only `finalized` data is read, so there is no reorg to repair. With no `reread`, the
+    tail is always read again.
     """
     if rpc.genesis_hash() != GENESIS_HASH:
         raise SolanaDataError(f"{chain.name}: the RPC does not serve Solana mainnet")
@@ -447,7 +465,8 @@ def sync_solana(
         return SyncResult(chain.name, head, head, None, store.transfer_count(chain.name))
 
     # Read below the cursor again, wherever the head is: a node can list a transaction late.
-    lower = None if cursor is None else cursor - REREAD_SLOTS
+    heal = reread is None or not reread.spent
+    lower = None if cursor is None else cursor - REREAD_SLOTS if heal else cursor
     rows = _walk(chain, rpc, head, lower)
     fetch = [row for row in reversed(rows) if not row.failed]
 
@@ -463,6 +482,8 @@ def sync_solana(
         slots[row.signature] = row.slot
         last_slot = row.slot
     _commit(chain, store, batch, slots, head)
+    if reread is not None:
+        reread.spent = True
     return SyncResult(chain.name, head, head, None, store.transfer_count(chain.name))
 
 
@@ -635,7 +656,9 @@ def _require_recent_read(chain: SolanaChain, cursor: int, slot: int) -> None:
         )
 
 
-def _pin_supply_and_sync(chain: SolanaChain, rpc: SolanaRpc, store: Store) -> SlotReading:
+def _pin_supply_and_sync(
+    chain: SolanaChain, rpc: SolanaRpc, store: Store, reread: TailReread | None
+) -> SlotReading:
     """Read supply, then sync through the slot that reading reports, which is what makes the
     comparison exact: `getTokenSupply` can't be read at a past slot."""
     cursor = _require_cursor(chain, store)
@@ -651,11 +674,13 @@ def _pin_supply_and_sync(chain: SolanaChain, rpc: SolanaRpc, store: Store) -> Sl
         # Recording it would fail the gate, which needs the row's block to equal the cursor.
         raise _NotReady(f"{chain.name}: the supply pin stayed below the cursor, slot {cursor}")
     _require_short_tail(chain, cursor, pin.slot)
-    sync_solana(chain, rpc, store, through_slot=pin.slot)
+    sync_solana(chain, rpc, store, through_slot=pin.slot, reread=reread)
     return pin
 
 
-def _read_balances_and_sync(chain: SolanaChain, rpc: SolanaRpc, store: Store) -> BalanceSnapshot:
+def _read_balances_and_sync(
+    chain: SolanaChain, rpc: SolanaRpc, store: Store, reread: TailReread | None
+) -> BalanceSnapshot:
     """Read every wallet, then sync through the slot the read reports.
 
     A read just below the cursor needs no retry, unlike supply: its rows are stored, and a
@@ -672,12 +697,12 @@ def _read_balances_and_sync(chain: SolanaChain, rpc: SolanaRpc, store: Store) ->
     if not any(snapshot.balances.values()):
         raise SolanaDataError(f"{chain.name}: no token account holds a balance at {snapshot.slot}")
     _require_short_tail(chain, cursor, snapshot.slot)
-    sync_solana(chain, rpc, store, through_slot=snapshot.slot)
+    sync_solana(chain, rpc, store, through_slot=snapshot.slot, reread=reread)
     return snapshot
 
 
 def reconcile_solana(
-    chain: SolanaChain, rpc: SolanaRpc, store: Store
+    chain: SolanaChain, rpc: SolanaRpc, store: Store, reread: TailReread | None = None
 ) -> ChainReconciliation | Unchecked:
     """Compare events with the supply at a pinned slot, to the base unit, and record it.
 
@@ -686,7 +711,7 @@ def reconcile_solana(
     `check_all_balances` is for.
     """
     try:
-        pin = _pin_supply_and_sync(chain, rpc, store)
+        pin = _pin_supply_and_sync(chain, rpc, store, reread)
     except _CANT_CHECK as error:
         return _unchecked(chain, rpc, error)
     minted, burned = store.minted_and_burned(chain.name, pin.slot)
@@ -696,7 +721,11 @@ def reconcile_solana(
 
 
 def read_sampled_balances(
-    chain: SolanaChain, rpc: SolanaRpc, store: Store, owners: Sequence[str] | None
+    chain: SolanaChain,
+    rpc: SolanaRpc,
+    store: Store,
+    owners: Sequence[str] | None,
+    reread: TailReread | None = None,
 ) -> list[BalanceReading] | Unchecked:
     """On-chain balances of the given owners, or of every owner in the read for None, all at one
     slot, with the store synced through it. An owner with no token account reads 0.
@@ -709,7 +738,7 @@ def read_sampled_balances(
         _require_cursor(chain, store)
         if owners is not None and not owners:
             return []
-        snapshot = _read_balances_and_sync(chain, rpc, store)
+        snapshot = _read_balances_and_sync(chain, rpc, store, reread)
     except _CANT_CHECK as error:
         return _unchecked(chain, rpc, error)
     wanted = sorted(snapshot.balances) if owners is None else owners
@@ -719,7 +748,7 @@ def read_sampled_balances(
 
 
 def check_all_balances(
-    chain: SolanaChain, rpc: SolanaRpc, store: Store
+    chain: SolanaChain, rpc: SolanaRpc, store: Store, reread: TailReread | None = None
 ) -> BalanceCheck | Unchecked:
     """Compare every wallet's balance with received minus sent at the read's slot.
 
@@ -730,7 +759,7 @@ def check_all_balances(
     recorded, because unit 1.4 adds the table.
     """
     try:
-        snapshot = _read_balances_and_sync(chain, rpc, store)
+        snapshot = _read_balances_and_sync(chain, rpc, store, reread)
     except _CANT_CHECK as error:
         return _unchecked(chain, rpc, error)
     wallets = sorted(snapshot.balances.keys() | set(store.wallets(chain.name, snapshot.slot)))

@@ -29,6 +29,7 @@ from ousd.solana import (
     SolanaDataError,
     SolanaRpc,
     SolanaRpcError,
+    TailReread,
     Unchecked,
     check_all_balances,
     decode_transaction,
@@ -199,6 +200,62 @@ def test_a_mint_in_the_tail_is_counted_at_the_pin(store):
     at(fake, CURSOR + 50, 2 * MINTED - BURNED)
 
     result = reconcile_solana(CHAIN, fake, store)
+
+    assert isinstance(result, ChainReconciliation) and result.matched
+    assert result.minted == 2 * MINTED
+
+
+# synced_node's stored transactions, oldest first, all within the re-read window.
+TAIL = [MINT_CREATION_SIGNATURE, "minted", "burned"]
+
+
+def test_one_run_of_checks_reads_the_tail_again_once(store):
+    fake = synced_node(store)
+    reread = TailReread()
+
+    at(fake, CURSOR + 10)
+    assert isinstance(reconcile_solana(CHAIN, fake, store, reread), ChainReconciliation)
+    assert fake.transaction_requests == TAIL
+    assert reread.spent
+
+    fake.transaction_requests.clear()
+    at(fake, CURSOR + 20)
+    readings = read_sampled_balances(CHAIN, fake, store, [MINT_RECEIVER], reread)
+    assert isinstance(readings, list)
+    assert fake.transaction_requests == []
+
+    fake.add(moved("mint_inner_second_mint", "new", CURSOR + 25))
+    at(fake, CURSOR + 30, 2 * MINTED - BURNED)
+    result = reconcile_solana(CHAIN, fake, store, reread)
+    assert isinstance(result, ChainReconciliation) and result.matched
+    assert fake.transaction_requests == ["new"]
+
+    fake.transaction_requests.clear()
+    at(fake, CURSOR + 40, 2 * MINTED - BURNED)
+    check = check_all_balances(CHAIN, fake, store, reread)
+    assert isinstance(check, BalanceCheck)
+    assert fake.transaction_requests == []
+
+
+def test_a_check_with_no_run_still_reads_the_tail_again(store):
+    fake = synced_node(store)
+
+    at(fake, CURSOR + 10)
+    reconcile_solana(CHAIN, fake, store)
+    assert fake.transaction_requests == TAIL
+
+    fake.transaction_requests.clear()
+    at(fake, CURSOR + 20)
+    reconcile_solana(CHAIN, fake, store)
+    assert fake.transaction_requests == TAIL
+
+
+def test_a_run_heals_a_late_mint_on_its_first_check(store):
+    fake = synced_node(store)
+    fake.add(moved("mint_inner_second_mint", "late", CURSOR - 50))
+    at(fake, CURSOR + 10, 2 * MINTED - BURNED)
+
+    result = reconcile_solana(CHAIN, fake, store, TailReread())
 
     assert isinstance(result, ChainReconciliation) and result.matched
     assert result.minted == 2 * MINTED

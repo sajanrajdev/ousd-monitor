@@ -16,6 +16,7 @@ from ousd.solana import (
     SolanaDataError,
     SolanaRpc,
     SolanaRpcError,
+    TailReread,
     load_solana,
     sync_solana,
 )
@@ -205,6 +206,101 @@ def test_a_signature_an_earlier_page_omitted_is_stored_by_the_next_sync(store, m
     names = [r[2] for r in stored(store)]
     assert "sig4" in names
     assert "sig1" not in names
+
+
+def test_a_plain_sync_reads_the_tail_again_every_time(store, monkeypatch):
+    monkeypatch.setattr(solana, "REREAD_SLOTS", 25)
+    fake = history(6, head=slot_of(6))
+    sync_solana(CHAIN, fake, store)
+
+    for _ in range(2):
+        fake.transaction_requests.clear()
+        fake.head += 1
+        sync_solana(CHAIN, fake, store)
+        assert fake.transaction_requests == ["sig4", "sig5"]
+
+
+def test_only_the_first_sync_of_a_run_reads_the_tail_again(store, monkeypatch):
+    monkeypatch.setattr(solana, "REREAD_SLOTS", 25)
+    fake = history(6, head=slot_of(6))
+    sync_solana(CHAIN, fake, store)
+    reread = TailReread()
+
+    fake.transaction_requests.clear()
+    fake.head += 1
+    sync_solana(CHAIN, fake, store, reread=reread)
+    assert fake.transaction_requests == ["sig4", "sig5"]
+    assert reread.spent
+
+    fake.transaction_requests.clear()
+    fake.add(movement("new", fake.head + 1, 1, 7))
+    fake.head += 2
+    sync_solana(CHAIN, fake, store, reread=reread)
+
+    assert fake.transaction_requests == ["new"]
+    assert store.synced_through("solana") == fake.head
+
+
+def test_a_run_heals_a_late_row_on_its_first_sync_and_not_after(store, monkeypatch):
+    monkeypatch.setattr(solana, "REREAD_SLOTS", 25)
+    fake = history(6, head=slot_of(6))
+    late = {r.signature: r for r in fake.rows if r.signature in {"sig4", "sig5"}}
+    fake.rows = [r for r in fake.rows if r.signature not in late]
+    sync_solana(CHAIN, fake, store)
+    reread = TailReread()
+
+    fake.rows.append(late["sig4"])
+    fake.head += 1
+    sync_solana(CHAIN, fake, store, reread=reread)
+    assert "sig4" in [r[2] for r in stored(store)]
+
+    # Listed after the run's one re-read, so a later sync in the run doesn't see it.
+    fake.rows.append(late["sig5"])
+    fake.head += 1
+    sync_solana(CHAIN, fake, store, reread=reread)
+    assert "sig5" not in [r[2] for r in stored(store)]
+
+    # The next plain sync does.
+    fake.head += 1
+    sync_solana(CHAIN, fake, store)
+    assert "sig5" in [r[2] for r in stored(store)]
+
+
+def test_a_sync_with_nothing_to_walk_leaves_the_re_read_for_the_next(store, monkeypatch):
+    monkeypatch.setattr(solana, "REREAD_SLOTS", 25)
+    fake = history(6, head=slot_of(6))
+    sync_solana(CHAIN, fake, store)
+    fake.transaction_requests.clear()
+    reread = TailReread()
+
+    sync_solana(CHAIN, fake, store, reread=reread)
+    assert not reread.spent
+    assert fake.transaction_requests == []
+
+    fake.head += 1
+    sync_solana(CHAIN, fake, store, reread=reread)
+    assert reread.spent
+    assert fake.transaction_requests == ["sig4", "sig5"]
+
+
+def test_a_sync_that_fails_leaves_the_re_read_for_the_next(store, monkeypatch):
+    monkeypatch.setattr(solana, "REREAD_SLOTS", 25)
+    fake = history(6, head=slot_of(6))
+    sync_solana(CHAIN, fake, store)
+    fake.transaction_requests.clear()
+    reread = TailReread()
+    fake.head += 1
+    fake.raise_on_transaction_call = 1
+
+    with pytest.raises(RuntimeError, match="dropped"):
+        sync_solana(CHAIN, fake, store, reread=reread)
+    assert not reread.spent
+
+    fake.raise_on_transaction_call = None
+    fake.transaction_requests.clear()
+    sync_solana(CHAIN, fake, store, reread=reread)
+    assert fake.transaction_requests == ["sig4", "sig5"]
+    assert reread.spent
 
 
 def test_a_reread_with_a_different_amount_is_a_conflict_and_stores_nothing(store):
