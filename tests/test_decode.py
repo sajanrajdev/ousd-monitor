@@ -17,6 +17,7 @@ def test_decodes_rpc_log():
 
     assert transfer.block_number == 26_334_851
     assert transfer.log_index == 587
+    assert transfer.block_hash is not None
     assert transfer.block_hash.startswith("0x245ebf46")
     assert transfer.block_timestamp == 0x6AE9EE7F
     assert transfer.from_address == ZERO_ADDRESS

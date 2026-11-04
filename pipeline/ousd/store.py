@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import duckdb
 
@@ -176,7 +177,7 @@ class Store:
         self.db.execute("DELETE FROM blocks WHERE chain = ? AND block_number < ?", [chain, below])
 
     def minted_and_burned(self, chain: str, through_block: int) -> tuple[int, int]:
-        minted, burned = self.db.execute(
+        minted, burned = self._aggregate_row(
             """
             SELECT
                 coalesce(sum(value) FILTER (WHERE from_address = $zero), 0)::HUGEINT,
@@ -185,12 +186,21 @@ class Store:
             WHERE chain = $chain AND block_number <= $block
             """,
             {"zero": ZERO_ADDRESS, "chain": chain, "block": through_block},
-        ).fetchone()
+        )
         return int(minted), int(burned)
 
     def transfer_count(self, chain: str) -> int:
-        row = self.db.execute("SELECT count(*) FROM transfers WHERE chain = ?", [chain]).fetchone()
-        return row[0]
+        row = self._aggregate_row("SELECT count(*) FROM transfers WHERE chain = ?", [chain])
+        return int(row[0])
+
+    def _aggregate_row(
+        self, query: str, parameters: Sequence[Any] | Mapping[str, Any]
+    ) -> tuple[Any, ...]:
+        """Run an aggregate without GROUP BY, which returns one row even when nothing matches."""
+        row = self.db.execute(query, parameters).fetchone()
+        if row is None:
+            raise RuntimeError(f"aggregate query returned no row: {query}")
+        return row
 
     def record_reconciliation(
         self, chain: str, block_number: int, minted: int, burned: int, onchain: int, matched: bool
