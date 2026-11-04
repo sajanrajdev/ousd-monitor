@@ -1,0 +1,35 @@
+version: 2
+models:
+  - name: mart_supply_journey
+    description: >
+      Per chain and day: issuer inventory, placed, venue and free-floating supply.
+      `issuer_labeled` is false where no issuer label exists for the chain, so inventory
+      is understated there and the held-by-issuer amount sits in free_floating.
+    columns:
+      - name: chain
+        data_tests: [not_null]
+      - name: day_utc
+        data_tests: [not_null]
+      - name: total_supply
+        data_tests: [not_null]
+      - name: issuer_inventory
+        data_tests: [not_null]
+      - name: placed_supply
+        data_tests: [not_null]
+      - name: venue_dex
+        data_tests: [not_null]
+      - name: venue_lending
+        data_tests: [not_null]
+      - name: venue_exchange
+        data_tests: [not_null]
+      - name: free_floating
+        data_tests: [not_null]
+      - name: placed_wallets
+        data_tests: [not_null]
+      - name: holders
+        data_tests: [not_null]
+      - name: holders_over_1m
+        data_tests: [not_null]
+      - name: top10_value
+      - name: issuer_labeled
+        data_tests: [not_null]
