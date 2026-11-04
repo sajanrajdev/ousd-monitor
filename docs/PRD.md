@@ -91,20 +91,24 @@ Also: a short written "what changed this week" note, for sharing and for readers
 
 ## 7. Metric definitions
 
-Draft definitions, to be tested against real data in Phase 1. Publish every one on the methodology page.
+Tested against real data on 2026-11-03 for Tempo and part of Ethereum: see `docs/brainstorms/2026-11-03-adoption-metrics-requirements.md`. Base and Solana may still change them. Publish every one on the methodology page.
 
 | Metric | Definition |
 |---|---|
 | **Minted, burned, net issuance** | Transfers from and to the zero address on EVM chains; mint and burn instructions on Solana. Day 0 is 2026-09-30, though test mints began earlier |
-| **Placed supply** | Held by a non-venue wallet that received at least $1M and has made no outbound transfer for N days |
-| **Issuer inventory** | Held by known Bridge wallets |
-| **Venue supply** | Held by exchanges, DEX pools or lending markets |
-| **Circulating supply** | Total minus issuer inventory and placed supply |
+| **Issuer inventory** | Held by wallets labeled as Bridge's or on its redemption route |
+| **Venue supply** | Held by wallets a public source labels as an exchange, DEX pool or lending market. Unlabeled custody doesn't count |
+| **Placed supply** | For a wallet with no issuer, venue or system label: the lowest its balance has been over the last 14 days, counted if that is at least $1M and the wallet is at least 14 days old. Measures dollars that stayed, and says nothing about intent |
+| **Free-floating supply** | Everything else: total minus issuer inventory, placed and venue |
+| **Circulating supply** | Total minus issuer inventory and placed. So it includes venues, shown separately |
 | **Headline volume** | All transfer value, for comparison with other sources |
-| **Clean volume** | Headline minus mints, burns, Tempo fee transfers, Bridge wallet flows and same-entity moves. DEX volume is split out rather than removed |
-| **Velocity** | Daily clean volume divided by circulating supply, which differs from Dune's definition (transfer volume over total supply). Show ours and note the difference |
-| **Active wallets** | Sent clean volume above a dust threshold in the period |
-| **Concentration** | Top-10 share and holders above and below set sizes |
+| **Clean volume** | Headline minus, in order: mints, burns, Tempo fees, fee liquidity, issuer flows, same-entity moves, same-transaction netting, and venue flow. Within a transaction, each address's in and out are netted, so loops and multi-hop routes count once. Hops across transactions still count more than once |
+| **Everyday and large clean volume** | Clean volume split by transaction at $1M. Large transfers are mostly balances moving between wallets, though public evidence can't show that they're the same owner, so they're split out instead of removed |
+| **Venue flow** | Net flow to and from DEX and lending contracts, shown separately and including seeding. It isn't trading volume |
+| **Tempo fee** | A transfer to the fee manager that is the last OUSD transfer in its transaction. Other transfers to or from the fee manager are fee liquidity |
+| **Velocity** | Rolling 7-day clean volume divided by 7, then by circulating supply. Differs from the common definition (transfer volume over total supply). Show ours, the everyday version and the common one, as they differ widely |
+| **Active wallets** | Sent at least $1 of clean volume in the period, net per transaction, excluding issuer, venue and system wallets. Also published at $100. Wallets, not people |
+| **Concentration** | Top-10 share and holders above and below set sizes, per chain |
 | **Implied reserve income** | Treasury share of reserves times a stated yield, plus cash at a stated rate. Illustrative example: 872M at 4% is about $35M a year. The management fee is undisclosed, so show a range |
 
 ## 8. Requirements
@@ -114,7 +118,7 @@ Draft definitions, to be tested against real data in Phase 1. Publish every one 
 - **R2. Idempotent backfill:** re-running any range changes nothing.
 - **R3. Reorg handling:** store block hashes, re-check a lookback at the tip, and replace orphaned data. Use each chain's finality signal. Reorgs may be rare here, so test the logic with simulated reorgs and say so.
 - **R4. Modeling:** dbt from raw to staging to marts, with tests and documentation.
-- **R5. Orchestration:** scheduled, partitioned jobs with retries and alerts on failure, in Dagster.
+- **R5. Orchestration:** scheduled jobs with retries and alerts on failure, in Dagster. Ingest is cursor-based and idempotent, so it doesn't use partitions (see `docs/architecture.md`).
 - **R6. Reconciliation checks, which block publishing:** per chain, mints minus burns must equal `totalSupply()` at the same block, to the base unit, and balances must match `balanceOf` for sampled wallets. The chain total should match Bridge's figure within a stated timing tolerance.
 - **R7. Labels:** a versioned file with address, entity, source and confidence for every label.
 - **R8. Freshness:** at least daily, with "data as of" visible. Show the last good data if a check fails.

@@ -27,6 +27,8 @@ Prefer a small system that's clearly correct over a big one that looks impressiv
 
 **Known gap:** no cloud hosting in the first version. Hosted schedules can follow.
 
+**No Dagster partitions:** ingest is cursor-based and idempotent, and dbt rebuilds in seconds, so partitions would add a second backfill path that could disagree with the cursor. dbt runs as one asset for the same reason.
+
 ## Layout
 
 ```
@@ -80,17 +82,18 @@ Provider differences stay inside `sources`. Everything after that works on norma
 - **Reorgs.** Store block hashes, re-check a per-chain lookback at the tip, and replace orphaned rows. Test with simulated reorgs and say plainly that this is how it was tested.
 - **Raw is immutable** except for reorg repair. All interpretation happens in dbt.
 - **Time is UTC.** Day 0 is 2026-09-30, but ingest from the first mint.
+- **Marts live in their own file.** dbt attaches `data/ousd.duckdb` read-only and writes `data/marts.duckdb`, so modeling can't change raw data.
 
 ## Blocking checks
 
 Publishing stops if any of these fail:
 
 1. **Per-chain supply:** mints minus burns equals `totalSupply()` (or Solana's `getTokenSupply`) at the same block or slot, exactly.
-2. **Cross-chain supply:** the sum of chains matches Bridge's reported total, within a stated timing tolerance. Bridge's figure can move by millions within hours, so compare close in time.
+2. **Cross-chain supply:** the sum of chains matches Bridge's reported total, within the larger of 0.25% and 2,000,000 OUSD, on any of 3 attempts 10 minutes apart. Bridge's figure can move by millions within hours, so compare close in time.
 3. **Sampled balances:** model balances equal `balanceOf` for a sample of wallets.
 4. **dbt tests:** uniqueness, not-null and accepted values.
 5. **Volume waterfall:** the parts add back up to headline volume.
-6. **Freshness:** data is within the stated age.
+6. **Freshness:** each chain's newest transfer and reconciliation are within 36 hours.
 
 Non-blocking: changes that look wrong, such as a large jump in any metric, produce warnings for human review.
 
@@ -102,13 +105,14 @@ Marts map to PRD questions. Definitions are in PRD section 7, and these are the 
 |---|---|---|
 | `mart_supply_journey` | How much is placed, in venues, circulating or active? | A |
 | `mart_activity_waterfall` | How much of the headline volume is real? | B |
+| `mart_activity_kpis` | What are velocity and active wallets? | B |
 | `mart_chain_roles` | What is each chain used for? | E |
 | `mart_reconciliation` | Do the numbers hold up? | Trust strip |
 | `mart_partner_evidence` (later) | Who shows evidence of going live? | C |
 | `mart_peer_benchmarks` (later) | How does it compare at the same age? | D |
 | `mart_partner_economics` (later) | What could reserve income be worth? | F |
 
-**Tempo fee transfers:** initial findings put these at about 44% of Tempo transfers by count and about 138 OUSD by value. They go to the fee manager `0xfeec000000000000000000000000000000000000`. Filtering on that address alone may catch ordinary transfers, because the largest was 50 OUSD, so the rule needs care and a test.
+**Tempo fee transfers:** about 44% of Tempo transfers by count and about $23 by value. The rule is a transfer to the fee manager `0xfeec000000000000000000000000000000000000` that is the last OUSD transfer in its transaction, tested against receipts. Filtering on the address alone also catches fee-liquidity transfers, including the largest at 50 OUSD.
 
 ## Labels
 
@@ -120,7 +124,7 @@ Marts map to PRD questions. Definitions are in PRD section 7, and these are the 
 
 - JSON per view, plus CSV for download.
 - A manifest with data-as-of time, git commit and check results.
-- Numbers as strings where precision matters, with a schema the site validates at build.
+- Numbers as strings where precision matters, with a schema the site validates at build. Schema v1 is in `docs/plans/2026-11-03-001-insight-models-plan.md`.
 
 ## Site
 
