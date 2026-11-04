@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 import duckdb
 
+from ousd.chains import REQUIRED_CHAINS
 from ousd.decode import ZERO_ADDRESS, Transfer
 
 SCHEMA = """
@@ -691,23 +692,27 @@ class Store:
         )
 
     def census_complete(self, chain: str) -> bool:
-        """True once a census of every wallet has passed. Partial reads never count."""
-        row = self._aggregate_row(
+        """True once the newest census of every wallet has passed. Partial reads never count."""
+        row = self.db.execute(
             """
-            SELECT count(*) FROM reconciliation_checks
-            WHERE check_name = 'balance_census' AND subject = ? AND status = 'pass'
+            SELECT status FROM reconciliation_checks
+            WHERE check_name = 'balance_census' AND subject = ?
+            ORDER BY recorded_at DESC, attempt DESC LIMIT 1
             """,
             [chain],
-        )
-        return int(row[0]) > 0
+        ).fetchone()
+        return row is not None and row[0] == "pass"
 
     def latest_reconciliation(self) -> LatestReconciliation | None:
         """The newest finished run, and whether its pass still describes the stored data.
 
-        `usable` is the publish gate: the run has scope `full` and status `pass`, and for every
-        chain it checked, the cursor, the pin hash where it has one and the transfer count equal
-        what it recorded at its final pin (the highest `attempt` of `chain_supply`). Anything
-        missing counts as changed.
+        `usable` is the publish gate and fails closed. It is true only when all of these hold:
+        the run is finished, scope `full`, status `pass` and exit_code 0; every chain in
+        REQUIRED_CHAINS has a pin (its final `chain_supply` row); for each (check_name, subject)
+        the row with the highest `attempt` has status `pass`, and a final `bridge` row exists;
+        and each pinned chain's cursor and transfer count equal the pin and the stored block hash
+        at the pin height equals the pin hash. A NULL pin hash counts as changed on every chain
+        except solana, which stores no block hashes by design and relies on cursor and count.
         """
         run = self.db.execute(
             """
@@ -720,26 +725,35 @@ class Store:
         if run is None:
             return None
         run_id, scope, status, exit_code, started_at, finished_at = run
-        pins = self.db.execute(
+        finals = self.db.execute(
             """
-            SELECT subject, pin_height, pin_hash, transfer_count FROM reconciliation_checks
-            WHERE run_id = ? AND check_name = 'chain_supply'
-            QUALIFY row_number() OVER (PARTITION BY subject ORDER BY attempt DESC) = 1
-            ORDER BY subject
+            SELECT check_name, subject, status, pin_height, pin_hash, transfer_count
+            FROM reconciliation_checks WHERE run_id = ?
+            QUALIFY row_number() OVER (
+                PARTITION BY check_name, subject ORDER BY attempt DESC
+            ) = 1
+            ORDER BY check_name, subject
             """,
             [run_id],
         ).fetchall()
         chains = {
-            chain: ChainPin(
-                height, pin_hash, count, self._pin_is_current(chain, height, pin_hash, count)
+            subject: ChainPin(
+                height,
+                pin_hash,
+                count,
+                self._pin_is_current(subject, height, pin_hash, count),
             )
-            for chain, height, pin_hash, count in pins
+            for check_name, subject, _, height, pin_hash, count in finals
+            if check_name == "chain_supply"
         }
         usable = (
             scope == "full"
             and status == "pass"
-            and bool(chains)
-            and all(pin.current for pin in chains.values())
+            and exit_code == 0
+            and all(chain in chains for chain in REQUIRED_CHAINS)
+            and all(state == "pass" for _, _, state, *_ in finals)
+            and any(check_name == "bridge" for check_name, *_ in finals)
+            and all(chains[chain].current for chain in chains)
         )
         return LatestReconciliation(
             run_id, scope, status, exit_code, started_at, finished_at, chains, usable
@@ -752,4 +766,6 @@ class Store:
             return False
         if self.synced_through(chain) != height or self.transfer_count(chain) != count:
             return False
-        return pin_hash is None or self.block_hashes(chain).get(height) == pin_hash
+        if pin_hash is None:
+            return chain == "solana"
+        return self.block_hashes(chain).get(height) == pin_hash

@@ -1,6 +1,7 @@
 import duckdb
 import pytest
 from conftest import ALICE, BOB, make_chain, rows
+from ousd.chains import REQUIRED_CHAINS
 from ousd.cli import format_units
 from ousd.decode import ZERO_ADDRESS, Transfer
 from ousd.store import BalanceSample, ChainPin, Store, StoreConflict
@@ -491,19 +492,38 @@ def test_a_run_cannot_be_finished_twice(store):
         store.finish_run("missing", "fail", 1)
 
 
-def finished_run(store, status="pass", scope="full", chain="testnet", pin_hash="0xh5"):
-    ledger(store, (5, 0, ZERO_ADDRESS, ALICE, 10, "0xt", pin_hash))
-    store.write_range(chain, [], {5: pin_hash} if pin_hash else {}, 5)
-    run = store.start_run(scope)
+def seed_chain(store, chain, block_hash="0xh5"):
+    """One mint at block 5, with a stored hash unless the chain keeps none."""
+    transfers = [Transfer(5, block_hash, 1_005, "0xt", 0, ZERO_ADDRESS, ALICE, 10)]
+    store.write_range(chain, transfers, {5: block_hash} if block_hash else {}, 5)
+
+
+def pin_chain(store, run, chain, status="pass", pin_hash="0xh5"):
+    """An earlier failing attempt, then the final one at the stored pin."""
     store.record_check(
         run, "chain_supply", chain, 1, "fail", "supply_mismatch",
         pin_height=4, pin_hash="0xold", transfer_count=99,
     )  # fmt: skip
     store.record_check(
-        run, "chain_supply", chain, 2, "pass",
+        run, "chain_supply", chain, 2, status,
         pin_height=5, pin_hash=pin_hash, transfer_count=1,
     )  # fmt: skip
-    store.finish_run(run, status, 0 if status == "pass" else 1)
+
+
+def finished_run(
+    store, status="pass", scope="full", exit_code=None, chains=REQUIRED_CHAINS, bridge="pass"
+):
+    """A finished run that pinned `chains`, each seeded to match, with a final bridge row."""
+    run = store.start_run(scope)
+    for chain in chains:
+        keeps_hashes = chain != "solana"
+        seed_chain(store, chain, "0xh5" if keeps_hashes else None)
+        pin_chain(store, run, chain, pin_hash="0xh5" if keeps_hashes else None)
+    if bridge:
+        store.record_check(run, "bridge", "all", 1, bridge)
+    if exit_code is None:
+        exit_code = 0 if status == "pass" else 1
+    store.finish_run(run, status, exit_code)
     return run
 
 
@@ -524,7 +544,7 @@ def test_latest_reconciliation_ignores_an_unfinished_run(store):
     assert latest is not None
     assert latest.run_id == finished
     assert latest.usable
-    assert latest.chains["testnet"] == ChainPin(5, "0xh5", 1, True)  # The highest attempt.
+    assert latest.chains["ethereum"] == ChainPin(5, "0xh5", 1, True)  # The highest attempt.
 
 
 def test_latest_reconciliation_returns_the_newest_finished_run(store):
@@ -564,28 +584,150 @@ def test_a_pass_with_no_chain_pins_is_not_usable(store):
     assert not latest.usable
 
 
+@pytest.mark.parametrize("chain", ["tempo", "ethereum", "base"])
 @pytest.mark.parametrize("change", ["cursor", "hash", "count", "pruned"])
-def test_a_pass_stops_being_usable_when_the_data_changes(store, change):
+def test_a_pass_stops_being_usable_when_the_data_changes(store, change, chain):
     finished_run(store)
     assert store.latest_reconciliation().usable
 
     if change == "cursor":
-        store.write_range("testnet", [], {}, 6)
+        store.write_range(chain, [], {}, 6)
     elif change == "hash":
-        store.write_range("testnet", [], {5: "0xother"}, 5)
+        store.write_range(chain, [], {5: "0xother"}, 5)
     elif change == "count":
-        ledger(store, (4, 0, ALICE, BOB, 1, "0xnew"))
-        store.write_range("testnet", [], {}, 5)
+        ledger(store, (4, 0, ALICE, BOB, 1, "0xnew"), chain=chain)
+        store.write_range(chain, [], {}, 5)
     else:
-        store.prune_blocks("testnet", 6)
+        store.prune_blocks(chain, 6)
 
     latest = store.latest_reconciliation()
     assert not latest.usable
-    assert not latest.chains["testnet"].current
+    assert not latest.chains[chain].current
 
 
-def test_a_chain_without_a_hash_is_pinned_by_cursor_and_count(store):
-    finished_run(store, pin_hash=None)
-    store.db.execute("DELETE FROM blocks")
+def test_a_pass_that_pinned_only_one_chain_is_not_usable(store):
+    finished_run(store, chains=("tempo",))
+
+    latest = store.latest_reconciliation()
+
+    assert latest is not None
+    assert latest.chains["tempo"].current
+    assert not latest.usable
+
+
+@pytest.mark.parametrize("missing", REQUIRED_CHAINS)
+def test_every_required_chain_must_be_pinned(store, missing):
+    finished_run(store, chains=tuple(c for c in REQUIRED_CHAINS if c != missing))
+
+    assert not store.latest_reconciliation().usable
+
+
+@pytest.mark.parametrize("final", ["fail", "unchecked"])
+def test_a_pass_run_row_does_not_outweigh_a_final_chain_supply_row(store, final):
+    run = finished_run(store)
+    store.record_check(
+        run, "chain_supply", "base", 3, final, "supply_mismatch",
+        pin_height=5, pin_hash="0xh5", transfer_count=1,
+    )  # fmt: skip
+
+    assert not store.latest_reconciliation().usable
+
+
+def test_exit_code_must_be_zero(store):
+    finished_run(store, exit_code=1)
+
+    assert not store.latest_reconciliation().usable
+
+
+@pytest.mark.parametrize("check_name", ["bridge", "same_looking"])
+def test_a_final_failing_check_row_blocks_the_gate(store, check_name):
+    run = finished_run(store)
+    store.record_check(run, check_name, "all", 2, "fail", "mismatch")
+
+    assert not store.latest_reconciliation().usable
+
+
+@pytest.mark.parametrize("bridge", ["fail", "unchecked"])
+def test_a_final_bridge_row_must_pass(store, bridge):
+    finished_run(store, bridge=bridge)
+
+    assert not store.latest_reconciliation().usable
+
+
+def test_a_run_without_a_bridge_row_is_not_usable(store):
+    finished_run(store, bridge=None)
+
+    assert not store.latest_reconciliation().usable
+
+
+def test_an_earlier_failing_attempt_does_not_block_a_passing_final_one(store):
+    run = finished_run(store)
+    store.record_check(run, "same_looking", "all", 1, "fail", "mismatch")
+    store.record_check(run, "same_looking", "all", 2, "pass")
 
     assert store.latest_reconciliation().usable
+
+
+@pytest.mark.parametrize("chain", ["tempo", "ethereum", "base"])
+@pytest.mark.parametrize("stored_hash", [True, False])
+def test_an_evm_chain_with_a_null_pin_hash_is_not_usable(store, chain, stored_hash):
+    run = store.start_run("full")
+    for name in REQUIRED_CHAINS:
+        keeps_hashes = name != "solana"
+        seed_chain(store, name, "0xh5" if keeps_hashes else None)
+        pin_chain(store, run, name, pin_hash=None if name in (chain, "solana") else "0xh5")
+    if not stored_hash:
+        store.db.execute("DELETE FROM blocks WHERE chain = ?", [chain])
+    store.record_check(run, "bridge", "all", 1, "pass")
+    store.finish_run(run, "pass", 0)
+
+    latest = store.latest_reconciliation()
+
+    assert not latest.chains[chain].current
+    assert latest.chains["solana"].current
+    assert not latest.usable
+
+
+@pytest.mark.parametrize("missing", ["pin_height", "transfer_count"])
+def test_a_final_pin_with_a_missing_field_is_not_usable(store, missing):
+    run = finished_run(store)
+    pin = {"pin_height": 5, "pin_hash": "0xh5", "transfer_count": 1, missing: None}
+    store.record_check(run, "chain_supply", "base", 3, "pass", **pin)
+
+    assert not store.latest_reconciliation().usable
+
+
+def test_solana_is_pinned_by_cursor_and_count_without_a_hash(store):
+    finished_run(store)
+    store.write_range("solana", [], {5: "0xunrelated"}, 5)  # A stored hash is never compared.
+
+    latest = store.latest_reconciliation()
+
+    assert latest.chains["solana"] == ChainPin(5, None, 1, True)
+    assert latest.usable
+
+
+def test_a_solana_count_change_still_blocks_the_gate(store):
+    finished_run(store)
+    ledger(store, (4, 0, ALICE, BOB, 1, "0xnew"), chain="solana")
+    store.write_range("solana", [], {}, 5)
+
+    assert not store.latest_reconciliation().usable
+
+
+def test_a_stored_hash_changing_after_the_pin_is_not_usable(store):
+    finished_run(store)
+    store.db.execute("UPDATE blocks SET block_hash = '0xreorged' WHERE chain = 'base'")
+
+    assert not store.latest_reconciliation().usable
+
+
+def test_the_newest_failed_census_ends_census_complete(store):
+    run = store.start_run("full")
+    store.record_check(run, "balance_census", "ethereum", 1, "pass")
+    assert store.census_complete("ethereum")
+
+    store.record_check(run, "balance_census", "ethereum", 2, "fail", "balance_mismatch")
+
+    assert not store.census_complete("ethereum")
+    assert not store.census_complete("base")  # No census at all.
