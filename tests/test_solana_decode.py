@@ -175,15 +175,78 @@ def test_transient_account_that_no_longer_nets_to_zero_fails():
         decode_transaction(tx, MINT)
 
 
-def test_plain_mint_to_is_not_decoded_so_the_invariant_stops():
-    tx = load("mint_inner_second_mint")
+def plain_form(tx: dict[str, Any], mint: str, kind: str) -> dict[str, Any]:
+    """Turn every Checked movement of `mint` into the plain form: no decimals, amount at the top."""
     for group in tx["meta"]["innerInstructions"]:
         for inner in group["instructions"]:
             parsed = inner.get("parsed")
-            if isinstance(parsed, dict) and parsed["info"].get("mint") == MINT:
-                parsed["type"] = "mintTo"
+            if isinstance(parsed, dict) and parsed["info"].get("mint") == mint:
+                parsed["type"] = kind
+                parsed["info"]["amount"] = parsed["info"].pop("tokenAmount")["amount"]
+    return tx
+
+
+def test_plain_burn_with_a_closed_account_decodes_to_one_row():
+    rows = decode_transaction(load("plain_burn_close"), MINT)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.block_number == 459717019
+    assert row.log_index == (32 << 12) | 3
+    assert row.from_address == "AmxGS1afu2HpW7LTtaC8SVYJJ5QV8dRtejbzP6hiGjpc"
+    assert row.to_address == ZERO_ADDRESS
+    assert row.value == 2423360
+
+
+def test_plain_mint_to_decodes_like_mint_to_checked():
+    checked = decode_transaction(load("mint_inner_second_mint"), MINT)
+    tx = plain_form(load("mint_inner_second_mint"), MINT, "mintTo")
+
+    assert decode_transaction(tx, MINT) == checked
+
+
+def test_plain_burn_of_another_mint_is_ignored():
+    tx = load("plain_burn_close")
+    other = copy.deepcopy(
+        next(
+            ix
+            for ix in tx["transaction"]["message"]["instructions"]
+            if isinstance(ix.get("parsed"), dict) and ix["parsed"]["type"] == "burn"
+        )
+    )
+    other["parsed"]["info"]["mint"] = WITHDRAW_MINT
+    other["parsed"]["info"]["amount"] = "7"
+    tx["transaction"]["message"]["instructions"].append(other)
+
+    rows = decode_transaction(tx, MINT)
+
+    assert len(rows) == 1
+    assert rows[0].value == 2423360
+
+
+@pytest.mark.parametrize("amount", ["-5", "1.5", "1_0", " 7", "", 7, 7.0, None])
+def test_plain_amount_that_is_not_digits_is_a_data_error(amount):
+    tx = load("plain_burn_close")
+    for ix in tx["transaction"]["message"]["instructions"]:
+        parsed = ix.get("parsed")
+        if isinstance(parsed, dict) and parsed["type"] == "burn":
+            parsed["info"]["amount"] = amount
 
     with pytest.raises(SolanaDataError, match=signature(tx)):
+        decode_transaction(tx, MINT)
+
+
+def test_plain_transfer_names_no_mint_so_the_invariant_stops():
+    tx = plain_form(load("top_level_transfer"), MINT, "transfer")
+    for ix in tx["transaction"]["message"]["instructions"]:
+        parsed = ix.get("parsed")
+        if isinstance(parsed, dict) and parsed["type"] == "transferChecked":
+            info = parsed["info"]
+            parsed["type"] = "transfer"
+            info["amount"] = info.pop("tokenAmount")["amount"]
+            info.pop("mint")
+
+    with pytest.raises(SolanaDataError, match="changed by"):
         decode_transaction(tx, MINT)
 
 

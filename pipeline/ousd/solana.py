@@ -68,7 +68,10 @@ MAX_TRANSACTION_INDEX = 1 << 19
 POSITION_BITS = 12
 MAX_POSITION = 1 << POSITION_BITS
 
-_MOVEMENTS = {"mintToChecked", "burnChecked", "transferChecked"}
+# Plain `transfer` is left out on purpose: its parsed info names no mint, so a balance it moves
+# stops at the invariant. The plain `mintTo` and `burn` info does name the mint.
+_MOVEMENTS = {"mintToChecked", "burnChecked", "transferChecked", "mintTo", "burn"}
+_PLAIN_AMOUNT = {"mintTo", "burn"}
 _OWNER_INITIALIZERS = {"initializeAccount", "initializeAccount2", "initializeAccount3"}
 # The only confidential instructions that name the mint and move nothing.
 _CONFIDENTIAL_ALLOWED = {"initializeConfidentialTransferMint", "updateConfidentialTransferMint"}
@@ -237,10 +240,12 @@ def _decode(transaction: dict[str, Any], mint: str) -> list[Transfer]:
             continue
         kind = parsed["type"]
         info = parsed["info"]
-        value = _base_units(info["tokenAmount"]["amount"])
-        if kind == "mintToChecked":
+        # The plain forms carry the amount at info.amount, the Checked forms in info.tokenAmount.
+        amount = info["amount"] if kind in _PLAIN_AMOUNT else info["tokenAmount"]["amount"]
+        value = _base_units(amount)
+        if kind in ("mintToChecked", "mintTo"):
             source, destination = None, str(info["account"])
-        elif kind == "burnChecked":
+        elif kind in ("burnChecked", "burn"):
             source, destination = str(info["account"]), None
         else:
             source, destination = str(info["source"]), str(info["destination"])
