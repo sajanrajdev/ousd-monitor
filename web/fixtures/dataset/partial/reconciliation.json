@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "preview": true,
+  "data": [
+    {
+      "kind": "bridge",
+      "subject": "all_chains",
+      "block_number": null,
+      "event_value": "12800000000000000",
+      "reference_value": "13100000000000000",
+      "difference": "-300000000000000",
+      "passed": false,
+      "checked_at": "2026-11-04T05:30:00Z",
+      "run_id": "00000000000000000000000000000001",
+      "in_latest_run": false
+    },
+    {
+      "kind": "chain",
+      "subject": "ethereum",
+      "block_number": 1000000,
+      "event_value": "12000000000000000",
+      "reference_value": "12000000000000000",
+      "difference": "0",
+      "passed": true,
+      "checked_at": "2026-11-04T05:30:00Z",
+      "run_id": "00000000000000000000000000000001",
+      "in_latest_run": true
+    },
+    {
+      "kind": "chain",
+      "subject": "tempo",
+      "block_number": 1000000,
+      "event_value": "800000000000000",
+      "reference_value": "800000000000000",
+      "difference": "0",
+      "passed": true,
+      "checked_at": "2026-11-04T05:30:00Z",
+      "run_id": "00000000000000000000000000000001",
+      "in_latest_run": true
+    }
+  ],
+  "latest_run": {
+    "run_id": "00000000000000000000000000000001",
+    "scope": "partial",
+    "status": "pass",
+    "finished_at": "2026-11-04T05:30:00Z"
+  }
+}

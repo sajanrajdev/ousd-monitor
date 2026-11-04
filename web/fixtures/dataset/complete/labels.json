@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "preview": false,
+  "data": [
+    {
+      "chain": "base",
+      "entity": "Sample Pool C",
+      "category": "dex",
+      "source_type": "onchain_metadata",
+      "source_url": "https://example.com/sample-labels/base/sample-pool-c",
+      "confidence": "high",
+      "date_checked": "2026-11-01"
+    },
+    {
+      "chain": "base",
+      "entity": "Sample Exchange",
+      "category": "exchange",
+      "source_type": "official_statement",
+      "source_url": "https://example.com/sample-labels/base/sample-exchange",
+      "confidence": "medium",
+      "date_checked": "2026-11-01"
+    },
+    {
+      "chain": "base",
+      "entity": "Sample Issuer",
+      "category": "issuer",
+      "source_type": "company_docs",
+      "source_url": "https://example.com/sample-labels/base/sample-issuer",
+      "confidence": "high",
+      "date_checked": "2026-11-01"
+    },
+    {
+      "chain": "base",
+      "entity": "Sample Router",
+      "category": "system",
+      "source_type": "onchain_metadata",
+      "source_url": "https://example.com/sample-labels/base/sample-router",
+      "confidence": "high",
+      "date_checked": "2026-11-01"
+    },
+    {
+      "chain": "ethereum",
+      "entity": "Sample Pool B",
+      "category": "dex",
+      "source_type": "published_research",
+      "source_url": "https://example.com/sample-labels/ethereum/sample-pool-b",
+      "confidence": "high",
+      "date_checked": "2026-11-01"
+    },
+    {
+      "chain": "ethereum",
+      "entity": "Sample Exchange",
+      "category": "exchange",
+      "source_type": "company_docs",
+      "source_url": "https://example.com/sample-labels/ethereum/sample-exchange",
+      "confidence": "high",
+      "date_checked": "2026-11-01"
+    },
+    {
+      "chain": "ethereum",
+      "entity": "Sample Issuer",
+      "category": "issuer",
+      "source_type": "project_docs",
+      "source_url": "https://example.com/sample-labels/ethereum/sample-issuer",
+      "confidence": "high",
+      "date_checked": "2026-11-01"
+    },
+    {
+      "chain": "ethereum",
+      "entity": "Sample Vault B",
+      "category": "lending",
+      "source_type": "project_docs",
+      "source_url": "https://example.com/sample-labels/ethereum/sample-vault-b",
+      "confidence": "high",
+      "date_checked": "2026-11-01"
+    },
+    {
+      "chain": "tempo",
+      "entity": "Sample Pool A",
+      "category": "dex",
+      "source_type": "official_statement",
+      "source_url": "https://example.com/sample-labels/tempo/sample-pool-a",
+      "confidence": "medium",
+      "date_checked": "2026-11-01"
+    },
+    {
+      "chain": "tempo",
+      "entity": "Sample Issuer",
+      "category": "issuer",
+      "source_type": "explorer_tag",
+      "source_url": "https://example.com/sample-labels/tempo/sample-issuer",
+      "confidence": "medium",
+      "date_checked": "2026-11-01"
+    },
+    {
+      "chain": "tempo",
+      "entity": "Sample Vault A",
+      "category": "lending",
+      "source_type": "explorer_tag",
+      "source_url": "https://example.com/sample-labels/tempo/sample-vault-a",
+      "confidence": "medium",
+      "date_checked": "2026-11-01"
+    },
+    {
+      "chain": "tempo",
+      "entity": "Sample Router",
+      "category": "system",
+      "source_type": "published_research",
+      "source_url": "https://example.com/sample-labels/tempo/sample-router",
+      "confidence": "high",
+      "date_checked": "2026-11-01"
+    }
+  ],
+  "unnamed_clusters": {
+    "rule_reference": "labels/README.md#how-unnamed-clusters-are-found",
+    "rule": "An unnamed cluster is a set of wallets found from the chain's own transfers by a written rule. No public source names them, so they have no name here, and the rule says nothing about who holds them. The redemption route (`issuer_route`) has three kinds of wallet. The hub is the wallet a chain's mints go to. Path wallets are on the fixed path from the hub into burns. Collection wallets take money from many senders, send every outgoing transfer to the hub, and hold almost no balance. A wallet that passes money through from a single sender stays unlabeled, as does any other wallet with flows into the route, however large the flows. A contract on the path may have a verified name on the chain, but that name doesn't say who runs it, so the label stays unnamed. Published data gives a count of these wallets by chain and category, with this rule. Their addresses are only in `labels/labels.csv` in this repository.",
+    "counts": [
+      {
+        "chain": "base",
+        "category": "issuer_route",
+        "count": 1
+      },
+      {
+        "chain": "ethereum",
+        "category": "issuer_route",
+        "count": 3
+      },
+      {
+        "chain": "tempo",
+        "category": "issuer_route",
+        "count": 2
+      }
+    ]
+  },
+  "source_legend": {
+    "source_types": [
+      {
+        "source_type": "explorer_tag",
+        "meaning": "A block explorer shows this name on the address",
+        "how_to_check": "Open the link and read the name at the top of the address page"
+      },
+      {
+        "source_type": "project_docs",
+        "meaning": "The documentation or app of the project that runs the contract lists it under this name",
+        "how_to_check": "Open the link and find the name, with its address beside it"
+      },
+      {
+        "source_type": "company_docs",
+        "meaning": "A company's own documentation names the address as its own",
+        "how_to_check": "Open the link and find the name, with its address beside it"
+      },
+      {
+        "source_type": "official_statement",
+        "meaning": "The named organization said so in an announcement or other statement",
+        "how_to_check": "Open the link and find the name and address in the statement"
+      },
+      {
+        "source_type": "published_research",
+        "meaning": "A named research publisher ties the name to the address",
+        "how_to_check": "Open the link and find the name and address. Publishers may shorten an address, as in `0x4c2c…00b8`"
+      },
+      {
+        "source_type": "onchain_metadata",
+        "meaning": "The chain itself records it, such as a verified contract name and its creator",
+        "how_to_check": "Open the link and read the contract details"
+      },
+      {
+        "source_type": "derived_rule",
+        "meaning": "No source names it. It is an unnamed cluster, found by a written rule applied to the chain's own data",
+        "how_to_check": "Read the rule at the link. The dataset publishes no address for an unnamed cluster, so apply it to the addresses in `labels/labels.csv` in this repository"
+      }
+    ],
+    "reading_a_label": "a named label always has a web source you can open. A `derived_rule` label never has a name, because it describes what a wallet does, not who holds it. `confidence` is `medium` when the source leaves a gap, such as a vault page that shows no curator, or research that prints only a shortened address. Vault names come from the vault's creator, not from any company the name may suggest, so a name alone doesn't say who runs a vault. The 0x Settler labels rest on the verified contract name and on the creator the chain records for it, `deployer.zeroexprotocol.eth`. Tell us if a source no longer supports a label."
+  },
+  "issuer_coverage": [
+    {
+      "chain": "tempo",
+      "issuer_rows": 1,
+      "issuer_route_rows": 2,
+      "has_issuer_row": true,
+      "issuer_labeled": true
+    },
+    {
+      "chain": "ethereum",
+      "issuer_rows": 1,
+      "issuer_route_rows": 3,
+      "has_issuer_row": true,
+      "issuer_labeled": true
+    },
+    {
+      "chain": "base",
+      "issuer_rows": 1,
+      "issuer_route_rows": 1,
+      "has_issuer_row": true,
+      "issuer_labeled": true
+    },
+    {
+      "chain": "solana",
+      "issuer_rows": 0,
+      "issuer_route_rows": 0,
+      "has_issuer_row": false,
+      "issuer_labeled": false
+    }
+  ],
+  "chains_without_issuer_row": [
+    "solana"
+  ]
+}

@@ -15,5 +15,7 @@ export default defineConfig({
     environment: "jsdom",
     include: ["tests/**/*.test.{ts,tsx}"],
     setupFiles: ["tests/setup.ts"],
+    // Tests never read data/, where a real run may be in progress.
+    env: { OUSD_DATASET_DIR: "fixtures/dataset/complete" },
   },
 });
