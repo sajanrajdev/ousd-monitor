@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+out/
+__pycache__/
+*.pyc
+.venv/
+target/
+dbt_packages/
+logs/
+.dagster/
+data/
