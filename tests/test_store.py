@@ -812,3 +812,46 @@ def test_a_same_looking_row_in_another_block_is_not_a_twin(store):
     store.write_range("testnet", [transfer(6, 3)], {}, 6)
 
     assert [(row[0], row[1]) for row in rows(store)] == [(5, 0), (6, 3)]
+
+
+class InterruptingDb:
+    """The store's connection, but a statement inside a transaction is cut by Ctrl-C."""
+
+    def __init__(self, real, after: str):
+        self._real, self._after, self._began = real, after, False
+
+    def begin(self):
+        self._real.begin()
+        self._began = True
+
+    def execute(self, sql, *args):
+        if self._began and self._after in sql:
+            raise KeyboardInterrupt
+        return self._real.execute(sql, *args)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+@pytest.mark.parametrize(
+    "act, statement",
+    [
+        (lambda s: s.write_range("t", [transfer(5)], {5: "0xa"}, 5), "INSERT"),
+        (lambda s: s.rollback_to("t", 4), "DELETE"),
+        (lambda s: s.record_check("r", "balance_census", "t", 1, "pass"), "INSERT"),
+    ],
+    ids=["write_range", "rollback_to", "record_check"],
+)
+def test_ctrl_c_inside_a_transaction_rolls_it_back(store, act, statement):
+    store.write_range("t", [transfer(1)], {1: "0x1"}, 1)
+    real = store.db
+    store.db = InterruptingDb(real, statement)
+
+    with pytest.raises(KeyboardInterrupt):
+        act(store)
+
+    store.db = real
+    # An open transaction would refuse this one, and would have kept the interrupted write.
+    store.write_range("t", [transfer(2)], {2: "0x2"}, 2)
+    blocks = store.db.execute("SELECT block_number FROM transfers ORDER BY 1").fetchall()
+    assert blocks == [(1,), (2,)]

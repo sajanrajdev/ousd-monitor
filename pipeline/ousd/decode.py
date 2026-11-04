@@ -19,7 +19,7 @@ class Transfer:
     value: int  # Base units. Always an integer, never a float.
 
 
-def _address_from_topic(topic: str) -> str:
+def address_from_topic(topic: str) -> str:
     return "0x" + topic[-40:].lower()
 
 
@@ -39,8 +39,8 @@ def _decode(
         block_timestamp=int(timestamp_hex, 16),
         tx_hash=log["transactionHash"].lower(),
         log_index=int(log["logIndex"], 16),
-        from_address=_address_from_topic(topics[1]),
-        to_address=_address_from_topic(topics[2]),
+        from_address=address_from_topic(topics[1]),
+        to_address=address_from_topic(topics[2]),
         value=int(log["data"], 16),
     )
 

@@ -1,5 +1,6 @@
 """DuckDB storage. Every write that spans tables is one transaction."""
 
+import contextlib
 import json
 import uuid
 from collections.abc import Mapping, Sequence
@@ -237,9 +238,15 @@ class Store:
                 "INSERT OR REPLACE INTO sync_state VALUES (?, ?)", [chain, synced_through]
             )
             self.db.commit()
-        except Exception:
-            self.db.rollback()
+        except BaseException:
+            # Ctrl-C included: a transaction left open would hold the connection.
+            self._rollback()
             raise
+
+    def _rollback(self) -> None:
+        # A rollback that fails must not replace the error that got us here.
+        with contextlib.suppress(duckdb.Error):
+            self.db.rollback()
 
     def _refuse_conflicts(self, chain: str, transfers: Sequence[Transfer]) -> None:
         """Re-reading a row is fine. A different row at the same position is a data problem."""
@@ -337,8 +344,9 @@ class Store:
                 [block_number, chain, block_number],
             )
             self.db.commit()
-        except Exception:
-            self.db.rollback()
+        except BaseException:
+            # Ctrl-C included: a transaction left open would hold the connection.
+            self._rollback()
             raise
 
     def prune_blocks(self, chain: str, below: int) -> None:
@@ -650,8 +658,9 @@ class Store:
                     },
                 )
             self.db.commit()
-        except Exception:
-            self.db.rollback()
+        except BaseException:
+            # Ctrl-C included: a transaction left open would hold the connection.
+            self._rollback()
             raise
 
     def record_group_audit(
