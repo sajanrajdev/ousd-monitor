@@ -87,6 +87,8 @@ One page that reads top to bottom as an argument, then a methodology page. First
 | **F. Partner economics** | What could the reserve pool be worth at current supply? | The whole model rests on this. Estimate only, with assumptions visible |
 | **Trust strip** | Do our numbers reconcile? | Mints minus burns against `totalSupply()` on every chain, then against Bridge's total |
 
+**How the first version words views A and E.** View A shows *active* as a separate measure, not a slice of the supply stack: volume and wallets aren't parts of a balance. The stack is issuer inventory, placed, venues and free-floating, with clean volume and active wallets beside it. View E says what each chain *leads* in (supply, issuance, everyday use, DEX flow, lending flow), and never calls a chain a "trading" or "settlement" chain, because the pipeline ingests no swap events and so can't show it. Both choices keep the site from saying more than the data does. Details are in `docs/plans/2026-11-04-001-first-public-version-plan.md`.
+
 Also: a short written "what changed this week" note, for sharing and for readers who want the summary without the charts.
 
 ## 7. Metric definitions
@@ -118,7 +120,7 @@ Tested against real data on 2026-11-03 for Tempo and part of Ethereum: see `docs
 - **R2. Idempotent backfill:** re-running any range changes nothing.
 - **R3. Reorg handling:** store block hashes, re-check a lookback at the tip, and replace orphaned data. Use each chain's finality signal. Reorgs may be rare here, so test the logic with simulated reorgs and say so.
 - **R4. Modeling:** dbt from raw to staging to marts, with tests and documentation.
-- **R5. Orchestration:** scheduled jobs with retries and alerts on failure, in Dagster. Ingest is cursor-based and idempotent, so it doesn't use partitions (see `docs/architecture.md`).
+- **R5. Orchestration:** one daily Dagster job, `make run`, with retries on source errors and an alert file on failure. The schedule ships stopped and is switched on by hand, because there is no hosted scheduler yet. Ingest is cursor-based and idempotent, so it doesn't use partitions (see `docs/architecture.md`).
 - **R6. Reconciliation checks, which block publishing:** per chain, mints minus burns must equal `totalSupply()` at the same block, to the base unit, and balances must match `balanceOf` for sampled wallets. The chain total should match Bridge's figure within a stated timing tolerance.
 - **R7. Labels:** a versioned file with address, entity, source type, source and confidence for every label.
 - **R8. Freshness:** at least daily, with "data as of" visible. Show the last good data if a check fails.
@@ -170,6 +172,8 @@ JSON/CSV dataset, then static Next.js site on Vercel
 ## 11. Phases
 
 Each phase can stop and still be useful. Time is a rough guess until Phase 1 shows the data's quirks.
+
+The phase numbers here differ from `docs/implementation-plan.md`, which is the one to follow for what is built when. There, setup is not a separate phase, independent review is Phase 4 and not part of Phase 3's exit, and views C, D and F come in Phase 5, after the first release.
 
 | Phase | Delivers | Done when |
 |---|---|---|

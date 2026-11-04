@@ -210,12 +210,13 @@ Rule used: a published source must tie a name to this address. Matching a descri
 
 **Unnamed, by behavior.** The redemption and burn route stays an unnamed `issuer_route` cluster. Crystal describes the route and says it belongs to Bridge, but publishes no addresses. The cluster is defined by the chain's own behavior: wallets on the fixed path into the burn. `0x1767…1873` is verified on Etherscan as `ReserveLedgerWrappedHandler`, created by a wallet tagged "Open Standard: Deployer", which supports the classification.
 
-**Names Crystal gives that we can't use yet, because it publishes no address:**
+**Names a source gives that we can't use yet, because it publishes no address:**
 
-- **Wintermute:** described on Base, Tempo and Solana.
-- **Coinbase Prime:** $25M on Ethereum. `0xfb25…9f1b` holds 40.0M and Etherscan shows it funded by a tagged Coinbase Prime funder, but the address itself has no tag, so that's inference.
-- **The 40 Coinbase custody addresses.** The $2M pattern is easy to see, and on Ethereum the parent is tagged. It's a strong match, but still a match.
-- **The $85M wallet,** which Crystal itself only says "appears to be" in Coinbase custody.
+- Crystal describes market makers and exchange custody on several chains, and publishes no addresses for them.
+- Where a wallet only resembles a described pattern, such as a uniform balance repeated across many wallets, or a funding link to a tagged wallet, that is a match and not a source. The wallet's own explorer page must carry the tag or name.
+- Crystal itself hedges on one large wallet, saying only that it "appears to be" in exchange custody.
+
+None of these gets a name. Such wallets stay unnamed and unlabeled, and count as placed.
 
 Crystal's figures are from October 5, and much has changed. For example, its staged wallets have mostly moved to new addresses, so its descriptions don't identify current holders on their own.
 

@@ -114,3 +114,22 @@ These were found before any real run, by reviews that reproduced each one agains
 ### Decision closed
 
 **The key stays chain, block or slot, and log index.** This closes the earlier "Revisit with Solana". Solana's `log_index` is built from the transaction index and the position within the transaction, so it fits the same key, and no table needed rebuilding.
+
+## Phase 3, 2026-11-04: the site
+
+### What went wrong
+
+**A bare `pnpm` crashed.** Corepack 0.34 from Homebrew looks for `bin/pnpm.cjs`, which pnpm 12 doesn't ship, and exits with "Cannot find module". The same crash can reappear in any local setup script that calls `pnpm` directly. The site now runs pnpm only through `npx`, at the one version in `web/package.json`'s `packageManager`, and the Makefile reads it from there. Use `make web-install`, never a bare `pnpm`. This was checked on macOS only. Linux and the CI runner were not checked, and nothing relies on Corepack there.
+
+**The newest TypeScript and ESLint left unmet peers.** TypeScript 7.0.2 and ESLint 10.14.0 both leave peer dependencies unmet in `eslint-config-next` and `typescript-eslint`. The site pins TypeScript 6.0.3 and ESLint 9.39.5, which have none. Move them together, and only when those two packages support the newer versions.
+
+**Charts don't render to static HTML.** Recharts leaves an empty responsive wrapper in a static export. Every chart therefore has a text summary and a table that the server renders, and the chart is an addition to them.
+
+**An ignored folder nearly hid code.** `.gitignore` matches `data/` at any depth, so a folder named `web/lib/data/` would have been silently untracked. Nothing under `web/` uses that name.
+
+**The first dataset schema's wording promised more than a static page can do.** It described a failed run as marking the page stale. A failed run does mark the last published dataset stale, but a static page shows that only after someone rebuilds it. Until then, only the clock tells a page it is old, and it does so once the data is more than 36 hours old, in the reader's browser. So a failed run can go unseen on a page that nobody rebuilds for up to 36 hours. The plan now says this, the page compares times with the reader's clock, and the choice of who rebuilds, and how often, is left to the release decision in Phase 4.
+
+### Known limits
+
+- **No hosted schedule.** The Dagster schedule ships stopped, and nothing rebuilds the site by itself.
+- **Recharts' behavior in a real browser is proved by tests and sample builds only** until the acceptance unit (3.6) runs it at phone and desktop widths.

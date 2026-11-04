@@ -28,7 +28,9 @@ Prefer a small system that's clearly correct over a big one that looks impressiv
 
 **Known gap:** no cloud hosting in the first version. Hosted schedules can follow.
 
-**No Dagster partitions:** ingest is cursor-based and idempotent, and dbt rebuilds in seconds, so partitions would add a second backfill path that could disagree with the cursor. dbt runs as one asset for the same reason.
+**No Dagster partitions (decision):** ingest is cursor-based and idempotent, and dbt rebuilds in seconds, so partitions would add a second backfill path that could disagree with the cursor. dbt runs as one asset for the same reason. A missed day is caught up by the next run, which reads from the cursor. Revisit only if a rebuild stops taking seconds.
+
+**Orchestration:** one Dagster job, `ousd_daily`, runs four assets in order: `raw_transfers`, `chain_reconciliations`, `dbt_marts`, then `published_dataset`. The blocking checks are asset checks on `dbt_marts`, so a failed check stops the run before publish, marks the last published dataset stale and publishes nothing. Ingest and reconciliation retry twice, five minutes apart, on a source error. A failed check or a reconciliation that isn't a full pass never retries. The schedule (06:00 UTC daily) and a failure sensor ship **stopped**: they run only while the Dagster UI is up and someone has switched them on. A failed run writes `data/alerts/<run_id>.json` and sends nothing anywhere. Dagster's state lives in `data/.dagster`.
 
 ## Layout
 
@@ -155,6 +157,20 @@ Marts map to PRD questions. Definitions are in PRD section 7, and these are the 
 
 `make check` runs lint, types and tests for the Python code, then, once `web/package.json` exists, installs the site's packages and runs Prettier, ESLint, `tsc`, Vitest and a site build. It has no chain access, though a clean install reaches package registries. It's the only command CI calls.
 
-`make build` builds what's buildable and `make test` runs tests. `make web-install` installs the site's packages, and `make web-shots` captures local screenshots and is never part of `make check`.
+`make build` builds what's buildable and `make test` runs tests. `make web-install` installs the site's packages, `make web-samples` builds the two bundled sample sites, `make web-build` builds from the newest dataset it finds, and `make web-release` builds only from a dataset that is release grade. `make web-shots` captures local screenshots and is never part of `make check`.
+
+The pipeline commands:
+
+| Command | Does |
+|---|---|
+| `make sync` | Ingest every chain to its tip, repairing any reorg |
+| `make reconcile` | Per-chain and Bridge reconciliation. Exit 0 only on a full pass |
+| `make models` | `dbt build`: staging, intermediate and marts, with tests |
+| `make publish` | Run the blocking checks, then publish only if all pass. A refusal marks the last dataset stale |
+| `make preview` | A local, marked-as-preview dataset for site development. Never a release |
+| `make run` | `ousd_daily` in one process: ingest, reconcile, dbt, checks, publish |
+| `make dagster-dev` | The Dagster UI, where the schedule and failure sensor can be switched on |
+
+Run one writer at a time: each of these writes to `data/ousd.duckdb`, and the second to start exits 2 with "database in use".
 
 If Node or npm is missing or out of range, the site's steps fail with a message saying what to install. They never skip, and they never load `.env`.
