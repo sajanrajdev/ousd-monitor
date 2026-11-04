@@ -1,6 +1,7 @@
 """Shared test doubles. Nothing in this suite touches the network."""
 
 import hashlib
+import socket
 
 import pytest
 from ousd.chains import Chain
@@ -9,6 +10,14 @@ from ousd.store import Store
 
 ALICE = "0x" + "a" * 40
 BOB = "0x" + "b" * 40
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    def refuse(self, address):
+        raise RuntimeError(f"a test tried to open a connection to {address}")
+
+    monkeypatch.setattr(socket.socket, "connect", refuse)
 
 
 def make_chain(**overrides) -> Chain:

@@ -1,3 +1,5 @@
+import socket
+
 import httpx
 import pytest
 from ousd.http import MAX_SERVER_WAIT, HttpError, PoliteClient
@@ -84,3 +86,8 @@ def test_gives_up_after_max_attempts():
 
     with pytest.raises(HttpError, match="gave up after 6"):
         client.request_json("GET", "http://x.invalid")
+
+
+def test_suite_cannot_reach_the_network():
+    with pytest.raises(RuntimeError, match="tried to open a connection"):
+        socket.create_connection(("127.0.0.1", 9))
