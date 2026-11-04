@@ -251,3 +251,35 @@ def test_reorg_between_two_ranges_never_stores_a_mix_of_forks(store, new_fork_va
     assert result.reorg_fork_block == 102
     assert [row[5] for row in rows(store)] == ([] if new_fork_value is None else [new_fork_value])
     assert store.block_hashes("testnet") == {n: rpc.hashes[n] for n in range(102, 110)}
+
+
+def test_history_stops_at_finality_even_if_the_tail_is_short(store):
+    # Finality has stalled 20 blocks back, deeper than the 3 block tail.
+    chain = make_chain(rpc_tail_blocks=3)
+    rpc = FakeRpc(tip=130, finality_lag=20)
+    rpc.add_transfer(120, 1)
+    history = FakeHistory([])
+
+    sync_chain(chain, rpc, store, history)
+
+    assert history.ranges == [(100, 110)]
+    assert [(row[0], row[2]) for row in rows(store)] == [(120, rpc.hashes[120])]
+
+
+def test_sync_ends_near_the_tip_after_a_long_history_backfill(store):
+    chain = make_chain(rpc_tail_blocks=10)
+    rpc = FakeRpc(tip=150)
+    history = FakeHistory([])
+    real_pages = history.pages
+
+    def slow_pages(token, low, high):
+        yield from real_pages(token, low, high)
+        rpc.extend(170)  # The chain moved on while history was rate limited.
+
+    history.pages = slow_pages
+    result = sync_chain(chain, rpc, store, history)
+
+    assert history.ranges == [(100, 140)]
+    assert result.tip == 170
+    assert store.synced_through("testnet") == 170
+    assert max(store.block_hashes("testnet")) == 170
