@@ -1,0 +1,147 @@
+# Architecture
+
+**Status:** binding. If a decision here is missing or wrong, change this file in the same PR.
+
+## Purpose
+
+Two things decide every choice here:
+
+1. **Trustworthy data:** anyone should be able to check the numbers, from raw chain data to the published figure.
+2. **Useful insight:** every model exists to answer a question in `docs/PRD.md`. A table that doesn't feed a question doesn't get built.
+
+Prefer a small system that's clearly correct over a big one that looks impressive.
+
+## Stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Language | Python 3.12, managed with uv | Standard for data work. Fast, reproducible installs |
+| Sources | JSON-RPC, Blockscout, Bridge transparency API, DefiLlama | Raw data, free where possible |
+| Warehouse | DuckDB file | Free, serverless, real SQL. Can move to Postgres or MotherDuck later |
+| Modeling | dbt with dbt-duckdb | Standard for analytics. Tests and lineage come with it |
+| Orchestration | Dagster assets, with asset checks | Asset model suits data work. Checks can block publishing |
+| Site | Static Next.js with TypeScript, Tailwind and Recharts, on Vercel's free tier | No database calls from visitors |
+| Quality | ruff, pytest, sqlfluff, ESLint, Prettier, Vitest | Enforced by `make check` |
+
+**Cost:** designed to run on free tiers.
+
+**Known gap:** no cloud hosting in the first version. Hosted schedules can follow.
+
+## Layout
+
+```
+pipeline/ousd/      Python package: chains, sources, ingest, store, reconcile, publish, cli
+pipeline/dagster/   Dagster definitions, schedules and asset checks
+dbt/                dbt project: staging, intermediate, marts, tests
+labels/             Versioned entity labels, each with source and confidence
+web/                Static site. Reads only from the published dataset
+tests/              Python tests. No network, ever
+docs/               PRD, architecture, plans, design system, methodology, build log
+data/               Local DuckDB and published output. Not in git
+```
+
+## Data flow
+
+```
+Chains and APIs
+   | sources: paged, throttled, retried
+   v
+raw tables in DuckDB (idempotent, reorg-aware)
+   | reconcile: events against totalSupply, to the base unit
+   v
+dbt staging -> intermediate -> marts, with tests
+   | Dagster asset checks
+   v
+publish step, only if every blocking check passes
+   | versioned JSON and CSV with a data-as-of time
+   v
+static site
+```
+
+If a check fails, nothing publishes and the site keeps the last good data, marked as stale.
+
+## Chains
+
+| Chain | Token | History | Tip | Finality |
+|---|---|---|---|---|
+| Tempo (4217) | `0x20c0000000000000000000006a37DA5C996874BE` | Public RPC | Public RPC | Finalized matched tip when checked |
+| Ethereum | `0x9f6F3991D525015a6F8CaF062C83b62fD3AC4436` | Blockscout | RPC | Roughly 76 blocks behind tip when checked |
+| Base | `0xB2000000000000000000002fEb517dFeC7415344` | Keyed RPC (`BASE_RPC_URL`) | RPC | Roughly 600 blocks behind tip when checked |
+| Solana | `ousd2mJsPEckLHcSCDxyKD7NDGARZcfLbDZkKiatYHB` | Keyed RPC (`SOLANA_RPC_URL`) | RPC | Use `finalized` commitment |
+
+Always filter by these addresses. The OUSD ticker also belongs to Origin Dollar.
+
+Provider differences stay inside `sources`. Everything after that works on normalized rows.
+
+## Core data rules
+
+- **Amounts are integers in base units** (6 decimals). Never floats, in Python or SQL.
+- **Idempotent writes.** The key is chain plus transaction plus log index, or the Solana equivalent. Re-running any range changes nothing.
+- **Reorgs.** Store block hashes, re-check a per-chain lookback at the tip, and replace orphaned rows. Test with simulated reorgs and say plainly that this is how it was tested.
+- **Raw is immutable** except for reorg repair. All interpretation happens in dbt.
+- **Time is UTC.** Day 0 is 2026-09-30, but ingest from the first mint.
+
+## Blocking checks
+
+Publishing stops if any of these fail:
+
+1. **Per-chain supply:** mints minus burns equals `totalSupply()` (or Solana's `getTokenSupply`) at the same block or slot, exactly.
+2. **Cross-chain supply:** the sum of chains matches Bridge's reported total, within a stated timing tolerance. Bridge's figure can move by millions within hours, so compare close in time.
+3. **Sampled balances:** model balances equal `balanceOf` for a sample of wallets.
+4. **dbt tests:** uniqueness, not-null and accepted values.
+5. **Volume waterfall:** the parts add back up to headline volume.
+6. **Freshness:** data is within the stated age.
+
+Non-blocking: changes that look wrong, such as a large jump in any metric, produce warnings for human review.
+
+## Models
+
+Marts map to PRD questions. Definitions are in PRD section 7, and these are the first ones:
+
+| Mart | Answers | PRD view |
+|---|---|---|
+| `mart_supply_journey` | How much is placed, in venues, circulating or active? | A |
+| `mart_activity_waterfall` | How much of the headline volume is real? | B |
+| `mart_chain_roles` | What is each chain used for? | E |
+| `mart_reconciliation` | Do the numbers hold up? | Trust strip |
+| `mart_partner_evidence` (later) | Who shows evidence of going live? | C |
+| `mart_peer_benchmarks` (later) | How does it compare at the same age? | D |
+| `mart_partner_economics` (later) | What could reserve income be worth? | F |
+
+**Tempo fee transfers:** initial findings put these at about 44% of Tempo transfers by count and about 138 OUSD by value. They go to the fee manager `0xfeec000000000000000000000000000000000000`. Filtering on that address alone may catch ordinary transfers, because the largest was 50 OUSD, so the rule needs care and a test.
+
+## Labels
+
+- One versioned file in `labels/`: address, chain, entity, category, source URL, confidence and date checked.
+- Only named when a published source supports it. Everything else stays an unnamed cluster.
+- A label change is a reviewed change, because labels affect published claims.
+
+## Published dataset
+
+- JSON per view, plus CSV for download.
+- A manifest with data-as-of time, git commit and check results.
+- Numbers as strings where precision matters, with a schema the site validates at build.
+
+## Site
+
+- Follows `docs/design-system.md`. Reads only from the published dataset.
+- Every chart has a takeaway sentence, source, as-of time and definition link.
+- Shows "Independent. Not affiliated with Open Standard or Bridge."
+
+## Security and secrets
+
+- Keys only in `.env`, which is gitignored. `.env.example` lists names without values.
+- Never log full RPC URLs, since they contain keys.
+- Changes to `pipeline/ousd/reconcile.py`, `pipeline/ousd/publish.py` and `labels/**` get extra review, because they decide what gets published.
+
+## Code standards
+
+- Small modules with one job. Type hints throughout. Clear names over comments; comments explain why.
+- Tests cover behavior and edge cases: paging boundaries, idempotent re-runs, reorg replacement, reconciliation failures. Tests never use the network.
+- No speculative abstractions. A second chain justifies an interface; an imagined fifth doesn't.
+- Conventional Commits. Every PR has `## Decisions`. UI PRs add `## Evidence`.
+- `docs/build-log.md` records what went wrong, honestly.
+
+## Commands
+
+`make check` runs lint, types and tests with no network. `make build` builds what's buildable. `make test` runs tests. These are the only commands CI calls.
