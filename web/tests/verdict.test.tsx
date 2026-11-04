@@ -87,14 +87,14 @@ describe("the verdict block", () => {
 
   it("chips the supporting line Inferred at full scope and Estimate at partial", () => {
     const full = renderBlock(sample(), () => {});
-    expect(full.container.querySelector("[data-verdict-text] .status-chip")!.textContent).toBe(
-      "Inferred",
-    );
+    expect(
+      full.container.querySelector("[data-verdict-text] .status-chip .sr-only")!.textContent,
+    ).toBe("Inferred");
     full.unmount();
     const partial = renderBlock(sample("partial"), () => {});
-    expect(partial.container.querySelector("[data-verdict-text] .status-chip")!.textContent).toBe(
-      "Estimate",
-    );
+    expect(
+      partial.container.querySelector("[data-verdict-text] .status-chip .sr-only")!.textContent,
+    ).toBe("Estimate");
   });
 
   it("keeps facts, estimates and opinions apart, and hides an empty group", () => {

@@ -2,15 +2,15 @@ import type { FrameWord } from "@/lib/dataset/state";
 
 export type ChipKind = "fact" | "estimate" | "inferred" | "opinion";
 
-const LABELS: Record<ChipKind, string> = {
-  fact: "Fact",
-  estimate: "Estimate",
-  inferred: "Inferred",
-  opinion: "Our reading",
+export const MARKERS: Record<Exclude<ChipKind, "opinion">, { letter: string; word: string }> = {
+  fact: { letter: "F", word: "Fact" },
+  inferred: { letter: "I", word: "Inferred" },
+  estimate: { letter: "E", word: "Estimate" },
 };
 
-// The label carries the meaning; the outline style is only a second cue. On sample or preview data
-// an opinion isn't one, so `frameWord` replaces "Our reading" and nothing else.
+// The letter carries the meaning, the outline style is only a second cue, and the full word is in
+// the DOM for assistive tech. An opinion stays in words, and on sample or preview data it isn't one,
+// so `frameWord` replaces "Our reading" and nothing else.
 export function StatusChip({
   kind,
   frameWord = null,
@@ -18,9 +18,18 @@ export function StatusChip({
   kind: ChipKind;
   frameWord?: FrameWord | null;
 }) {
+  if (kind === "opinion") {
+    return (
+      <span className="status-chip" data-kind={kind}>
+        {frameWord ? `${frameWord}, not a finding` : "Our reading"}
+      </span>
+    );
+  }
+  const { letter, word } = MARKERS[kind];
   return (
     <span className="status-chip" data-kind={kind}>
-      {kind === "opinion" && frameWord ? `${frameWord}, not a finding` : LABELS[kind]}
+      <span aria-hidden="true">{letter}</span>
+      <span className="sr-only">{word}</span>
     </span>
   );
 }

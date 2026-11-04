@@ -173,7 +173,7 @@ describe("the rendered page", () => {
     const card = container.querySelector("#documented-defaults")!.parentElement!.parentElement!;
     expect(card.textContent).toContain("placed_days");
     expect(card.textContent).toContain("clean_7d / 7 over circulating_supply");
-    expect(card.querySelector(".chart-card__meta")!.textContent).toContain("Source:");
+    expect(card.querySelector(".info-popover__panel")!.textContent).toContain("Source:");
   });
 
   it("names nothing but what the dataset names", () => {

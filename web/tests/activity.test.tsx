@@ -29,11 +29,22 @@ describe("the real activity view", () => {
     expect(cards).toHaveLength(3);
     for (const card of cards) {
       expect(card.querySelector("h2")!.textContent!.length).toBeGreaterThan(10);
-      const meta = card.querySelector(".chart-card__meta")!.textContent!;
-      expect(meta).toContain("Source:");
-      expect(meta).toContain("As of");
-      expect(card.querySelector('a[href^="/methodology/#"]')).not.toBeNull();
+      expect(card.querySelector(".chart-card__meta")!.textContent).toContain("As of");
+      const panel = card.querySelector(".info-popover__panel")!;
+      expect(panel.textContent).toContain("Source:");
+      expect(panel.querySelector('a[href^="/methodology/#"]')).not.toBeNull();
     }
+  });
+
+  it.each([
+    ["everyday-meaning", "Everyday means under"],
+    ["hops", "Hops across transactions still count more than once."],
+    ["wallets-not-people", "Wallets, not people."],
+  ])("keeps the %s caveat visible, with nothing opened", (kind, words) => {
+    const { container } = mount();
+    const note = container.querySelector(`[data-note="${kind}"]`)!;
+    expect(note.textContent).toContain(words);
+    expect(note.closest("details, noscript, .sr-only")).toBeNull();
   });
 
   it("shows one waterfall row per step, in the mart's order, hatched when removed", () => {

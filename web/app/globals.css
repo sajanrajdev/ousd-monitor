@@ -127,6 +127,7 @@ h2 {
   font-size: var(--text-meta);
   font-weight: 650;
   line-height: 1.4;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -149,13 +150,36 @@ h2 {
 }
 
 .chart-card {
+  /* Its width is what its tables and notes respond to, and not the viewport's. */
+  container-type: inline-size;
   padding: 1.25rem;
   background: var(--surface-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
 }
 
-.chart-card__meta {
+.chart-card__head > :first-child {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: var(--text-card-title);
+}
+
+.chart-card__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+/* A container query reads the content box: a card of 560 less its padding and borders. */
+@container (min-width: 518px) {
+  .chart-card__body[data-notes] {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+}
+
+.chart-card__meta,
+.chart-card__source-note {
   font-size: var(--text-meta);
   color: var(--color-meta-text);
 }
@@ -168,6 +192,11 @@ h2 {
 }
 
 .chart-area:has(.recharts-wrapper) {
+  background: none;
+}
+
+.chart-area[data-plot-content] {
+  height: auto;
   background: none;
 }
 
@@ -276,6 +305,315 @@ h2 {
   .hairline-table tr {
     padding: 0.5rem 0;
     border-bottom: 1px solid var(--color-border);
+  }
+}
+
+/* The same stack in a card narrower than 720 less its padding and borders. It can't share the rule
+   above, as a media and a container condition don't combine. A table outside a card has no
+   container, so this never reads for it. */
+@container (max-width: 677.98px) {
+  .hairline-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .hairline-table,
+  .hairline-table caption,
+  .hairline-table thead,
+  .hairline-table th,
+  .hairline-table tbody,
+  .hairline-table tr {
+    display: block;
+  }
+
+  .hairline-table td {
+    display: grid;
+    grid-template-columns: minmax(6rem, 40%) 1fr;
+    gap: 0.75rem;
+    padding: 0.375rem 0;
+    border-bottom: 0;
+  }
+
+  .hairline-table td::before {
+    content: attr(data-label);
+    font-weight: 550;
+  }
+
+  .hairline-table tr {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+}
+
+/* A head that holds an info popover: its trigger goes in the corner this reserves. */
+.explain-head {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  column-gap: 0.75rem;
+  padding-right: 2rem;
+}
+
+.info-popover > summary {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid var(--color-maroon);
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: var(--text-meta);
+  font-weight: 650;
+  list-style: none;
+}
+
+.info-popover > summary::-webkit-details-marker {
+  display: none;
+}
+
+.info-popover > summary::before {
+  content: "i";
+  content: "i" / "";
+}
+
+.info-popover[open] > summary {
+  background: var(--color-maroon);
+  color: var(--color-off-white);
+}
+
+/* The popover pushes and doesn't float: the panel opens in flow under the head, so it moves the plot
+   down and covers nothing at any width. To float it instead, change this block and nothing else. */
+.info-popover {
+  flex: 0 0 100%;
+}
+
+.info-popover__panel {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background: var(--color-secondary);
+  border-radius: var(--radius-control);
+  font-family: var(--font-sans);
+  font-size: var(--text-small);
+  font-weight: 450;
+}
+
+.pin {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--pin-size);
+  height: var(--pin-size);
+  background: var(--color-maroon);
+  border-radius: 50%;
+  color: var(--color-off-white);
+  font-size: var(--text-meta);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.pinned-notes {
+  display: grid;
+  align-content: start;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  font-size: var(--text-small);
+  list-style: none;
+}
+
+.pinned-notes > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.data-toggle {
+  margin-top: 0.75rem;
+}
+
+.data-toggle > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  padding: 0 0.75rem;
+  background: var(--color-secondary);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+  font-size: var(--text-small);
+  font-weight: 550;
+  list-style: none;
+}
+
+.data-toggle > summary::-webkit-details-marker {
+  display: none;
+}
+
+.data-toggle > summary:hover {
+  background: var(--color-secondary-strong);
+}
+
+/* It says Chart only where opening it really swaps the chart out, in the @supports block below. */
+.data-toggle__to-chart {
+  display: none;
+}
+
+/* A table too wide for its card scrolls inside it and never clips. */
+.data-toggle__panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  margin-top: 0.75rem;
+  overflow-x: auto;
+}
+
+/* A segmented control over native radios. The radio covers its option, so the whole of it is the
+   target, and it stays the thing that takes focus. */
+.chain-filter fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  min-height: var(--filter-height);
+  padding: 0.25rem;
+  background: var(--color-secondary);
+  border-radius: var(--radius-input);
+}
+
+.chain-filter label {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 2.25rem;
+  font-size: var(--text-small);
+  font-weight: 550;
+}
+
+.chain-filter input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.chain-filter label > span {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.75rem;
+  border-radius: var(--radius-control);
+}
+
+.chain-filter input:checked + span {
+  background: var(--color-maroon);
+  color: var(--color-off-white);
+}
+
+.chain-filter input:focus-visible + span {
+  outline: 2px solid var(--color-maroon);
+  outline-offset: 2px;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--grid-gap);
+}
+
+.chain-panels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--grid-gap);
+  min-width: 0;
+}
+
+@media (min-width: 1056px) {
+  .card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Without :has() nothing here applies, so an old browser shows every panel, long but complete, and
+   the plot and table together. Each filter value is listed, as CSS can't compare two attributes. */
+@supports selector(:has(*)) {
+  :root:has(.chain-filter input[value="all"]:checked) .chain-panel:not([data-chain-panel="all"]),
+  :root:has(.chain-filter input[value="tempo"]:checked)
+    .chain-panel:not([data-chain-panel="tempo"]),
+  :root:has(.chain-filter input[value="ethereum"]:checked)
+    .chain-panel:not([data-chain-panel="ethereum"]),
+  :root:has(.chain-filter input[value="base"]:checked) .chain-panel:not([data-chain-panel="base"]),
+  :root:has(.chain-filter input[value="solana"]:checked)
+    .chain-panel:not([data-chain-panel="solana"]) {
+    display: none;
+  }
+
+  .chart-card:has(> .data-toggle[open]) .chart-card__plot {
+    display: none;
+  }
+
+  .data-toggle[open] .data-toggle__to-chart {
+    display: inline;
+  }
+
+  .data-toggle[open] .data-toggle__to-table {
+    display: none;
+  }
+
+  .chart-card:has(> .data-toggle[open]) .chart-card__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* An open table needs the width. In panels it's the shown panel's toggle that counts, as a hidden
+     panel may still have one open. */
+  @media (min-width: 1056px) {
+    .card-grid > .chart-card:has(> .data-toggle[open]),
+    :root:has(.chain-filter input[value="all"]:checked)
+      .card-grid
+      > .chain-panels:has(> [data-chain-panel="all"] .data-toggle[open]),
+    :root:has(.chain-filter input[value="tempo"]:checked)
+      .card-grid
+      > .chain-panels:has(> [data-chain-panel="tempo"] .data-toggle[open]),
+    :root:has(.chain-filter input[value="ethereum"]:checked)
+      .card-grid
+      > .chain-panels:has(> [data-chain-panel="ethereum"] .data-toggle[open]),
+    :root:has(.chain-filter input[value="base"]:checked)
+      .card-grid
+      > .chain-panels:has(> [data-chain-panel="base"] .data-toggle[open]),
+    :root:has(.chain-filter input[value="solana"]:checked)
+      .card-grid
+      > .chain-panels:has(> [data-chain-panel="solana"] .data-toggle[open]) {
+      grid-column: 1 / -1;
+    }
+  }
+}
+
+/* Choosing an option couldn't change anything here, so there's no control to mislead with. */
+@supports not selector(:has(*)) {
+  .chain-filter {
+    display: none;
+  }
+}
+
+/* Forced colours drop backgrounds, and the background is what shows these are chosen. */
+@media (forced-colors: active) {
+  .chain-filter input:checked + span,
+  .info-popover[open] > summary {
+    background: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none;
   }
 }
 

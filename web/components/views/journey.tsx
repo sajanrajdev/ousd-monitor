@@ -132,7 +132,7 @@ export function JourneyView({ journey, activity, kpis, definitions, state }: Jou
         }
         note={<VenueNote unlabeled={unlabeled} />}
         table={{
-          caption: "Supply by part, newest day per chain",
+          caption: "Supply by part, newest day per chain. Holders are wallets, not people.",
           columns: [
             { key: "chain", label: "Chain" },
             { key: "day", label: "Day" },
@@ -176,6 +176,7 @@ export function JourneyView({ journey, activity, kpis, definitions, state }: Jou
         asOf={seriesAsOf}
         definitionHref={definitionHref("placed-supply")}
         frameWord={state.frameWord}
+        needsJs={series.length > 0}
         summary={
           series.length === 0
             ? UNKNOWN_TEXT
@@ -216,6 +217,9 @@ export function JourneyView({ journey, activity, kpis, definitions, state }: Jou
         definitionHref={definitionHref("active-wallets")}
         frameWord={state.frameWord}
         summary="Clean volume and active wallets sit beside the supply parts because they are flows, not slices of a balance. Wallets, not people, and never added across chains."
+        note={
+          <p data-note="wallets-not-people">Wallets, not people, and never added across chains.</p>
+        }
         table={{
           caption: "Last 7 days, per chain",
           columns: [

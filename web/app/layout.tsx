@@ -4,6 +4,7 @@ import "@fontsource-variable/inter";
 import "@fontsource-variable/newsreader";
 import "./globals.css";
 import { DatasetBanner, StaleNote } from "@/components/dataset-banner";
+import { ExplainEnhance } from "@/components/explain-enhance";
 import { FreshnessWatch } from "@/components/freshness";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -36,6 +37,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     >
       <body>
         <FreshnessWatch clock={state.clock} />
+        <ExplainEnhance />
         <SiteHeader />
         <DatasetBanner state={state} />
         <StaleNote state={state} />

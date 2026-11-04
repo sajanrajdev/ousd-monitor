@@ -139,7 +139,7 @@ export function UnnamedClusters({ clusters }: { clusters: LabelsFile["unnamed_cl
         <p>{UNKNOWN_TEXT}</p>
       ) : (
         <HairlineTable
-          caption="Unnamed clusters by category"
+          caption="Unnamed clusters by category. Wallets, not people."
           columns={[
             { key: "category", label: "Category" },
             { key: "total", label: "Wallets", numeric: true },
@@ -225,6 +225,7 @@ export function SettingsCard({ manifest, state }: { manifest: Manifest; state: D
         definitionHref="/methodology/#documented-defaults"
         frameWord={state.frameWord}
         summary="The values the pipeline was built with, beside the documented defaults. Amounts are in base units, 6 to the dollar."
+        note={<p>Amounts are in base units, 6 to the dollar.</p>}
         table={{
           caption: "Settings in this dataset",
           columns: [

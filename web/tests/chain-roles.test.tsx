@@ -23,12 +23,10 @@ describe("the chain roles view", () => {
     expect(cards).toHaveLength(1);
     const card = cards[0];
     expect(card.querySelector("h2")!.textContent).toContain("Ethereum leads on all 5 measures");
-    const meta = card.querySelector(".chart-card__meta")!.textContent!;
-    expect(meta).toContain("Source:");
-    expect(meta).toContain("As of");
-    expect(
-      card.querySelector('.chart-card__meta a[href="/methodology/#chain-roles"]'),
-    ).not.toBeNull();
+    expect(card.querySelector(".chart-card__meta")!.textContent).toContain("As of");
+    const panel = card.querySelector(".info-popover__panel")!;
+    expect(panel.textContent).toContain("Source:");
+    expect(panel.querySelector('a[href="/methodology/#chain-roles"]')).not.toBeNull();
     expect(card.querySelector("svg, canvas")).toBeNull();
   });
 

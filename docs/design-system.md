@@ -98,22 +98,13 @@ Both substitutes are free on Google Fonts, and the site serves them from the Fon
 | Token | Size | Use |
 |---|---|---|
 | `--text-display` | `clamp(2.5rem, 5vw, 4rem)` | The methodology page's title. The main page's headline uses the smaller size below |
+| `--text-headline` | `clamp(1.5rem, 1.2rem + 1.2vw, 2.25rem)` | The main page's headline, one line at 1056 and up in its usual state |
 | `--text-h2` | `clamp(1.5rem, 2.5vw, 2rem)` | Page section headings on the methodology page. Card titles use the smaller size below |
+| `--text-card-title` | `1.125rem` | Card titles and findings |
 | `--text-kpi` | `clamp(1.75rem, 3vw, 2.25rem)` | Key numbers |
 | `--text-body` | `clamp(1rem, 0.95rem + 0.25vw, 1.125rem)` | Narrative, from `1rem` to `1.125rem` |
 | `--text-small` | `0.875rem` | Table rows, chart labels, popover text |
 | `--text-meta` | `0.75rem` | Sources and as-of times |
-
-**Tokens the refurbish adds.** Unit U1 adds these to `tokens.css` and moves each row into the tables here, in one change. They have the use in their first column until then, because `web/tests/tokens.test.ts` requires any row that starts with a token to exist in `tokens.css`.
-
-| Use | Token | Value |
-|---|---|---|
-| The main page's headline, one line at 1056 and up in its usual state | `--text-headline` | `clamp(1.5rem, 1.2rem + 1.2vw, 2.25rem)` |
-| Card titles and findings | `--text-card-title` | `1.125rem` |
-| Between cards in the grid | `--grid-gap` | `1rem` |
-| Between the dashboard's sections, in place of `--section-space` on the main page | `--dashboard-space` | `clamp(1.5rem, 2vw, 2rem)` |
-| The chain filter's height, which `scroll-padding-top` adds from 768 while it's sticky | `--filter-height` | `2.75rem` |
-| A numbered pin | `--pin-size` | `1.25rem` |
 
 ## Layout
 
@@ -127,6 +118,10 @@ Taken from their tokens:
 | `--section-space` | `clamp(3.5rem, 4.1vw + 2.5rem, 6.25rem)` |
 | `--header-height` | `60px` on desktop. On phones it is a minimum, since the header wraps |
 | `--header-budget` | `88px`, the most the header may take at 390 wide. Also the phone `scroll-padding-top`, so anchors aren't covered |
+| `--grid-gap` | `1rem`, between cards in the grid |
+| `--dashboard-space` | `clamp(1.5rem, 2vw, 2rem)`, between the dashboard's sections, in place of `--section-space` on the main page |
+| `--filter-height` | `2.75rem`, the chain filter's height, which `scroll-padding-top` adds from 768 while it's sticky |
+| `--pin-size` | `1.25rem`, a numbered pin |
 
 **Named widths.** The first version of this file named 1440px and 1056px and no phone width. These are the widths the site is built and checked at. Two-column charts begin at 1056.
 
@@ -189,8 +184,8 @@ Three layers, none covering data. Each is native HTML, and works by tap and keyb
 | **Data toggle** | Tap, click or keyboard | The chart's table in full, with exact amounts and any further tables. It swaps the chart for the table | The only copy of a finding or caveat | Works the same |
 
 - **A popover pushes and doesn't float.** It opens in flow under the card's or cell's head, moving the plot down, so it covers nothing at any width. One is open at a time.
-- **Popover behaviour:** a trigger at least 24 px with a name. Escape closes it and returns focus. With a mouse, moving onto the panel keeps it open, and a click keeps it open until dismissed. It has no animation.
-- **Pins in a chart are decoration.** The graphic is hidden from assistive technology and out of the tab order, so a pin is never a link or a focusable element. Its note reads on its own without it.
+- **Popover behaviour:** a trigger at least 24 px with a name. Escape closes it, and returns focus when focus was in it or nowhere, so it never scrolls a reader away. With a mouse, moving onto the panel keeps it open, and a click keeps it open until dismissed. It has no animation.
+- **Pins in a chart are decoration.** The graphic is hidden from assistive technology and out of the tab order, so a pin is never a link or a focusable element. Its note reads on its own without it. A plot that is real content, such as the chain grid's table, isn't a graphic and isn't hidden.
 - **A pin comes from the data.** It appears because the manifest or a condition in the config says so, so it can't go false when the data changes.
 
 ## Charts
@@ -234,6 +229,8 @@ None of these states may move into a popover or a data toggle.
 - With JavaScript off, a chart that needs it says "This chart needs JavaScript. The Table button has the same data." The filter and data toggles still work, and sources and definitions show as plain notes.
 - Full keyboard use, with visible focus states. The filter uses arrow keys, and popovers and toggles use Enter and Space.
 - Targets at least 24 px, and the filter's at least 36 px.
+- In forced colours the chosen filter option and an open popover's trigger use `Highlight`, as backgrounds drop out.
+- Without `:has()`, every panel shows and the filter is hidden, because choosing an option couldn't change anything.
 - Axe runs with every popover and toggle open, because it skips closed content.
 
 ## Tailwind

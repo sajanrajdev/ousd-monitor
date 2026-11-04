@@ -1,5 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
+import type { ReactElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   ChartCard,
@@ -34,9 +36,14 @@ const props: ChartCardProps = {
   children: <svg data-testid="graphic" />,
 };
 
+// The way verify-output reads a built page: with scripting off, so a noscript's children are elements.
+function parsed(card: ReactElement): Document {
+  return new DOMParser().parseFromString(renderToStaticMarkup(card), "text/html");
+}
+
 describe("chart card", () => {
-  it("renders the takeaway as a heading, then source, as-of time, a definition link and a table", () => {
-    render(
+  it("renders the takeaway as a heading, the marker and a visible as-of, and the rest on demand", () => {
+    const { container } = render(
       <main>
         <ChartCard {...props} />
       </main>,
@@ -45,15 +52,66 @@ describe("chart card", () => {
     const heading = screen.getByRole("heading", { level: 2 });
     expect(heading.textContent).toBe(props.takeaway);
     expect(screen.getByText("Fact")).toBeTruthy();
-    expect(screen.getByText(/Source: Sample data/)).toBeTruthy();
-    expect(screen.getByText("4 Nov 2026, 14:05 UTC").getAttribute("datetime")).toBe(props.asOf);
-    expect(screen.getByRole("link", { name: "Definition" }).getAttribute("href")).toBe(
-      "/methodology#supply",
-    );
-    expect(screen.getByText(props.summary)).toBeTruthy();
 
-    const accordion = screen.getByText("Table of the same data").closest("details")!;
-    expect(within(accordion).getByRole("table", { name: table.caption })).toBeTruthy();
+    const meta = container.querySelector(".chart-card__meta")!;
+    expect(meta.closest("details")).toBeNull();
+    expect(meta.querySelector("time")!.textContent).toBe("4 Nov 2026, 14:05 UTC");
+    expect(meta.querySelector("time")!.getAttribute("datetime")).toBe(props.asOf);
+    expect(meta.textContent).not.toContain("Source:");
+
+    const panel = container.querySelector(".info-popover__panel")!;
+    expect(panel.textContent).toContain("Source: Sample data");
+    expect(panel.textContent).toContain("As of 4 Nov 2026, 14:05 UTC");
+    expect(panel.textContent).toContain(props.summary);
+    expect(panel.querySelector("a")!.getAttribute("href")).toBe("/methodology#supply");
+
+    const toggle = screen.getByText("Table").closest("details")!;
+    expect(within(toggle).getByRole("table", { name: table.caption, hidden: true })).toBeTruthy();
+  });
+
+  it("keeps the takeaway and marker in the card's head, outside its popover", () => {
+    const { container } = render(
+      <main>
+        <ChartCard {...props} />
+        <TableCard {...props} />
+      </main>,
+    );
+    const heads = container.querySelectorAll(".chart-card__head");
+    expect(heads).toHaveLength(2);
+    for (const head of heads) {
+      const heading = head.querySelector(":scope > h2")!;
+      const chip = head.querySelector(":scope > .status-chip")!;
+      expect(heading.textContent).toBe(props.takeaway);
+      expect(heading.closest("details")).toBeNull();
+      expect(chip.getAttribute("data-kind")).toBe("fact");
+      expect(chip.closest("details")).toBeNull();
+    }
+    expect(container.querySelector(".info-popover__panel .status-chip")).toBeNull();
+    expect(container.querySelector(".info-popover__panel h2")).toBeNull();
+  });
+
+  it("keeps the summary for assistive tech, visually hidden", () => {
+    const { container } = render(<ChartCard {...props} />);
+    const hidden = container.querySelector(".chart-card > .sr-only")!;
+    expect(hidden.textContent).toBe(props.summary);
+  });
+
+  it("names the card on its popover's trigger and its toggle", () => {
+    const { container } = render(<ChartCard {...props} />);
+    expect(container.querySelector(".info-popover > summary")!.getAttribute("aria-label")).toBe(
+      `About: ${props.takeaway}`,
+    );
+    expect(container.querySelector(".data-toggle > summary")!.textContent).toContain(
+      `for ${props.takeaway}`,
+    );
+  });
+
+  it("has source and definition in the noscript note, as verify-output parses it", () => {
+    const note = parsed(<ChartCard {...props} />).querySelector(
+      "noscript .chart-card__source-note",
+    )!;
+    expect(note.textContent).toContain("Source: Sample data");
+    expect(note.querySelector("a")!.getAttribute("href")).toBe("/methodology#supply");
   });
 
   it("hides the graphic from assistive tech and the tab order", () => {
@@ -68,11 +126,75 @@ describe("chart card", () => {
     expect(area.querySelector("a, button, input, [tabindex]")).toBeNull();
   });
 
-  it("says what to do without JavaScript", () => {
-    const { container } = render(<ChartCard {...props} />);
-    const noscript = container.querySelector("noscript")!;
-    expect(noscript).not.toBeNull();
-    expect(noscript.closest("[aria-hidden]")).toBeNull();
+  it("says what to do without JavaScript only on a chart that needs it", () => {
+    const needing = parsed(<ChartCard {...props} needsJs />).querySelector(
+      ".chart-area__needs-js",
+    )!;
+    expect(needing.textContent).toBe(
+      "This chart needs JavaScript. The Table button has the same data.",
+    );
+    expect(needing.closest("[aria-hidden]")).toBeNull();
+    expect(needing.closest("noscript")).not.toBeNull();
+    expect(parsed(<ChartCard {...props} />).querySelector(".chart-area__needs-js")).toBeNull();
+  });
+
+  it("hides the plot from assistive tech unless it is real content", () => {
+    const { container, rerender } = render(<ChartCard {...props} />);
+    const area = () => container.querySelector(".chart-area")!;
+    expect(area().getAttribute("aria-hidden")).toBe("true");
+    expect(area().hasAttribute("data-plot-content")).toBe(false);
+    rerender(<ChartCard {...props} plotIsContent />);
+    expect(area().hasAttribute("aria-hidden")).toBe(false);
+    expect(area().hasAttribute("data-plot-content")).toBe(true);
+  });
+
+  it("gives the noscript definition link a 24px target", () => {
+    const link = parsed(<ChartCard {...props} />).querySelector("noscript a")!;
+    expect(link.className).toContain("target-link");
+  });
+
+  it("renders its pinned notes after the plot, and none when it has none", () => {
+    const notes = [{ kind: "a-caveat", text: "On Tempo, a caveat." }];
+    const { container, rerender } = render(<ChartCard {...props} notes={notes} />);
+    const list = container.querySelector("[data-pinned-notes]")!;
+    expect(list.previousElementSibling!.className).toBe("chart-card__plot");
+    expect(list.closest("details")).toBeNull();
+    expect(container.querySelector(".chart-card__body")!.hasAttribute("data-notes")).toBe(true);
+
+    rerender(<ChartCard {...props} />);
+    expect(container.querySelector("[data-pinned-notes]")).toBeNull();
+    expect(container.querySelector(".chart-card__body")!.hasAttribute("data-notes")).toBe(false);
+  });
+
+  it("takes an anchor, more for the popover, and further tables under the toggle", () => {
+    const { container } = render(
+      <ChartCard
+        {...props}
+        id="where-supply-sits"
+        detail={<p>The long takeaway.</p>}
+        moreTables={<p data-testid="more">Another table</p>}
+      />,
+    );
+    expect(container.querySelector(".chart-card")!.id).toBe("where-supply-sits");
+    expect(container.querySelector(".info-popover__panel")!.textContent).toContain(
+      "The long takeaway.",
+    );
+    expect(screen.getByTestId("more").closest(".data-toggle")).not.toBeNull();
+  });
+
+  it("keeps the frame word beside the as-of, on a table card too", () => {
+    const { container } = render(
+      <>
+        <ChartCard {...props} frameWord="Sample" />
+        <TableCard {...props} frameWord="Sample" />
+      </>,
+    );
+    const metas = container.querySelectorAll(".chart-card__meta");
+    expect(metas).toHaveLength(2);
+    for (const meta of metas) {
+      expect(meta.closest("details")).toBeNull();
+      expect(meta.textContent).toContain("Sample");
+    }
   });
 
   it("has no axe violations", async () => {
@@ -100,8 +222,10 @@ describe("chart card", () => {
       { ...props, definitionHref: undefined },
       // @ts-expect-error the chip is required
       { ...props, chip: undefined },
+      // @ts-expect-error the takeaway is required
+      { ...props, takeaway: undefined },
     ];
-    expect(missing).toHaveLength(6);
+    expect(missing).toHaveLength(7);
   });
 });
 

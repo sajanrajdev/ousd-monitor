@@ -38,7 +38,47 @@ function filesUnder(dir) {
   });
 }
 
-function visibleTextNodes(document) {
+const OUT_OF_VIEW = [
+  "noscript",
+  "template",
+  "script",
+  "style",
+  "[hidden]",
+  ".sr-only",
+  '[style*="display:none"]',
+  '[style*="display: none"]',
+  '[style*="visibility:hidden"]',
+  '[style*="visibility: hidden"]',
+].join(", ");
+
+// In view with nothing opened: not hidden, and inside no details but in its summary. CSS can't be
+// read here, so the browser checks in acceptance.mjs cover what a stylesheet hides.
+function inView(element) {
+  if (element.closest(OUT_OF_VIEW)) return false;
+  for (let d = element.closest("details"); d; d = d.parentElement?.closest("details")) {
+    if (!d.querySelector(":scope > summary")?.contains(element)) return false;
+  }
+  return true;
+}
+
+function viewText(element) {
+  if (!element || !inView(element)) return "";
+  const { NodeFilter } = element.ownerDocument.defaultView;
+  const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  let text = "";
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (inView(node.parentElement)) text += `${node.data} `;
+  }
+  return text;
+}
+
+// The card's visible line.
+function visibleMeta(card) {
+  return [...card.querySelectorAll(".chart-card__meta")].find(inView);
+}
+
+// Every text node, for the scans that must find a thing wherever it sits, seen or not.
+function allTextNodes(document) {
   const { NodeFilter } = document.defaultView;
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   const nodes = [];
@@ -53,9 +93,16 @@ function escapedNameMatcher(name) {
   return new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`);
 }
 
-function checkEveryPage(page, document, text, problems) {
-  if (!text.includes(INDEPENDENCE_LINE)) problems.push(`${page}: no independence line`);
-  if (!/not financial advice/i.test(text)) problems.push(`${page}: no "not financial advice"`);
+function checkEveryPage(page, document, problems) {
+  const header = viewText(document.querySelector("header"));
+  const footer = viewText(document.querySelector("footer"));
+  if (!header.includes(INDEPENDENCE_LINE)) {
+    problems.push(`${page}: no independence line in the header`);
+  }
+  if (!footer.includes(INDEPENDENCE_LINE)) {
+    problems.push(`${page}: no independence line in the footer`);
+  }
+  if (!/not financial advice/i.test(footer)) problems.push(`${page}: no "not financial advice"`);
 }
 
 function checkStateOnPage(page, document, expected, problems) {
@@ -75,7 +122,7 @@ function checkStateOnPage(page, document, expected, problems) {
     return;
   }
   if (root.dataset.frame !== word) problems.push(`${page}: no ${word} frame on the page root`);
-  if (!banner) problems.push(`${page}: no ${word} banner`);
+  if (!viewText(banner).trim()) problems.push(`${page}: no ${word} banner`);
   if (!document.title.startsWith(`[${word}]`)) problems.push(`${page}: no [${word}] in the title`);
   const robots = document.querySelector('meta[name="robots"]')?.getAttribute("content") ?? "";
   if (!robots.includes("noindex")) problems.push(`${page}: no noindex`);
@@ -83,7 +130,7 @@ function checkStateOnPage(page, document, expected, problems) {
     if (card.getAttribute("data-frame") !== word) {
       problems.push(`${page}: a card has no ${word} edge`);
     }
-    if (!card.querySelector(".chart-card__meta")?.textContent.includes(word)) {
+    if (!viewText(visibleMeta(card)).includes(word)) {
       problems.push(`${page}: a card has no "${word}" beside its as-of time`);
     }
   }
@@ -97,14 +144,14 @@ function checkFreshnessOnPage(page, document, expected, problems) {
   } else if (expected.freshness === "stale" && shown !== "stale") {
     problems.push(`${page}: page root says fresh, dataset is stale`);
   }
-  const note = document.querySelector("[data-stale-note]")?.textContent ?? "";
+  const note = viewText(document.querySelector("[data-stale-note]"));
   if (!note.includes(expected.asOfLine.stale)) problems.push(`${page}: no stale note`);
 }
 
 function checkMainFreshness(page, document, expected, problems) {
   const shownFresh = document.documentElement.dataset.freshness === "fresh";
-  const verdict = document.querySelector('[data-section="verdict"]')?.textContent ?? "";
-  const trust = document.querySelector('[data-section="trust-strip"]')?.textContent ?? "";
+  const verdict = viewText(document.querySelector('[data-section="verdict"]'));
+  const trust = viewText(document.querySelector('[data-section="trust-strip"]'));
   if (!verdict.includes(expected.asOfLine.stale)) {
     problems.push(`${page}: the verdict block has no stale text`);
   }
@@ -127,14 +174,14 @@ function checkMainFrame(page, document, expected, problems) {
   const word = expected.frameWord;
   if (!word) return;
   const chip = document.querySelector('[data-section="verdict"] .status-chip[data-kind="opinion"]');
-  if (chip?.textContent.trim() !== `${word}, not a finding`) {
+  if (viewText(chip).trim() !== `${word}, not a finding`) {
     problems.push(`${page}: the verdict chip doesn't say "${word}, not a finding"`);
   }
-  if (!document.querySelector('[data-section="kpi-row"]')?.textContent.includes(word)) {
+  if (!viewText(document.querySelector('[data-section="kpi-row"]')).includes(word)) {
     problems.push(`${page}: no "${word}" in the KPI row`);
   }
   if (
-    !document.querySelector('[data-section="trust-strip"]')?.textContent.includes("Not reconciled")
+    !viewText(document.querySelector('[data-section="trust-strip"]')).includes("Not reconciled")
   ) {
     problems.push(`${page}: the trust strip doesn't say "Not reconciled"`);
   }
@@ -153,13 +200,63 @@ function checkAddresses(page, texts, allowedAddresses, problems) {
   }
 }
 
+const DEFINITION_LINK = /^\/methodology\/?#[\w-]+$/;
+
+function hasSourceAndDefinition(block) {
+  return {
+    source: [...(block?.querySelectorAll("p") ?? [])].some((line) =>
+      /Source:\s*[^\s·]/.test(line.textContent),
+    ),
+    definition: [...(block?.querySelectorAll("a[href]") ?? [])].some((link) =>
+      DEFINITION_LINK.test(link.getAttribute("href")),
+    ),
+  };
+}
+
+// A chart with nothing in the static HTML is blank with JavaScript off, so it has to say so.
+function drawsOnlyInBrowser(area) {
+  return !area.textContent.trim() || area.querySelector(".recharts-responsive-container");
+}
+
+// A card's takeaway, marker and time stay in view. Its source and definition are one tap away in the
+// popover, and are in a plain note with JavaScript off, which the page's parser reads as elements
+// here. The table is required by type, and this says it reached the page.
 function checkCards(page, document, problems) {
   for (const card of document.querySelectorAll(".chart-card")) {
-    const meta = card.querySelector(".chart-card__meta");
-    if (!meta?.textContent.includes("Source:")) problems.push(`${page}: a card has no source`);
-    if (!meta?.querySelector("time[datetime]")) problems.push(`${page}: a card has no as-of time`);
-    const link = meta?.querySelector('a[href*="#"]');
-    if (!link) problems.push(`${page}: a card has no definition link`);
+    const headings = [...card.querySelectorAll(".chart-card__head h2, .chart-card__head h3")];
+    if (!headings.some((heading) => viewText(heading).trim())) {
+      problems.push(`${page}: a card has no visible takeaway`);
+    }
+    const chips = [...card.querySelectorAll(".chart-card__head .status-chip")];
+    if (!chips.some((chip) => viewText(chip).trim())) {
+      problems.push(`${page}: a card has no visible marker`);
+    }
+    const time = visibleMeta(card)?.querySelector("time[datetime]");
+    if (!time?.getAttribute("datetime").trim() || !viewText(time).trim()) {
+      problems.push(`${page}: a card has no visible as-of time`);
+    }
+    const panel = hasSourceAndDefinition(card.querySelector(".info-popover__panel"));
+    if (!panel.source) problems.push(`${page}: a card's popover has no source`);
+    if (!panel.definition) problems.push(`${page}: a card's popover has no definition link`);
+    const notes = [...card.querySelectorAll("noscript")].map(hasSourceAndDefinition);
+    if (!notes.some((note) => note.source)) {
+      problems.push(`${page}: a card's noscript note has no source`);
+    }
+    if (!notes.some((note) => note.definition)) {
+      problems.push(`${page}: a card's noscript note has no definition link`);
+    }
+    if (!card.querySelector("table")) problems.push(`${page}: a card has no table`);
+    for (const area of card.querySelectorAll(".chart-area")) {
+      const note = area.parentElement.querySelector("noscript .chart-area__needs-js");
+      if (drawsOnlyInBrowser(area) && !note) {
+        problems.push(`${page}: a chart that draws only in the browser has no note for it`);
+      }
+    }
+  }
+  for (const notes of document.querySelectorAll("[data-pinned-notes]")) {
+    if (notes.closest("details, noscript")) {
+      problems.push(`${page}: pinned notes inside a details or noscript`);
+    }
   }
 }
 
@@ -251,9 +348,9 @@ export function verifyOutput(outDir, expected) {
     const page = relative(outDir, path);
     const html = readFileSync(path, "utf8");
     const { document } = new JSDOM(html).window;
-    const nodes = visibleTextNodes(document);
+    const nodes = allTextNodes(document);
     const text = nodes.map((node) => node.data).join(" ");
-    checkEveryPage(page, document, text, problems);
+    checkEveryPage(page, document, problems);
     checkStateOnPage(page, document, expected, problems);
     checkFreshnessOnPage(page, document, expected, problems);
     checkCards(page, document, problems);

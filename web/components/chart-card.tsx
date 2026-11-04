@@ -1,14 +1,16 @@
 import { useId, type ReactNode } from "react";
-import { Accordion } from "./accordion";
 import type { FrameWord } from "@/lib/dataset/state";
 import { formatAsOf, type AsOfRange } from "@/lib/format";
+import { DataToggle } from "./data-toggle";
 import { HairlineTable, type HairlineTableProps } from "./hairline-table";
+import { InfoPopover } from "./info-popover";
+import { PinnedNotes, type PinnedNote } from "./pinned-notes";
 import { StatusChip, type ChipKind } from "./status-chip";
 
-// Every prop but `level` is required, so a chart missing its source, time, definition, summary or
-// table doesn't compile. `frameWord` comes from the dataset's state and is required too, so a card
-// on sample or preview data can't forget to say so, even cropped alone. The summary and table are
-// server-rendered; Recharts is not.
+// Every prop from `takeaway` to `children` is required, so a chart missing its source, time,
+// definition, summary or table doesn't compile. `frameWord` comes from the dataset's state and is
+// required too, so a card on sample or preview data can't forget to say so, even cropped alone. The
+// summary and table are server-rendered; Recharts is not.
 export type ChartCardProps = {
   takeaway: string;
   chip: ChipKind;
@@ -19,138 +21,170 @@ export type ChartCardProps = {
   summary: string;
   table: HairlineTableProps;
   children: ReactNode;
+  // The card's anchor. Under a filter it goes on ChainPanels instead, as a panel repeats its card.
+  id?: string;
+  // Short caveats, always visible, numbered to their pins in the chart.
+  notes?: PinnedNote[];
+  // More for the popover, under the summary: the long takeaway or a note in full. Nothing essential.
+  detail?: ReactNode;
+  // Further tables under the data toggle, after the chart's own.
+  moreTables?: ReactNode;
+  // For a chart that only draws in the browser. A hand-built chart is in the static HTML.
+  needsJs?: boolean;
+  // For a plot that is itself real content, such as a table with words for assistive tech. Otherwise
+  // the graphic is hidden from assistive tech, as the summary and table carry what it shows.
+  plotIsContent?: boolean;
   // Words a reader needs beside the chart or table, such as a caveat with a link. Read by everyone:
   // the graphic is hidden from assistive tech, and the summary is a plain string.
   note?: ReactNode;
   level?: 2 | 3;
 };
 
-// A card whose content is its table: no chart, and no second table in an accordion.
-export type TableCardProps = Omit<ChartCardProps, "children">;
+// A card whose content is its table: no chart, and no second table behind a toggle.
+export type TableCardProps = Omit<
+  ChartCardProps,
+  "children" | "moreTables" | "needsJs" | "plotIsContent"
+>;
+
+type CardFrameProps = Pick<
+  ChartCardProps,
+  | "takeaway"
+  | "chip"
+  | "source"
+  | "asOf"
+  | "definitionHref"
+  | "frameWord"
+  | "summary"
+  | "id"
+  | "detail"
+  | "level"
+> & { children: ReactNode };
 
 function cardAsOf(asOf: string | AsOfRange): { dateTime: string; text: string } {
   const dateTime = typeof asOf === "string" ? asOf : asOf.to;
   return { dateTime, text: formatAsOf(asOf) };
 }
 
-function CardHead({
-  headingId,
-  takeaway,
-  chip,
-  frameWord,
-  level,
-}: Pick<ChartCardProps, "takeaway" | "chip" | "frameWord" | "level"> & { headingId: string }) {
-  const Heading = level === 3 ? "h3" : "h2";
-  return (
-    <div className="flex items-start justify-between gap-3">
-      <Heading id={headingId} style={{ fontSize: "var(--text-h2)" }}>
-        {takeaway}
-      </Heading>
-      <StatusChip kind={chip} frameWord={frameWord} />
-    </div>
-  );
-}
-
 function CardNote({ note }: { note: ReactNode }) {
   return note ? <div className="chart-card__note mt-3">{note}</div> : null;
 }
 
-function CardMeta({
+// The parts every card has. The as-of time and frame word stay visible, so a cropped card still says
+// them. Source and definition sit in the popover, and in a plain note with JavaScript off.
+function CardFrame({
+  takeaway,
+  chip,
   source,
   asOf,
   definitionHref,
   frameWord,
-}: Pick<ChartCardProps, "source" | "asOf" | "definitionHref" | "frameWord">) {
+  summary,
+  id,
+  detail,
+  level = 2,
+  children,
+}: CardFrameProps) {
+  const headingId = useId();
+  const Heading = level === 3 ? "h3" : "h2";
   const when = cardAsOf(asOf);
   return (
-    <p className="chart-card__meta mt-3">
-      Source: {source} · As of <time dateTime={when.dateTime}>{when.text}</time>
-      {frameWord ? (
-        <>
-          {" "}
-          · <strong className="chart-card__frame-word">{frameWord}</strong>
-        </>
-      ) : null}{" "}
-      ·{" "}
-      <a href={definitionHref} className="underline underline-offset-4">
-        Definition
-      </a>
-    </p>
+    <section
+      id={id}
+      className="chart-card"
+      aria-labelledby={headingId}
+      data-frame={frameWord ?? undefined}
+    >
+      <div className="chart-card__head explain-head">
+        <Heading id={headingId}>{takeaway}</Heading>
+        <StatusChip kind={chip} frameWord={frameWord} />
+        <InfoPopover label={`About: ${takeaway}`}>
+          <p>{summary}</p>
+          {detail}
+          <p>Source: {source}</p>
+          <p>As of {when.text}</p>
+          <p>
+            <a href={definitionHref} className="target-link underline underline-offset-4">
+              Definition
+            </a>
+          </p>
+        </InfoPopover>
+      </div>
+      <p className="sr-only">{summary}</p>
+      {children}
+      <p className="chart-card__meta mt-3">
+        As of <time dateTime={when.dateTime}>{when.text}</time>
+        {frameWord ? (
+          <>
+            {" "}
+            · <strong className="chart-card__frame-word">{frameWord}</strong>
+          </>
+        ) : null}
+      </p>
+      <noscript>
+        <p className="chart-card__source-note">
+          Source: {source} ·{" "}
+          <a href={definitionHref} className="target-link underline underline-offset-4">
+            Definition
+          </a>
+        </p>
+      </noscript>
+    </section>
   );
 }
 
 export function ChartCard({
-  takeaway,
-  chip,
-  source,
-  asOf,
-  definitionHref,
-  frameWord,
-  summary,
   table,
   children,
+  notes = [],
+  moreTables,
+  needsJs = false,
+  plotIsContent = false,
   note,
-  level = 2,
+  ...frame
 }: ChartCardProps) {
-  const headingId = useId();
   return (
-    <section className="chart-card" aria-labelledby={headingId} data-frame={frameWord ?? undefined}>
-      <CardHead
-        headingId={headingId}
-        takeaway={takeaway}
-        chip={chip}
-        frameWord={frameWord}
-        level={level}
-      />
-      <p className="mt-3">{summary}</p>
-      {/* aria-hidden and nothing focusable inside; not inert, so hover tooltips still work. */}
-      <div className="chart-area mt-4" aria-hidden="true">
-        {children}
+    <CardFrame {...frame}>
+      <div className="chart-card__body" data-notes={notes.length > 0 || undefined}>
+        <div className="chart-card__plot">
+          {/* aria-hidden and nothing focusable inside; not inert, so hover tooltips still work. */}
+          <div
+            className="chart-area"
+            aria-hidden={plotIsContent ? undefined : "true"}
+            data-plot-content={plotIsContent || undefined}
+          >
+            {children}
+          </div>
+          {needsJs ? (
+            <noscript>
+              <p className="chart-area__needs-js">
+                This chart needs JavaScript. The Table button has the same data.
+              </p>
+            </noscript>
+          ) : null}
+        </div>
+        <PinnedNotes notes={notes} />
       </div>
-      <noscript>
-        <p className="chart-area__needs-js">
-          This chart needs JavaScript. The table below has the same data.
-        </p>
-      </noscript>
       <CardNote note={note} />
-      <div className="mt-4">
-        <Accordion title="Table of the same data">
-          <HairlineTable {...table} />
-        </Accordion>
-      </div>
-      <CardMeta source={source} asOf={asOf} definitionHref={definitionHref} frameWord={frameWord} />
-    </section>
+      <DataToggle label={frame.takeaway}>
+        <HairlineTable {...table} />
+        {moreTables}
+      </DataToggle>
+    </CardFrame>
   );
 }
 
-export function TableCard({
-  takeaway,
-  chip,
-  source,
-  asOf,
-  definitionHref,
-  frameWord,
-  summary,
-  table,
-  note,
-  level = 2,
-}: TableCardProps) {
-  const headingId = useId();
+export function TableCard({ table, notes = [], note, ...frame }: TableCardProps) {
   return (
-    <section className="chart-card" aria-labelledby={headingId} data-frame={frameWord ?? undefined}>
-      <CardHead
-        headingId={headingId}
-        takeaway={takeaway}
-        chip={chip}
-        frameWord={frameWord}
-        level={level}
-      />
-      <p className="mt-3">{summary}</p>
+    <CardFrame {...frame}>
       <div className="mt-4">
         <HairlineTable {...table} />
       </div>
+      {notes.length > 0 ? (
+        <div className="mt-3">
+          <PinnedNotes notes={notes} />
+        </div>
+      ) : null}
       <CardNote note={note} />
-      <CardMeta source={source} asOf={asOf} definitionHref={definitionHref} frameWord={frameWord} />
-    </section>
+    </CardFrame>
   );
 }
