@@ -582,7 +582,7 @@ def _finish_run(
         store.record_bridge_comparison(run_id, REQUIRED_CHAINS, matched_total, matched_total, True)
         store.finish_run(run_id, status, code)
         store.db.commit()
-    except Exception:
+    except BaseException:  # Ctrl-C too, or this connection stays inside the transaction.
         store.db.rollback()
         raise
 

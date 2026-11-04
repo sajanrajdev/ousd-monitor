@@ -1890,7 +1890,20 @@ def test_a_busy_window_in_a_run_is_unchecked_and_writes_no_comparison(store, mon
 
 
 class Crash(BaseException):
-    """The process dying: `except Exception` doesn't run, so nothing gets to roll back."""
+    """The process dying, for the writes outside a transaction this run holds open."""
+
+
+class NoRollback:
+    """A connection whose rollback does nothing, as a process that dies never gets to run one."""
+
+    def __init__(self, db):
+        self._db = db
+
+    def __getattr__(self, name):
+        return getattr(self._db, name)
+
+    def rollback(self):
+        pass
 
 
 def crash_on_bridge_outcome(item):
@@ -1951,6 +1964,7 @@ def test_a_crash_after_the_check_row_leaves_no_passing_comparison(tmp_path):
 @pytest.mark.parametrize("method", ["record_bridge_comparison", "finish_run"])
 def test_a_passing_comparison_and_the_finished_run_are_written_together(tmp_path, method):
     def crash_after_the_real_write(store):
+        store.db = NoRollback(store.db)
         real = getattr(store, method)
 
         def crash(*args, **kwargs):
@@ -1979,6 +1993,50 @@ def test_a_finish_that_fails_takes_the_passing_comparison_with_it(store, monkeyp
     assert runs(store) == [("full", None, None, True)]
     # The rollback left the connection usable, so the failure can't hide behind a second one.
     assert store.db.execute("SELECT count(*) FROM bridge_comparisons").fetchone() == (0,)
+
+
+def test_ctrl_c_during_the_finish_leaves_the_connection_clean_for_the_next_run(store):
+    real = store.finish_run
+
+    def interrupt(run_id, status, code):
+        real(run_id, status, code)
+        raise KeyboardInterrupt
+
+    store.finish_run = interrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run_it(store, four_probes(store))
+
+    # This same connection would read its own uncommitted pass, had it not rolled back.
+    assert comparisons(store) == []
+    assert runs(store) == [("full", None, None, True)]
+    assert store.latest_reconciliation() is None
+
+    store.finish_run = real
+    result, _ = run_it(store, four_probes(store))
+
+    assert result.exit_code == 0
+    assert [row[5] for row in comparisons(store)] == [True]
+    assert store.latest_reconciliation().usable
+
+
+def test_a_pass_and_its_comparison_are_still_there_after_the_store_is_closed(tmp_path):
+    path = tmp_path / "ousd.duckdb"
+    store = Store(path)
+    result, _ = run_it(store, four_probes(store))
+    store.close()
+
+    reopened = Store(path)
+    latest = reopened.latest_reconciliation()
+
+    assert result.exit_code == 0
+    assert runs(reopened) == [("full", "pass", 0, False)]
+    assert comparisons(reopened) == [
+        ("tempo,ethereum,base,solana", "", FOUR_CHAINS, FOUR_CHAINS, 0, True)
+    ]
+    assert latest is not None
+    assert latest.usable
+    reopened.close()
 
 
 def test_a_crash_while_waiting_after_a_fail_leaves_only_that_fail(tmp_path):
