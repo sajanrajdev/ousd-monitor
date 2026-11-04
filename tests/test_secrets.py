@@ -13,6 +13,7 @@ from ousd import cli
 from ousd.chains import Chain, missing_rpc_keys
 from ousd.decode import TRANSFER_TOPIC
 from ousd.http import HttpError, PoliteClient
+from ousd.solana import SolanaChain, SolanaDataError, SolanaRpc, SolanaRpcError
 from ousd.sources import BlockscoutClient, RpcClient, RpcError
 
 KEY = "k3y9aZ7QwErTyUiOpAsDfGhJkLzXcVbNm1234567890abcdefghijklmnopqr"
@@ -717,3 +718,93 @@ def test_at_block_with_two_chains_still_reports_exactly_one_chain(monkeypatch, c
         cli.main(["reconcile", "--at-block", "5"])
 
     assert "exactly one --chain" in capsys.readouterr().err
+
+
+# Solana: the key sits in a path segment or in a query value, as the providers put it.
+
+
+def solana_rpc(url: str, handler) -> SolanaRpc:
+    return SolanaRpc(make_client(handler, label="solana"), url, sleep=lambda _: None)
+
+
+@pytest.mark.parametrize("url", PARAMS)
+def test_a_solana_401_echoing_the_url_is_clean(url, caplog):
+    rpc = solana_rpc(url, lambda request: httpx.Response(401, text=f"denied {url} {KEY}"))
+
+    with pytest.raises(HttpError) as raised:
+        rpc.finalized_slot()
+
+    assert "denied" in str(raised.value)
+    assert_clean(raised.value, caplog)
+
+
+@pytest.mark.parametrize("url", PARAMS)
+@pytest.mark.parametrize("echo", ["url", "key"])
+def test_a_solana_json_rpc_error_on_http_200_is_clean(url, echo, caplog):
+    message = url if echo == "url" else KEY
+    error = {"code": -32005, "message": f"unauthorized {message}"}
+    rpc = solana_rpc(url, lambda request: httpx.Response(200, json={"id": 1, "error": error}))
+
+    with pytest.raises(SolanaRpcError) as raised:
+        rpc.transaction("sig")
+
+    assert raised.value.code == -32005
+    assert "getTransaction" in str(raised.value)
+    assert_clean(raised.value, caplog)
+
+
+@pytest.mark.parametrize("url", PARAMS)
+def test_a_solana_error_is_cut_at_200_characters_after_scrubbing(url, caplog):
+    error = {"code": -32005, "message": "x" * 180 + KEY}
+    rpc = solana_rpc(url, lambda request: httpx.Response(200, json={"id": 1, "error": error}))
+
+    with pytest.raises(SolanaRpcError) as raised:
+        rpc.finalized_slot()
+
+    assert len(str(raised.value)) <= 200
+    assert not any(prefix in str(raised.value) for prefix in shown(KEY))
+    assert_clean(raised.value, caplog)
+
+
+@pytest.mark.parametrize("url", PARAMS)
+def test_a_solana_error_message_drops_control_characters(url):
+    error = {"code": -32005, "message": "line one\nline\x1b[31m two"}
+    rpc = solana_rpc(url, lambda request: httpx.Response(200, json={"id": 1, "error": error}))
+
+    with pytest.raises(SolanaRpcError) as raised:
+        rpc.finalized_slot()
+
+    assert "\n" not in str(raised.value)
+    assert "\x1b" not in str(raised.value)
+
+
+@pytest.mark.parametrize("url", PARAMS)
+@pytest.mark.parametrize("echo", ["url", "key"])
+def test_a_solana_parse_failure_quoting_the_key_is_clean(url, echo, caplog):
+    poisoned = url if echo == "url" else KEY
+    rpc = solana_rpc(url, lambda request: httpx.Response(200, json={"id": 1, "result": poisoned}))
+
+    with pytest.raises(SolanaDataError) as raised:
+        rpc.finalized_slot()
+
+    assert "getSlot" in str(raised.value)
+    assert_clean(raised.value, caplog)
+
+
+@pytest.mark.parametrize("url", PARAMS)
+def test_a_solana_reply_missing_its_result_is_clean(url, caplog):
+    rpc = solana_rpc(url, lambda request: httpx.Response(200, json={"id": 1, "note": KEY}))
+
+    with pytest.raises(SolanaDataError) as raised:
+        rpc.genesis_hash()
+
+    assert_clean(raised.value, caplog)
+
+
+@pytest.mark.parametrize("url", PARAMS)
+def test_the_solana_chain_and_client_reprs_hide_the_keyed_url(url):
+    chain = SolanaChain("solana", "mint", url)
+    rpc = solana_rpc(url, lambda request: httpx.Response(200))
+
+    assert KEY not in repr(chain)
+    assert KEY not in repr(rpc)
