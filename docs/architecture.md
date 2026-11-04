@@ -35,7 +35,7 @@ Prefer a small system that's clearly correct over a big one that looks impressiv
 pipeline/ousd/      Python package: chains, sources, ingest, store, reconcile, probes, publish, cli
 pipeline/dagster/   Dagster definitions, schedules and asset checks
 dbt/                dbt project: staging, intermediate, marts, tests
-labels/             Versioned entity labels, each with source and confidence
+labels/             Versioned entity labels, each with source type, source and confidence
 web/                Static site. Reads only from the published dataset
 tests/              Python tests. No network, ever
 docs/               PRD, architecture, plans, design system, methodology, build log
@@ -118,8 +118,10 @@ Marts map to PRD questions. Definitions are in PRD section 7, and these are the 
 
 ## Labels
 
-- One versioned file in `labels/`: address, chain, entity, category, source URL, confidence and date checked.
-- Only named when a published source supports it. Everything else stays an unnamed cluster.
+- One versioned file, `labels/labels.csv`, with the columns `chain,address,entity,category,source_type,source_url,confidence,date_checked`.
+- Source types: `explorer_tag`, `project_docs`, `company_docs`, `official_statement`, `published_research`, `onchain_metadata` and `derived_rule`. `derived_rule` is only for unnamed clusters, and points at the rule that defines them.
+- Only named when a public source ties the name to the address. Everything else stays an unnamed cluster. Private individuals are never labeled.
+- `labels/README.md` holds the source legend. The site and methodology page carry it, so a reader can see how we know each label.
 - A label change is a reviewed change, because labels affect published claims.
 
 ## Published dataset

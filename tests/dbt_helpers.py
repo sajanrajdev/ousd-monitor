@@ -20,6 +20,7 @@ LABEL_COLUMNS = [
     "address",
     "entity",
     "category",
+    "source_type",
     "source_url",
     "confidence",
     "date_checked",

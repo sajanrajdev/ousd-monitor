@@ -200,11 +200,12 @@ It uses `ousd.store.Store` to create the raw file, sets `OUSD_DB_PATH` and `OUSD
 
 **Delivers:** the versioned labels file and its staging model.
 
-**Paths:** create `labels/labels.csv`, `labels/README.md`, `dbt/models/staging/stg_labels.sql`, `tests/test_labels.py`. Extend `_staging.yml`.
+**Paths:** create `labels/labels.csv`, `labels/README.md`, `dbt/models/staging/stg_labels.sql`, `dbt/models/staging/_labels.yml`, `dbt/tests/assert_unique_label.sql`, `tests/test_labels.py`. `tests/dbt_helpers.py` writes the `source_type` column.
 
-**Contract:** CSV with columns `chain,address,entity,category,source_url,confidence,date_checked`.
+**Contract:** CSV with columns `chain,address,entity,category,source_type,source_url,confidence,date_checked`.
 
-- `entity` is empty for unnamed clusters, which still need a `source_url`, pointing at the brainstorm section that defines the rule.
+- `entity` is empty for unnamed clusters, which still need a `source_url`. A `derived_rule` row points at the brainstorm section that defines the rule.
+- `source_type`, one per row: `explorer_tag`, `project_docs`, `company_docs`, `official_statement`, `published_research`, `onchain_metadata`, or `derived_rule` (unnamed clusters only).
 - `category`: `issuer`, `issuer_route`, `system`, `dex`, `lending`, `exchange`.
 - `confidence`: `high`, `medium`.
 - One row per chain and address. EVM addresses lowercase. **A wallet absent from this file counts as unlabeled**, which is the safe default.
@@ -215,53 +216,60 @@ It uses `ousd.store.Store` to create the raw file, sets `OUSD_DB_PATH` and `OUSD
 select
     chain,
     address,
-    nullif(entity, '') as entity,
     category,
+    source_type,
     source_url,
     confidence,
-    cast(date_checked as date) as date_checked
+    cast(date_checked as date) as date_checked,
+    nullif(entity, '') as entity
 from read_csv('{{ var("labels_path") }}', header = true, all_varchar = true)
 ```
 
-**Initial rows.** `date_checked` is 2026-11-03 for all. Use the source URLs in the brainstorm's labels table. For unnamed `issuer_route` rows use `docs/brainstorms/2026-11-03-adoption-metrics-requirements.md`, except where noted.
+**Initial rows.** `date_checked` is the day each source was really checked. Use the source URLs in the brainstorm's labels table, except that Uniswap's page moved to `https://developers.uniswap.org/docs/protocols/v4/deployments`. Bridge on Tempo and Base cites Crystal, as `published_research`, which shows the address shortened to `0x4c2c…00b8`; Basescan has no tag for it. Unnamed `issuer_route` rows use `derived_rule` and the brainstorm's section on label sources, except where noted.
 
-| chain | address | entity | category | confidence |
-|---|---|---|---|---|
-| tempo, ethereum, base | `0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8` | Bridge | issuer | high |
-| tempo, ethereum | `0x4508a7021dfb7a1afe5ff60169c1778c303389fb` | | issuer_route | medium |
-| tempo, ethereum | `0x8458377a025da58e9cb547c979d5002c822a05cb` | | issuer_route | medium |
-| tempo, ethereum | `0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e` | | issuer_route | medium |
-| tempo | `0x334cc71f818324f3932ab9d41285450373b84cdc` | | issuer_route | medium |
-| tempo | `0x5176dfcab18ff5519bc1cfa4c6ef2d8008371d5f` | | issuer_route | medium |
-| ethereum | `0x0198f9d5c8e8ef8869d70d387d3efa997f727464` | | issuer_route | medium |
-| ethereum | `0x1767c61c9ec15126de4eb02cd9a91474584a1873` | | issuer_route | medium; source is its Etherscan page |
-| tempo | `0xfeec000000000000000000000000000000000000` | Tempo Fee Manager | system | high |
-| tempo | `0xb10c000000000000000000000000000000000000` | Tempo ReceivePolicyGuard | system | high |
-| tempo | `0xdec0000000000000000000000000000000000000` | Tempo Stablecoin DEX | dex | high |
-| tempo | `0x33620f62c5b9b2086dd6b62f4a297a9f30347029` | Uniswap v4 PoolManager | dex | high |
-| ethereum | `0x000000000004444c5dc75cb358380d2e3de08a90` | Uniswap v4 PoolManager | dex | high |
-| base | `0x498581ff718922c3f8e6a244956af099b2652b2b` | Uniswap v4 PoolManager | dex | high |
-| tempo | `0x0d136e26b4d9e4836fc5cb202baeb49cb6f5df48` | Sentora OUSD Main | lending | high |
-| tempo | `0xb86b3ccce82f6cb767c45afb9fb032ae5fde3592` | Tempo Earn | lending | medium |
-| ethereum | `0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43` | Coinbase | exchange | high |
+| chain | address | entity | category | source_type | confidence |
+|---|---|---|---|---|---|
+| ethereum | `0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8` | Bridge | issuer | explorer_tag | high |
+| tempo, base | `0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8` | Bridge | issuer | published_research | medium, until a source gives the full address on these chains |
+| tempo, ethereum | `0x4508a7021dfb7a1afe5ff60169c1778c303389fb` |  | issuer_route | derived_rule | medium |
+| tempo, ethereum | `0x8458377a025da58e9cb547c979d5002c822a05cb` |  | issuer_route | derived_rule | medium |
+| tempo, ethereum | `0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e` |  | issuer_route | derived_rule | medium |
+| tempo | `0x334cc71f818324f3932ab9d41285450373b84cdc` |  | issuer_route | derived_rule | medium |
+| tempo | `0x5176dfcab18ff5519bc1cfa4c6ef2d8008371d5f` |  | issuer_route | derived_rule | medium |
+| ethereum | `0x0198f9d5c8e8ef8869d70d387d3efa997f727464` |  | issuer_route | derived_rule | medium |
+| ethereum | `0x1767c61c9ec15126de4eb02cd9a91474584a1873` |  | issuer_route | onchain_metadata | medium; source is its Etherscan page |
+| tempo | `0xfeec000000000000000000000000000000000000` | Tempo Fee Manager | system | project_docs | high |
+| tempo | `0xb10c000000000000000000000000000000000000` | Tempo ReceivePolicyGuard | system | project_docs | high |
+| tempo | `0xdec0000000000000000000000000000000000000` | Tempo Stablecoin DEX | dex | project_docs | high |
+| tempo | `0x33620f62c5b9b2086dd6b62f4a297a9f30347029` | Uniswap v4 PoolManager | dex | project_docs | high |
+| ethereum | `0x000000000004444c5dc75cb358380d2e3de08a90` | Uniswap v4 PoolManager | dex | project_docs | high |
+| base | `0x498581ff718922c3f8e6a244956af099b2652b2b` | Uniswap v4 PoolManager | dex | project_docs | high |
+| tempo | `0x0d136e26b4d9e4836fc5cb202baeb49cb6f5df48` | Sentora OUSD Main | lending | project_docs | high |
+| tempo | `0xb86b3ccce82f6cb767c45afb9fb032ae5fde3592` | Tempo Earn (Morpho vault) | lending | project_docs | medium |
+| ethereum | `0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43` | Coinbase | exchange | explorer_tag | high |
 
-**Do not add** Wintermute, Coinbase Prime, the Coinbase custody addresses or any other wallet that lacks a source tying the name to the address. See the brainstorm.
+**Further rows:** any public contract, entity or address may be added when a public source ties the name to the address. Neutral wording only, never a private individual, and an ambiguous source means leave it out.
+
+**Do not add** Wintermute, Coinbase Prime, the Coinbase custody addresses or any other wallet that lacks a source tying the name to the address. See the brainstorm. A wallet the explorer itself tags is different: the tag is the source.
 
 **When Base and Solana land, in the same change as units 2.3, 2.4 and 2.5:**
 - Add the Base and Solana redemption route with rows found by rule: wallets on the fixed path from the hub into burns.
 - Add Solana's mint recipient as an `issuer` row only if a source names the address. If not, use `issuer_route`, so its balance is still inventory.
 - Add Orca's pool, with a source.
 
-`labels/README.md` states the rule: a published source must tie the name to the address, matching behavior is not enough, and a label change is a reviewed change.
+`labels/README.md` states the rule: a public source must tie the name to the address, matching behavior is not enough, and a label change is a reviewed change. It also holds the source legend: each source type, what it means and how a reader can check it, written so the site and methodology page can reuse it. Unit 3.4 carries it to the site.
 
 **Test scenarios (pytest, `tests/test_labels.py`, reads the real file)**
 - Each `(chain, address)` is unique.
-- Every row has a `source_url`, a `category` in the list, a `confidence` in the list and a valid date.
+- Every row has a `source_url`, a `category` in the list, a `source_type` in the list, a `confidence` in the list and a valid date.
 - EVM addresses match `^0x[0-9a-f]{40}$`. Solana addresses are never lowercased.
-- A named `entity` has an `http` source. A local brainstorm path is only allowed when `entity` is empty.
-- Each chain has at least one `issuer` row.
+- A named `entity` has an `http` source and never `derived_rule`. A local brainstorm path is only allowed when `entity` is empty.
+- A `derived_rule` row has no `entity` and no `http` requirement, and its section exists. Every other source type has an `http` source.
+- A named `entity` starts with a reviewed organization name, so a person's name can't be added by accident.
+- Each chain has at least one `issuer` row. This is an expected failure for Solana until a source names its mint recipient, and the test fails as soon as one does, so the mark gets removed.
+- The legend covers every source type.
 
-**dbt tests:** `accepted_values` on `category` and `confidence`, `not_null` on `chain` and `address`, plus a singular test that `(chain, address)` is unique.
+**dbt tests,** in `_labels.yml`: `accepted_values` on `chain`, `category`, `source_type` and `confidence`, `not_null` on every column except `entity`, plus a singular test that `(chain, address)` is unique.
 
 ## Unit 2.4: mart_supply_journey
 

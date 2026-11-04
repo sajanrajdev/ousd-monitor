@@ -120,7 +120,7 @@ Tested against real data on 2026-11-03 for Tempo and part of Ethereum: see `docs
 - **R4. Modeling:** dbt from raw to staging to marts, with tests and documentation.
 - **R5. Orchestration:** scheduled jobs with retries and alerts on failure, in Dagster. Ingest is cursor-based and idempotent, so it doesn't use partitions (see `docs/architecture.md`).
 - **R6. Reconciliation checks, which block publishing:** per chain, mints minus burns must equal `totalSupply()` at the same block, to the base unit, and balances must match `balanceOf` for sampled wallets. The chain total should match Bridge's figure within a stated timing tolerance.
-- **R7. Labels:** a versioned file with address, entity, source and confidence for every label.
+- **R7. Labels:** a versioned file with address, entity, source type, source and confidence for every label.
 - **R8. Freshness:** at least daily, with "data as of" visible. Show the last good data if a check fails.
 
 ### Dashboard
@@ -137,8 +137,8 @@ Tested against real data on 2026-11-03 for Tempo and part of Ethereum: see `docs
 
 ## 9. Integrity rules
 
-- **Public sources only.** Labels must come from explorers, company statements or published research. Record the source.
-- **No naming by inference.** A wallet that only looks like a partner stays an unnamed cluster. Same for individuals.
+- **Public sources only.** Labels may come from explorer tags, project and company documentation, official statements, published research or on-chain contract metadata. Every label records its source type, URL and the date it was checked. The site and methodology page carry the source legend from `labels/README.md`, so a reader can see how we know each label.
+- **No naming by inference.** A source must tie the name to the address. A wallet that only looks like a partner stays an unnamed cluster, and private individuals are never labeled.
 - **Separate fact, estimate and opinion** visibly. Anything derived from an assumption says so.
 - **Stay neutral.** Report what the data shows, good or bad, with no predictions about partners.
 - **It isn't an attestation.** Say so, and link to Bridge's reports.
