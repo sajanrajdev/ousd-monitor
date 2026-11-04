@@ -38,7 +38,9 @@ describe("the main page", () => {
     const question = container.querySelector('[data-section="question"]')!;
     expect(question.textContent).toContain("Is that turning into money that moves?");
     expect(container.querySelector('[data-section="verdict"]')!.contains(question)).toBe(true);
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Not enough data yet");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+      "At least half of Open USD (OUSD) supply is sitting still.",
+    );
   });
 
   it("has the fixed anchors", () => {
@@ -144,7 +146,7 @@ describe("a real dataset", () => {
       expect(card.getAttribute("data-frame")).toBeNull();
       expect(card.querySelector(".chart-card__meta")!.textContent).not.toContain("Sample");
     }
-    expect(screen.getByText("Our reading")).toBeTruthy();
+    expect(screen.getAllByText("Our reading").length).toBeGreaterThan(0);
     expect(container.textContent).not.toContain("Not reconciled");
   });
 });
