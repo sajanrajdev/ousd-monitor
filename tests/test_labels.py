@@ -36,7 +36,19 @@ EVM_ADDRESS = re.compile(r"^0x[0-9a-f]{40}$")
 SOLANA_ADDRESS = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 # A named label's first word must be one of these. A list of people's names can't be written, so
 # this makes adding any new name a deliberate, reviewed edit. Never add a private individual.
-ORGANIZATIONS = {"Bridge", "Coinbase", "Sentora", "Tempo", "Uniswap"}
+ORGANIZATIONS = {
+    "0x",
+    "Bridge",
+    "Coinbase",
+    "KyberSwap",
+    "LI.FI",
+    "OKX",
+    "Orca",
+    "Relay",
+    "Sentora",
+    "Tempo",
+    "Uniswap",
+}
 SOLANA_WALLET = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"
 
 

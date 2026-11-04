@@ -17,6 +17,8 @@
 | `confidence` | `high` or `medium` |
 | `date_checked` | The day we last confirmed the source still says this, in UTC |
 
+**`system`** covers contracts that run a chain or pass money through without holding it as a venue, such as third-party routers, cross-chain relayers and their solvers. `dex` and `lending` are for contracts that hold liquidity. Bridge, the issuer of OUSD, is `issuer`, not `system`.
+
 ## How we know: the source legend
 
 Every label has exactly one source type. It tells you what kind of evidence the label rests on, and so how to check it.
