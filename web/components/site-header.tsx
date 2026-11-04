@@ -9,7 +9,7 @@ export function SiteHeader() {
         Skip to main content
       </a>
       <div className="site-header__inner">
-        <Link href="/" className="flex items-center gap-2 font-semibold">
+        <Link href="/" className="target-link gap-2 font-semibold">
           <Mark />
           {SITE_NAME}
         </Link>

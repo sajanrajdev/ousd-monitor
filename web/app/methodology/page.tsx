@@ -44,14 +44,14 @@ function Contents({ items }: { items: ReturnType<typeof sectionList> }) {
     <ol className="mt-3 grid gap-1 text-sm md:grid-cols-2 lg:grid-cols-3">
       {items.map((item) => (
         <li key={item.id}>
-          <a href={`#${item.id}`} className="underline underline-offset-4">
+          <a href={`#${item.id}`} className="target-link underline underline-offset-4">
             {item.title}
           </a>
           {item.children.length > 0 ? (
             <ul className="ml-4 mt-1 grid gap-1 text-[length:var(--text-meta)]">
               {item.children.map((child) => (
                 <li key={child.id}>
-                  <a href={`#${child.id}`} className="underline underline-offset-4">
+                  <a href={`#${child.id}`} className="target-link underline underline-offset-4">
                     {child.title}
                   </a>
                 </li>

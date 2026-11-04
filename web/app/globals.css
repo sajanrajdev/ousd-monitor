@@ -77,6 +77,16 @@ h2 {
   padding: 0.5rem var(--page-margin);
 }
 
+/* A link that stands alone, not in a sentence, is at least 24px on its short side (WCAG 2.2, 2.5.8).
+   Links inside a sentence keep the text's own line box, as the rule exempts them, so this is
+   opt-in by class and never matches a link in running text. */
+.target-link,
+.site-header nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+}
+
 .independence-line {
   font-size: var(--text-small);
   color: var(--color-body-text);

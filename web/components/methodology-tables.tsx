@@ -36,7 +36,7 @@ export function Ticks({ text }: { text: string }) {
 
 function Outbound({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <a href={href} rel="noopener noreferrer" className="underline underline-offset-4">
+    <a href={href} rel="noopener noreferrer" className="target-link underline underline-offset-4">
       {children}
     </a>
   );
