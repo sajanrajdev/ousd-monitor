@@ -1,7 +1,9 @@
 import ast
 import itertools
 import json
+import time
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -2184,6 +2186,30 @@ def test_a_sample_has_a_fixed_answer_so_a_new_algorithm_cannot_pass_unnoticed():
     }
 
 
+@pytest.fixture
+def tokyo_clock(monkeypatch):
+    """A machine clock far from UTC, so a date taken in local time differs."""
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+MIDNIGHT = datetime(2026, 11, 4, tzinfo=UTC).timestamp()
+
+
+@pytest.mark.parametrize(
+    ("now", "date"),
+    [(MIDNIGHT - 1, "2026-11-03"), (MIDNIGHT, "2026-11-04")],
+    ids=["last-second", "first-second"],
+)
+def test_the_seed_takes_its_date_from_utc_either_side_of_midnight(store, tokyo_clock, now, date):
+    run_it(store, four_probes(store), None, clock=lambda: now)
+
+    assert {row[3] for row in samples(store)} == {f"v1|tempo|{date}"}
+
+
 def test_a_sample_counts_are_twenty_top_and_thirty_drawn():
     top = WALLETS[:20]
 
@@ -2587,6 +2613,25 @@ def test_a_transfer_lost_between_two_pins_fails_the_run_and_never_exits_zero(sto
     assert (finding.model_balance, finding.observed_balance) == (6, 1)
 
 
+def test_a_transfer_lost_between_wallets_with_no_later_row_exits_zero(store):
+    # The limit the plan accepts, pinned so it can't change unnoticed in either direction. Bob's
+    # reading stands from before the loss, and no later row brings him back.
+    probes, tempo = tempo_probes(store)
+
+    def lose_one(seconds):
+        tempo.rpc.extend(130)
+        tempo.rpc.add_transfer(123, 5, sender=BOB, to=DAN)
+        lose(tempo, 123)
+
+    result, _ = run_it(store, probes, BridgeFeed(BAD, good_at(1)), sleep=lose_one)
+
+    assert (result.chains["tempo"], result.exit_code) == ("pass", 0)
+    assert store.latest_reconciliation().usable
+    assert len(tempo.balance_reads) == 1
+    assert store.balances_at("tempo", [BOB], 130)[BOB] == 7
+    assert tempo.rpc.balance_of(tempo.chain.token, BOB, 130) == 2
+
+
 def test_a_group_that_appears_between_two_pins_is_audited_at_the_new_pin(store):
     probes, tempo = tempo_probes(store)
 
@@ -2873,6 +2918,83 @@ def test_a_wallet_first_seen_between_the_pin_and_the_read_is_still_read(store):
     assert solana.balance_reads[1] == ([ALICE, CAROL], 121)
     assert (result.chains["solana"], result.exit_code) == ("pass", 0)
     assert store.latest_reconciliation().usable
+
+
+def busy_for(probe, windows):
+    """After the first supply check, this many more each find a new row, and the rest find none."""
+    checks_seen = [0]
+
+    def touch():
+        checks_seen[0] += 1
+        if 1 < checks_seen[0] <= windows + 1:
+            tip = probe.rpc.tip() + 1
+            probe.rpc.extend(tip)
+            probe.rpc.add_transfer(tip, 1, sender=ALICE, to=BOB)
+
+    probe.before_supply = touch
+
+
+def test_three_busy_windows_use_every_round_and_a_fourth_is_never_tried(store):
+    probes, solana = slot_probes(store, ahead=1)
+    busy_for(solana, 3)
+
+    result, _ = run_it(store, probes)
+
+    assert (result.chains["solana"], result.exit_code) == ("unchecked", 3)
+    # The sample and three rounds. The fourth window would be quiet, and isn't looked at.
+    assert len(solana.balance_reads) == 4
+    assert solana.events.count("read") == 4
+    assert checks(store, "sampled_balances", "solana") == [
+        (1, "pass", None),
+        (2, "pass", None),
+        (3, "pass", None),
+        (4, "pass", None),
+        (5, "unchecked", "pin_behind_cursor"),
+    ]
+    assert not store.latest_reconciliation().usable
+
+
+def test_two_busy_windows_then_a_quiet_one_pass_on_the_last_round(store):
+    probes, solana = slot_probes(store, ahead=1)
+    busy_for(solana, 2)
+
+    result, _ = run_it(store, probes)
+
+    assert (result.chains["solana"], result.exit_code) == ("pass", 0)
+    assert solana.events.count("read") == 4
+    assert len(solana.balance_reads) == 3
+    assert check_detail(store, "sampled_balances", "solana", 4)["wallets"] == 0
+    assert store.latest_reconciliation().usable
+
+
+def test_a_lagging_recheck_on_solana_lowers_what_the_read_covers(store):
+    probes, solana = slot_probes(store)
+    solana.rpc.add_transfer(120, 3, sender=ALICE, to=BOB)
+
+    def mismatch_then_lag(reads):
+        solana.behind = 1
+        return off_by(BOB, 1)(reads)
+
+    def catch_up(reads):
+        solana.behind = 0
+        return reads
+
+    solana.balance_steps = [mismatch_then_lag, catch_up]
+
+    result, _ = run_it(store, probes)
+
+    # Bob's recheck stops at 119, so the row at 120 is still to be covered, at the pin.
+    assert solana.balance_reads == [
+        ([ALICE, BOB], 120),
+        ([BOB], 120),
+        ([ALICE, BOB], 120),
+    ]
+    assert [(row[0], row[1], row[2], row[4]) for row in samples(store, "solana")][2:] == [
+        (2, BOB, "top", 119),
+        (3, ALICE, "delta", 120),
+        (3, BOB, "delta", 120),
+    ]
+    assert (result.chains["solana"], result.exit_code) == ("pass", 0)
 
 
 def test_a_cursor_that_keeps_moving_is_never_a_pass(store):
@@ -3242,6 +3364,16 @@ def test_a_loop_that_nets_to_zero_is_decided_by_the_receipt_not_by_balances(stor
             {
                 "transfers": [
                     ProofTransfer(0, ALICE, BOB, 2),
+                    ProofTransfer(0, ALICE, BOB, 2),
+                    ProofTransfer(1, ALICE, BOB, 2),
+                ]
+            },
+            [0, 0, 1],
+        ),
+        (
+            {
+                "transfers": [
+                    ProofTransfer(0, ALICE, BOB, 2),
                     ProofTransfer(1, ALICE, BOB, 2),
                     ProofTransfer(2, ALICE, CAROL, 4),
                 ]
@@ -3271,6 +3403,7 @@ def test_a_loop_that_nets_to_zero_is_decided_by_the_receipt_not_by_balances(stor
         "fewer",
         "other-positions",
         "failed",
+        "duplicate-entry",
         "lost-sibling",
         "other-receiver",
         "other-value",

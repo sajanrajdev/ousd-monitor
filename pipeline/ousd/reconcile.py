@@ -699,23 +699,42 @@ def _check_balances(
 
     The sample is read once a run, unless a fork replaced the rows it was compared with. Every
     later pin, whether from a Bridge retry or from a read that moved the cursor, is covered by the
-    wallets its rows touched. A wallet with no row since keeps its reading, so a loss between two
-    wallets with no other row by then waits for a later run. Returns the balance status and the
-    newest supply outcome.
+    wallets its rows touched, in up to PIN_ROUNDS rounds. Returns the balance status and the newest
+    supply outcome.
+
+    A wallet with no row since keeps its reading. So a transfer lost between two wallets with no
+    later row exits 0 with the gate usable, and a later run catches it only if one of them is
+    drawn, about 3% a run on Tempo. The plan accepts this limit.
     """
     name = run.probe.name
-    # One more than PIN_ROUNDS, for the sample itself.
-    for _ in range(PIN_ROUNDS + 2):
+
+    def settled() -> bool:
+        pin = _pin(supply)
+        return (
+            run.store.synced_through(name) == pin
+            and coverage[name].through >= pin
+            and not _rows_replaced(run.store, name, coverage[name])
+        )
+
+    if name not in coverage:
+        seed, read, supply = _read_sample(run, supply, census, clock)
+        if read.status != "pass":
+            return read.status, supply
+        coverage[name] = _Coverage(seed, read.covers, read.covers_hash)
+
+    for _ in range(PIN_ROUNDS):
+        if settled():
+            return "pass", supply
         if run.store.synced_through(name) != _pin(supply):
             supply = _check_supply(run.probe, run.store, run.recorder)
             if supply.status != "pass":
                 return supply.status, supply
         pin = _pin(supply)
-        covered = coverage.get(name)
-        if covered is None or _rows_replaced(run.store, name, covered):
+        covered = coverage[name]
+        if _rows_replaced(run.store, name, covered):
             seed, read, supply = _read_sample(run, supply, census, clock)
         elif covered.through >= pin:
-            return "pass", supply
+            continue
         else:
             seed = covered.seed
             touched = run.store.wallets_touched(name, covered.through, pin)
@@ -735,6 +754,9 @@ def _check_balances(
         if read.status != "pass":
             return read.status, supply
         coverage[name] = _Coverage(seed, read.covers, read.covers_hash)
+    # The last round's read may have settled it, and no further round can.
+    if settled():
+        return "pass", supply
     status = run.recorder.record(
         "sampled_balances", name, "unchecked", "pin_behind_cursor", pin=_pin(supply)
     ).status
