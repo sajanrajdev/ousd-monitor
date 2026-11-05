@@ -1,7 +1,7 @@
 ---
 title: "plan: Host the daily run on Railway and the site on Vercel"
 type: plan
-status: proposed
+status: accepted
 date: 2026-11-05
 origin: docs/architecture.md
 ---
@@ -13,6 +13,17 @@ origin: docs/architecture.md
 Today the pipeline runs by hand on the maintainer's machine, and nothing is hosted. This plan moves the daily run to one Railway service with a persistent volume, and publishes the static site to Vercel. Visitors still read only static files. No remote database is added.
 
 This is a plan only. It writes no Dockerfile or workflow, creates no account and deploys nothing. Every step that needs an account or a token is the maintainer's, and production stays switched off until he approves it.
+
+## Decisions taken (2026-11-05)
+
+The maintainer accepted every recommendation below.
+
+1. **Shape:** (b) Railway cron, restart policy `Never`.
+2. **Warning policy:** acknowledge by chain and metric through `OUSD_ACK_WARNING_KEYS`, starting with `ethereum:circulating_supply`. Any other warning refuses. The acknowledged keys are logged on every run. **Review date: 2026-12-05**, or at U7 if that comes first. On review the key is either kept with a new date or removed.
+3. **Alerts:** Railway email notifications first.
+4. **Stale rebuild on failure:** later.
+5. **Branch:** Railway deploys from `dev` during the preview phase, and moves to `main` before production. This was the default proposed to the maintainer. Automatic deploys are either off (deploy by hand with "Deploy Latest Commit") or gated with Railway's "Wait for CI". Both exist; see the table below. Off is the safer default while a deploy could land during a run.
+6. **Production:** promoted by hand with `vercel promote` after the reviews in U7. No automatic promotion for now.
 
 **Settled by the maintainer, not reopened here:**
 
@@ -41,6 +52,9 @@ Railway and Vercel documentation was read on 2026-11-05. Anything below marked *
 | First Vercel deploy | **The first deployment of a new project is always production, even without `--prod`.** This affects the rollout. See U3 | vercel.com/docs/cli/deploy |
 | Keeping previews private | Vercel Authentication works on Hobby, for "Standard Protection" (all but production domains) or "All Deployments" | vercel.com/docs/deployment-protection |
 | Promotion | `vercel promote <url>` makes an existing deployment current. Promoting a preview asks for confirmation and makes a new production deployment | vercel.com/docs/cli/promote |
+| Automatic deploys | A service linked to GitHub deploys every push to its trigger branch, set in Service Settings. Automatic deploys can be **disabled** there; a deploy is then started by hand with "Deploy Latest Commit" from the command palette | docs.railway.com/deployments/github-autodeploys |
+| Wait for CI | A service setting. Deployments sit in `WAITING` until every GitHub Actions workflow run on the commit finishes; a failed run skips the deploy, a run still unfinished after two hours skips it, and a cancelled run blocks it only if no other workflow on the commit succeeded. The toggle appears only if a workflow runs `on: push` for the branch. This repo's CI does (`push` to `dev` and `main`). Its `cancel-in-progress` concurrency means a quickly superseded commit is skipped, which is harmless here | docs.railway.com/deployments/github-autodeploys |
+| Vercel CLI from the environment | **Verified.** The CLI reads `VERCEL_TOKEN` (a `--token` flag would win, and the docs recommend the variable so the token stays out of process lists and logs) and `VERCEL_PROJECT_ID`. For CI and non-interactive use, setting `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` skips project linking. `--non-interactive` turns off prompts | vercel.com/docs/cli/global-options, vercel.com/kb/guide/using-vercel-cli-for-custom-workflows |
 | Hobby terms | Hobby is for non-commercial, personal use. This project is a free, independent dashboard | vercel.com/docs/plans/hobby |
 
 And in this repo:
@@ -65,11 +79,11 @@ Both shapes are one service, one image and one volume mounted at `/app/data`, so
 | Exposure | The UI must stay private: no public domain, reached by `railway ssh -L` only | Nothing listens |
 | Cost (estimate) | Idle daemon memory all month, roughly $5 to $10 a month in total on Hobby | About $5 a month: the run uses well under the $5 included |
 
-**Recommendation: (b) cron.** It is the simplest thing that runs the existing `make run` once a day, keeps nothing running, and leaves no UI to secure. Its one awkwardness, reaching the volume, only matters for seeding and recovery, and a hold command handles it. The cost estimate assumes a run of under an hour at about 2 GB peak (the site build is the heaviest step). U1 measures both. This is the maintainer's call.
+**Recommendation: (b) cron.** It is the simplest thing that runs the existing `make run` once a day, keeps nothing running, and leaves no UI to secure. Its one awkwardness, reaching the volume, only matters for seeding and recovery, and a hold command handles it. The cost estimate assumes a run of under an hour at about 2 GB peak (the site build is the heaviest step). U1 measures both. Accepted by the maintainer (decision 1).
 
 **Restart policy must be `Never`** for the cron service. With the default `On Failure`, Railway would restart a failed run up to 10 times, and the code says a failed check is never retried. Dagster already retries source errors itself, twice, five minutes apart.
 
-**Branch.** The service deploys from one branch. Railway redeploying mid-run would stop the run, as two deployments can't share the volume. DuckDB recovers, and the next run catches up from the cursor, but turn automatic deploys off or limit them to the release branch (decision below).
+**Branch.** The service deploys from one branch: `dev` during the preview phase, `main` before production (decision 5). Railway redeploying mid-run would stop the run, as two deployments can't share the volume. DuckDB recovers, and the next run catches up from the cursor, but automatic deploys stay off, or on with "Wait for CI", so a broken commit never reaches the service.
 
 ## Container
 
@@ -99,7 +113,7 @@ All go into Railway service variables only, never into the repo, the image or a 
 
 - `BASE_RPC_URL`, `SOLANA_RPC_URL`.
 - Any keyed override of the public defaults, if the maintainer uses one: `TEMPO_RPC_URL`, `ETHEREUM_RPC_URL`, `ETHEREUM_BLOCKSCOUT_URL`, `BRIDGE_API_URL`.
-- `VERCEL_TOKEN`, and the project's `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` so the CLI needs no linked folder. That the CLI reads these three from the environment is **unverified**; check in U1. Pass the token by environment, never as `--token` on a command line.
+- `VERCEL_TOKEN`, and the project's `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` so the CLI needs no linked folder. The CLI reads all three from the environment (verified, see the table above). Pass the token by environment, never as `--token` on a command line.
 
 The repo rule stands: **never log, print or raise an RPC URL or any part of it**, in Python, dbt, Dagster logs or build output.
 
@@ -129,7 +143,7 @@ This differs from `vercel build` followed by `vercel deploy --prebuilt` on purpo
 
 `make web-release` refuses while the dataset has warnings, unless `OUSD_ACK_WARNINGS` equals that dataset's version. Every recent dataset carries one warning, Ethereum `circulating_supply`, because the warning compares each chain's newest day with the day before, and Ethereum's circulating supply is small and moves a lot. Its day changes with every run, and the version changes with every dataset, so neither can be acknowledged ahead of time. An unattended run would refuse every day.
 
-**Proposal (maintainer's decision):** acknowledge the known warning by **chain and metric**, not by day or version. For example a variable `OUSD_ACK_WARNING_KEYS=ethereum:circulating_supply`. The release prints every warning as now, passes if every warning's key is listed, and refuses on any other warning. Two guards: list the acknowledged key in the run log every time, and give it a review date in this plan's follow-up, so it doesn't become permanent by default. A new warning on any chain or metric still stops the deploy and alerts. This changes `web/scripts/build-site.mjs` and its tests.
+**Accepted (decision 2):** acknowledge the known warning by **chain and metric**, not by day or version. For example a variable `OUSD_ACK_WARNING_KEYS=ethereum:circulating_supply`. The release prints every warning as now, passes if every warning's key is listed, and refuses on any other warning. Two guards: list the acknowledged key in the run log every time, and give it a review date in this plan's follow-up, so it doesn't become permanent by default. A new warning on any chain or metric still stops the deploy and alerts. This changes `web/scripts/build-site.mjs` and its tests.
 
 Alternatives: keep the per-version acknowledgement and let the daily run deploy previews only when there are no warnings (in practice, never); or acknowledge every warning automatically for previews only, and require the per-version acknowledgement at promotion. The second keeps a human on production but means production is rebuilt by hand.
 
@@ -220,10 +234,8 @@ To fix in U6, not in this PR:
 
 ## Decisions for the maintainer
 
-1. **Shape:** (b) cron, recommended, or (a) always-on Dagster.
-2. **Warning policy:** acknowledge `ethereum:circulating_supply` by chain and metric (recommended), or one of the alternatives.
-3. **Alert channel:** Railway email first (recommended), then a webhook, then an email service.
-4. **Stale rebuild on failure:** now, or later (recommended later).
-5. **Branch:** which branch Railway deploys from, and whether automatic deploys stay on.
-6. **Production:** when to promote, after the reviews in U7, and whether later runs promote automatically.
-7. **Setup only he can do:** Railway account, project, service, volume and variables; Vercel account, project, protection and token; the seeding upload. All in his name.
+Items 1 to 6 were settled on 2026-11-05; see [Decisions taken](#decisions-taken-2026-11-05). What remains:
+
+1. **Review of the acknowledged warning key** by 2026-12-05, or at U7.
+2. **Whether Railway automatic deploys are off or gated on "Wait for CI"** during the preview phase.
+3. **Setup only he can do:** Railway account, project, service, volume and variables; Vercel account, project, protection and token; the seeding upload. All in his name.
