@@ -203,6 +203,89 @@ describe("make web-release", () => {
       expect(readlinkSync(join(root, "latest"))).toBe(`${VERSION}-9`);
     });
 
+    describe("OUSD_ACK_WARNING_KEYS", () => {
+      const KEYS = "ethereum:circulating_supply, base:total_supply";
+
+      it("builds when every warning's chain and metric is listed, and logs the keys", () => {
+        const root = releaseRootWithLastGood();
+        const lines: string[] = [];
+        const options = {
+          ...releaseOptions(warned(), root, { OUSD_ACK_WARNING_KEYS: KEYS }),
+          log: (line: string) => lines.push(line),
+        };
+        buildRelease({ ...options, now: () => 11 });
+        expect(readlinkSync(join(root, "latest"))).toBe(`${VERSION}-11`);
+        const log = lines.join("\n");
+        expect(log).toContain("base total_supply on 2026-11-02");
+        expect(log).toContain(
+          "Acknowledged warning keys: ethereum:circulating_supply, base:total_supply.",
+        );
+      });
+
+      it("refuses a warning whose key isn't listed, naming it", () => {
+        const root = releaseRootWithLastGood();
+        const options = releaseOptions(warned(), root, {
+          OUSD_ACK_WARNING_KEYS: "ethereum:circulating_supply,base:circulating_supply",
+        });
+        expect(() => buildRelease(options)).toThrow(/aren't acknowledged: base:total_supply/);
+        expect(readlinkSync(join(root, "latest"))).toBe("previous");
+      });
+
+      it("refuses when only some of the warnings are listed", () => {
+        const dir = warned();
+        editJson(dir, "manifest.json", (manifest) => {
+          manifest.warnings.push({
+            chain: "solana",
+            metric: "total_supply",
+            day: "2026-11-02",
+            previous: "1",
+            current: "2",
+          });
+        });
+        const root = releaseRootWithLastGood();
+        const options = releaseOptions(dir, root, { OUSD_ACK_WARNING_KEYS: KEYS });
+        expect(() => buildRelease(options)).toThrow(/aren't acknowledged: solana:total_supply\./);
+        expect(readlinkSync(join(root, "latest"))).toBe("previous");
+      });
+
+      it("a dataset without warnings needs no keys, and still logs any set", () => {
+        const root = releaseRootWithLastGood();
+        const lines: string[] = [];
+        buildRelease({
+          ...releaseOptions(releaseGrade(), root, { OUSD_ACK_WARNING_KEYS: KEYS }),
+          log: (line: string) => lines.push(line),
+          now: () => 12,
+        });
+        expect(readlinkSync(join(root, "latest"))).toBe(`${VERSION}-12`);
+        expect(lines.join("\n")).toContain("Acknowledged warning keys:");
+      });
+
+      it("refuses a malformed entry, even with no warnings", () => {
+        const root = releaseRootWithLastGood();
+        for (const bad of ["ethereum", "ethereum:circulating_supply:x", "Ethereum:supply", "*:*"]) {
+          const options = releaseOptions(releaseGrade(), root, { OUSD_ACK_WARNING_KEYS: bad });
+          expect(() => buildRelease(options)).toThrow(/aren't chain:metric/);
+        }
+        expect(readlinkSync(join(root, "latest"))).toBe("previous");
+      });
+
+      it("an empty value acknowledges nothing", () => {
+        const root = releaseRootWithLastGood();
+        const options = releaseOptions(warned(), root, { OUSD_ACK_WARNING_KEYS: " , " });
+        expect(() => buildRelease(options)).toThrow(/aren't acknowledged/);
+      });
+
+      it("the per-version OUSD_ACK_WARNINGS still works alongside it", () => {
+        const root = releaseRootWithLastGood();
+        const options = releaseOptions(warned(), root, {
+          OUSD_ACK_WARNING_KEYS: "ethereum:circulating_supply",
+          OUSD_ACK_WARNINGS: VERSION,
+        });
+        buildRelease({ ...options, now: () => 13 });
+        expect(readlinkSync(join(root, "latest"))).toBe(`${VERSION}-13`);
+      });
+    });
+
     it("a normal build only logs them", () => {
       const lines: string[] = [];
       const dir = copySample("complete");

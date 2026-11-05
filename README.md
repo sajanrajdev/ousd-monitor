@@ -83,7 +83,7 @@ make web-browser   # download the browser that make web-shots needs
 make web-shots     # local screenshots of the samples
 ```
 
-`make preview` writes a local preview dataset outside `data/published`, for site development. A preview is marked as one and is never a release. `make web-release` needs a real dataset from a run whose checks all passed. If that dataset carries warnings, the release prints each one and refuses until `OUSD_ACK_WARNINGS` is set to the dataset's version.
+`make preview` writes a local preview dataset outside `data/published`, for site development. A preview is marked as one and is never a release. `make web-release` needs a real dataset from a run whose checks all passed. If that dataset carries warnings, the release prints each one and refuses until `OUSD_ACK_WARNINGS` is set to the dataset's version, or until every warning's `chain:metric` is listed in `OUSD_ACK_WARNING_KEYS` (comma-separated, for a known warning on an unattended run; the listed keys are logged on every release). The hosted daily run is described in `docs/deploy.md`.
 
 ## How it works
 
