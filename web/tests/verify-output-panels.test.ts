@@ -587,6 +587,21 @@ describe("the velocity chart and the chain grid", { timeout: WHOLE_PAGE_TIMEOUT_
     );
   });
 
+  it("fails when the popover loses a full note, or the denominators pin leaves its legend entry", () => {
+    const full = main.replace(/<p data-full-note="velocity-denominators">.*?<\/p>/, "");
+    expect(check(full)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("lost the velocity-denominators note in full"),
+      ]),
+    );
+    const pin = main.replace(/(Headline velocity)<span class="pin">\d+<\/span>/, "$1");
+    expect(check(pin)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("the denominators pin isn't on the headline velocity legend"),
+      ]),
+    );
+  });
+
   it("fails on a grid cell, bar or lead marker that isn't the dataset's", () => {
     const cell = main.replace(/(<span data-grid-value>)[^<]*/, "$19.99%");
     const lead = main.replace(/ data-leads>/, ">");

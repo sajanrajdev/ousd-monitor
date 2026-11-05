@@ -1,12 +1,12 @@
 import { ChartCard } from "@/components/chart-card";
-import type { PinnedNote } from "@/components/pinned-notes";
+import { PinMark, type PinnedNote } from "@/components/pinned-notes";
 import { velocityChart, VELOCITY_MEASURES } from "@/lib/chain-views";
 import { dayRange } from "@/lib/aggregate";
 import type { Definitions, DatasetState, KpiRow, ManifestWarning } from "@/lib/dataset";
 import { CARD_ANCHORS, CHAIN_NAMES, DAY_ZERO, definitionHref } from "@/lib/definitions";
 import { formatBps, formatCompact } from "@/lib/format";
 import { velocityHeading, velocityTakeaway } from "@/lib/takeaways/activity";
-import { VELOCITY_NOTE, WALLETS_NOTE } from "@/lib/takeaways/caveats";
+import { JUMPY_NOTE, VELOCITY_NOTE, WALLETS_NOTE } from "@/lib/takeaways/caveats";
 import { measureStyle, VelocityChart } from "./velocity-chart";
 
 export type VelocityViewProps = {
@@ -16,16 +16,16 @@ export type VelocityViewProps = {
   state: DatasetState;
 };
 
-export const JUMPY_NOTE =
-  "A small circulating supply makes velocity jumpy: the same volume over a smaller base gives a bigger percentage.";
-
-function MeasureLegend() {
+// The denominators note is about velocity against headline velocity, so its pin sits on the legend's
+// headline entry.
+function MeasureLegend({ pin }: { pin: number }) {
   return (
     <ul className="velocity-legend px-4 pt-4" data-velocity-legend>
       {VELOCITY_MEASURES.map(({ key, label }) => (
-        <li key={key}>
+        <li key={key} data-legend-measure={key}>
           <span className="velocity-legend__swatch" style={measureStyle(key)} />
           {label === "Velocity" ? label : `${label} velocity`}
+          {key === "headline_velocity_bps" ? <PinMark number={pin} /> : null}
         </li>
       ))}
     </ul>
@@ -97,7 +97,11 @@ export function VelocityCard({ kpis, definitions, warnings, state }: VelocityVie
         })),
       }}
     >
-      {chart.max === null ? null : <MeasureLegend />}
+      {chart.max === null ? null : (
+        <MeasureLegend
+          pin={chart.notes.findIndex((note) => note.kind === "velocity-denominators") + 1}
+        />
+      )}
       <VelocityChart chart={chart} pins={pins} />
     </ChartCard>
   );

@@ -36,6 +36,9 @@ export const VELOCITY_NOTE =
 export const VELOCITY_PIN =
   "Velocity divides by circulating supply and headline velocity by total supply, so they aren't two cuts of one number.";
 
+export const JUMPY_NOTE =
+  "A small circulating supply makes velocity jumpy: the same volume over a smaller base gives a bigger percentage.";
+
 export const NO_SWAPS_NOTE = "We don’t ingest swaps, so this view can’t show trading.";
 
 // Two cards count wallets. The one beside the supply parts also rules out adding them up.

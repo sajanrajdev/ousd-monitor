@@ -45,6 +45,8 @@ import {
   seriesStartNote,
   seriesStartPin,
   SMALL_TICKET_PIN,
+  JUMPY_NOTE,
+  VELOCITY_NOTE,
   VELOCITY_PIN,
   WALLETS_ACROSS_CHAINS_NOTE,
   WALLETS_NOTE,
@@ -57,7 +59,7 @@ import {
   supplyPanel,
 } from "../lib/supply-segments.ts";
 import { chainRolesHeading } from "../lib/takeaways/chain-roles.ts";
-import { chainGrid, velocityChart } from "../lib/chain-views.ts";
+import { velocityChart } from "../lib/chain-views.ts";
 import { exchangeLinkedBands, journeyHeading } from "../lib/takeaways/journey.ts";
 import { verdictSentence, verdictTextVisible } from "../lib/verdict.ts";
 
@@ -1011,15 +1013,79 @@ function sumsFromRows(rows, chains) {
   return Object.fromEntries(Object.entries(sums).map(([key, sum]) => [key, sum.toString()]));
 }
 
+// What the velocity chart must print, worked out here from the KPI rows with no code the chart uses,
+// so a fault in its scale or its order can't set what this check expects: chains in the site's
+// order, three measures each, on one linear scale from zero to the largest figure.
+const VELOCITY_FIELDS = ["velocity_bps", "velocity_everyday_bps", "headline_velocity_bps"];
 function velocityExpected(kpis, warnings) {
+  const order = Object.keys(CHAIN_NAMES);
+  const rows = [...kpis].sort((a, b) => order.indexOf(a.chain) - order.indexOf(b.chain));
+  const values = rows
+    .flatMap((row) => VELOCITY_FIELDS.map((field) => row[field]))
+    .filter((v) => v !== null);
+  const max = values.length > 0 ? Math.max(...values) : null;
+  const width = (bps) =>
+    bps === null || max === null
+      ? null
+      : max === 0
+        ? 0
+        : Number((BigInt(bps) * 10_000n) / BigInt(max));
   const chart = velocityChart(kpis, warnings);
   return {
     heading: velocityHeading(kpis),
-    bars: chart.groups.flatMap((group) =>
-      group.bars.map((bar) => `${group.chain}:${bar.measure}=${bar.text}@${bar.widthBps}`),
-    ),
+    bars:
+      max === null
+        ? []
+        : rows.flatMap((row) =>
+            VELOCITY_FIELDS.map(
+              (field) =>
+                `${row.chain}:${field}=${row[field] === null ? UNKNOWN_TEXT : formatBps(row[field])}@${width(row[field])}`,
+            ),
+          ),
     notes: chart.notes.map(({ kind, chain, text }) => ({ kind, chain, words: text })),
     fullWarnings: chart.fullWarnings,
+  };
+}
+
+// What the chain grid must print, worked out here from the chain roles rows: a bar scales to the
+// amount a lead is measured on (publish.py's _LEADING_MEASURES), and the lead marker is the dataset's.
+const GRID_FIELDS = [
+  { measure: "supply", amount: "total_supply", share: "supply_share_bps", showAmount: false },
+  { measure: "issuance", amount: "minted_30d", share: "", showAmount: true },
+  {
+    measure: "everyday",
+    amount: "clean_everyday_30d",
+    share: "clean_everyday_share_bps",
+    showAmount: true,
+  },
+  { measure: "dex_flow", amount: "dex_flow_30d", share: "dex_flow_share_bps", showAmount: true },
+  { measure: "lending_flow", amount: "lending_flow_30d", share: "", showAmount: true },
+];
+function gridExpected(roles) {
+  const order = Object.keys(CHAIN_NAMES);
+  const rows = [...roles].sort((a, b) => order.indexOf(a.chain) - order.indexOf(b.chain));
+  return {
+    rows: GRID_FIELDS.map(({ measure, amount, share, showAmount }) => {
+      const amounts = rows.map((row) => BigInt(row[amount]));
+      const largest = amounts.reduce((top, value) => (value > top ? value : top), 0n);
+      return {
+        measure,
+        cells: rows.map((row, index) => {
+          const shared = share ? formatBps(row[share]) : "";
+          return {
+            chain: row.chain,
+            text: showAmount
+              ? `${formatCompact(amounts[index])}${shared ? ` (${shared})` : ""}`
+              : shared,
+            widthBps:
+              largest > 0n && amounts[index] > 0n
+                ? Number((amounts[index] * 10_000n) / largest)
+                : 0,
+            leads: row.leading_for.includes(measure),
+          };
+        }),
+      };
+    }),
   };
 }
 
@@ -1053,6 +1119,20 @@ function checkVelocity(page, document, expected, problems) {
   const pins = want.notes.flatMap(({ chain }, index) => (chain ? [`${chain}=${index + 1}`] : []));
   if (pinned.join() !== pins.join()) {
     problems.push(`${where}: its chain pins are ${pinned.join()}, not ${pins.join()}`);
+  }
+  const denominators = want.notes.findIndex(({ kind }) => kind === "velocity-denominators") + 1;
+  const legendPin = card.querySelector('[data-legend-measure="headline_velocity_bps"] .pin');
+  if (want.bars.length > 0 && plainText(legendPin) !== String(denominators)) {
+    problems.push(`${where}: the denominators pin isn't on the headline velocity legend`);
+  }
+  for (const [kind, words] of [
+    ["velocity-denominators", VELOCITY_NOTE],
+    ["velocity-jumpy", JUMPY_NOTE],
+  ]) {
+    const full = card.querySelector(`.info-popover__panel [data-full-note="${kind}"]`);
+    if (!full?.textContent.includes(words)) {
+      problems.push(`${where}: its popover has lost the ${kind} note in full`);
+    }
   }
   for (const { chain, text } of want.fullWarnings) {
     const full = card.querySelector(
@@ -1540,7 +1620,7 @@ function expectedPanels(files) {
       };
     }),
     velocity: velocityExpected(summary.kpis, manifest.warnings),
-    grid: chainGrid(files.chain_roles.data),
+    grid: gridExpected(files.chain_roles.data),
     waterfallPanels: options.map((option) => {
       const panel = waterfallPanel(option, activityInputs);
       return {

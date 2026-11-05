@@ -48,8 +48,9 @@ function ChainGrid({ rows, pin }: { rows: ChainRoleRow[]; pin: number }) {
   return (
     <table className="chain-grid" data-chain-grid>
       <caption>
-        Last 30 days, each chain on its newest day. <span aria-hidden="true">{LEAD_MARK}</span>{" "}
-        leads that measure. <PinMark number={pin} />
+        Each chain on its newest day. <span aria-hidden="true">{LEAD_MARK}</span>
+        <span className="sr-only">The marked chain</span> leads that measure.{" "}
+        <PinMark number={pin} />
       </caption>
       <thead>
         <tr>

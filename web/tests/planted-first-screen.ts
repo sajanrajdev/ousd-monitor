@@ -1,6 +1,7 @@
 // What verify-output wants on the main page's first screen, written by hand, so a test can plant one
 // fault and nothing else. Used for pages that no real build wrote.
 import { CARD_ANCHORS } from "@/lib/definitions";
+import { JUMPY_NOTE, VELOCITY_NOTE } from "@/lib/takeaways/caveats";
 
 type Verdict = { sentence: string; text: string; textVisible: boolean; items: string[] };
 type Note = { kind: string; chain?: string; text: string };
@@ -457,6 +458,10 @@ export function plantedVelocity(velocity: PlantedVelocity, id: string): string {
         `<li data-note="${kind}"${chain ? ` data-chain="${chain}"` : ""}><span class="pin" aria-hidden="true">${index + 1}</span><p>${escaped(words)}</p></li>`,
     )
     .join("");
+  const denominators =
+    velocity.notes.findIndex((note) => note.kind === "velocity-denominators") + 1;
+  const legend = `<ul><li data-legend-measure="headline_velocity_bps">Headline velocity<span class="pin">${denominators}</span></li></ul>`;
+  const fullNotes = `<p data-full-note="velocity-denominators">${escaped(VELOCITY_NOTE)}</p><p data-full-note="velocity-jumpy">${escaped(JUMPY_NOTE)}</p>`;
   const full = velocity.fullWarnings
     .map(
       ({ chain, text }) =>
@@ -465,8 +470,8 @@ export function plantedVelocity(velocity: PlantedVelocity, id: string): string {
     .join("");
   return `<div id="${id}">${plantedPanelCard(
     velocity.heading,
-    `<div class="chart-area" aria-hidden="true">${chart}</div><ol data-pinned-notes>${notes}</ol>`,
-    full,
+    `<div class="chart-area" aria-hidden="true">${legend}${chart}</div><ol data-pinned-notes>${notes}</ol>`,
+    `${fullNotes}${full}`,
     `<table><caption>Velocity. Wallets, not people.</caption></table>`,
   )}</div>`;
 }

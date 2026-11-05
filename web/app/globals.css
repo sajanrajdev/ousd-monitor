@@ -1259,6 +1259,18 @@ html[data-freshness="stale"] .freshness-text__fresh {
   color: var(--color-meta-text);
 }
 
+/* A narrow card gives the bar the row's width: the measure's name goes above it. */
+@container (max-width: 459.98px) {
+  .velocity-chart__row {
+    grid-template-columns: minmax(0, 1fr) 4.75rem;
+    row-gap: 0.125rem;
+  }
+
+  .velocity-chart__label {
+    grid-column: 1 / -1;
+  }
+}
+
 .velocity-chart__track {
   position: relative;
   display: block;

@@ -146,13 +146,17 @@ export function chainGrid(roles: ChainRoleRow[]): { chains: ChainName[]; rows: G
         lead: leadingSentence(measure),
         cells: rows.map((row, index) => {
           const shareText = share ? formatBps(row[share] as number | null) : null;
+          // A row without an amount to print is a share: share of supply.
           const text = showAmount
             ? `${formatCompact(amounts[index])}${shareText ? ` (${shareText})` : ""}`
-            : (shareText ?? formatCompact(amounts[index]));
+            : shareText!;
           return {
             chain: row.chain,
             text,
-            widthBps: largest > 0n ? (floorBps(amounts[index], largest) ?? 0) : 0,
+            // A negative amount, which the schema allows for flows, draws nothing rather than an
+            // invalid width.
+            widthBps:
+              largest > 0n && amounts[index] > 0n ? (floorBps(amounts[index], largest) ?? 0) : 0,
             leads: row.leading_for.includes(measure),
           };
         }),

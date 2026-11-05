@@ -251,5 +251,17 @@ describe("the chain roles view", () => {
       const { container } = mount();
       expect(grid(container).textContent).not.toMatch(/settlement|trading/i);
     });
+    it("draws nothing for a negative flow, and says what the mark means in words", () => {
+      const { container } = mount((props) => {
+        props.chain_roles[0].dex_flow_30d = "-5000000";
+      });
+      const negative = [
+        ...container.querySelectorAll('[data-grid-measure="dex_flow"] .chain-grid__bar'),
+      ].find((bar) => bar.getAttribute("data-width") === "0");
+      expect(negative).toBeTruthy();
+      expect(container.querySelector("[data-chain-grid] caption")!.textContent).toContain(
+        "The marked chain leads that measure.",
+      );
+    });
   });
 });
