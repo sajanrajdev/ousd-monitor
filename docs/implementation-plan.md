@@ -84,7 +84,7 @@ The data supports this for Tempo, and not yet for all chains: Base and Solana we
 | U2 First screen | Done, #52 |
 | U3 Supply views, with the chain filter mounted | Done, #53. Exchange-linked supply inside placed came first, in #51 |
 | U4 Activity views | Done, #54 |
-| U5 Velocity and chain views, then the maintainer's whole-page review | Built, in review. The whole-page review follows |
+| U5 Velocity and chain views, then the maintainer's whole-page review | Done, #55. The whole-page review is next |
 | U6 Acceptance | Not started |
 
 **Done when:** U6's scripted checks pass on a real dataset, and the maintainer has reviewed the whole page. The headline's final wording is the maintainer's call, and stays open until then.
