@@ -502,6 +502,7 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 - **The "Clean volume and active wallets" card is gone,** replaced by the figures beside the bar and its table under the toggle, as the words table says. Under All there's no wallet figure, and its caveat stays in view.
 - **The view sections take `card-grid`,** a one-word change in `views/activity.tsx` and `views/chain-roles.tsx`. A card left alone on its row takes the row, so velocity and chain roles leave no hole until U4 and U5.
 - **The waterfall's period table still stacks in its half-width card until U4** moves it under the toggle, so that row is tall for now.
+- **The whole-page `verify-output` tests are in `web/tests/verify-output-panels.test.ts`,** not `verify-output.test.ts`. That file's heap grows by about 5 MB a test, and 20 tests that each parse a whole main page several times ran its worker out of memory in CI.
 - **A finding with JavaScript off** lands on its card's All panel, by `:target` inside `@media (scripting: none)`. That card then stays on All until another link is followed, and its heading says what it covers.
 
 ---

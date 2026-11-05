@@ -426,7 +426,11 @@ describe("journey view", () => {
   });
 
   it("has no axe violations", async () => {
-    const { container } = render(<main>{view().ui}</main>);
+    // All and one chain, as every chain's panel is the same markup, and axe is slow on the ten cards
+    // of the whole view. acceptance.mjs runs axe on every panel in a browser.
+    const { dataset, ui } = view();
+    const options = chainOptions(dataset.manifest.coverage.chains_included).slice(0, 2);
+    const { container } = render(<main>{cloneElement(ui, { options })}</main>);
     const results = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(results.violations).toEqual([]);
   });
