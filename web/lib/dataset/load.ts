@@ -157,6 +157,53 @@ function addsUp(total: string | null, parts: string[]): boolean {
   return BigInt(total ?? 0) === parts.reduce((sum, part) => sum + BigInt(part), 0n);
 }
 
+// A name on the main page rests on a label, and its figures on the journey's own newest day.
+function checkExchangeRows({ labels, journey }: DatasetFiles): void {
+  const fail = (place: string, problem: string): never => {
+    throw new DatasetError("labels.json", place, problem);
+  };
+  const newest = new Map<string, (typeof journey.data)[number]>();
+  for (const row of journey.data) {
+    const known = newest.get(row.chain);
+    if (!known || row.day > known.day) newest.set(row.chain, row);
+  }
+  const exchangeLabels = labels.data.filter((row) => row.category === "exchange");
+  const held = new Map<string, bigint>();
+  labels.exchange_holdings.forEach((row, index) => {
+    const place = `/exchange_holdings/${index}`;
+    const named = exchangeLabels.filter((label) => label.entity === row.entity);
+    if (named.length === 0) fail(place, `an exchange holding on ${row.chain} has no named label`);
+    if (row.wallets > named.filter((label) => label.chain === row.chain).length) {
+      fail(place, `an exchange holding on ${row.chain} has more wallets than labels`);
+    }
+    if (newest.get(row.chain)?.day !== row.day) {
+      fail(place, `an exchange holding on ${row.chain} isn't from the journey's newest day`);
+    }
+    held.set(row.chain, (held.get(row.chain) ?? 0n) + BigInt(row.balance));
+  });
+  for (const [chain, row] of newest) {
+    if ((held.get(chain) ?? 0n) !== BigInt(row.venue_exchange)) {
+      fail("/exchange_holdings", `exchange holdings don't add up to exchange venues on ${chain}`);
+    }
+  }
+  labels.data.forEach((row, index) => {
+    if (row.category === "exchange_linked") {
+      fail(`/data/${index}`, `an exchange-linked label on ${row.chain} has a name`);
+    }
+  });
+  const other = new Set(
+    labels.data.filter((row) => row.category !== "exchange").map((row) => row.entity),
+  );
+  labels.exchange_listings.forEach((row, index) => {
+    if (other.has(row.entity)) {
+      fail(
+        `/exchange_listings/${index}`,
+        "an exchange listing has the name of a label that isn't an exchange",
+      );
+    }
+  });
+}
+
 function checkSums(files: DatasetFiles): void {
   files.journey.data.forEach((row, index) => {
     if (
@@ -169,6 +216,13 @@ function checkSums(files: DatasetFiles): void {
         "journey.json",
         `/data/${index}`,
         `parts don't add up to total_supply on ${row.chain}, ${row.day}`,
+      );
+    }
+    if (BigInt(row.placed_exchange_linked) > BigInt(row.placed_supply)) {
+      throw new DatasetError(
+        "journey.json",
+        `/data/${index}`,
+        `placed_exchange_linked is more than placed_supply on ${row.chain}, ${row.day}`,
       );
     }
   });
@@ -281,8 +335,8 @@ export function loadDatasetFiles(
 ): { files: DatasetFiles; placement: Placement } {
   const { dir } = location;
   const manifest = parseJson(MANIFEST, readBytes(dir, MANIFEST)) as DatasetFiles["manifest"];
-  if ((manifest as { schema_version?: unknown }).schema_version !== 1) {
-    throw new DatasetError(MANIFEST, "/schema_version", "must be 1");
+  if ((manifest as { schema_version?: unknown }).schema_version !== 2) {
+    throw new DatasetError(MANIFEST, "/schema_version", "must be 2");
   }
   checkListedFiles(manifest);
   validate(MANIFEST, "manifest", manifest, webRoot);
@@ -321,6 +375,7 @@ export function loadDatasetFiles(
     }
   }
   checkSums(files);
+  checkExchangeRows(files);
   checkOneRowEach(files);
   return { files, placement: placementOf(location, webRoot) };
 }

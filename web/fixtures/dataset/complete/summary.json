@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "preview": false,
   "notice": "Independent. Not affiliated with Open Standard or Bridge.",
   "verdict": {
@@ -16,7 +16,7 @@
       "base": "2026-11-02",
       "solana": "2026-11-03"
     },
-    "text": "On Tempo, Ethereum, Base and Solana, 73% of supply has sat still for at least 14 days in unlabeled wallets of $1M or more, and transfers under $1M moved $64.5M in the last week, 0.49% of supply.",
+    "text": "On Tempo, Ethereum, Base and Solana, 73% of supply has sat still for at least 14 days in wallets of $1M or more with no issuer, venue or system label, and transfers under $1M moved $64.5M in the last week, 0.49% of supply.",
     "facts": [
       "The figures cover Tempo, Ethereum, Base and Solana and end on 2026-11-02 to 2026-11-03, UTC.",
       "Total supply on these chains is $13.1B, and each chain's mints minus burns equal its reported supply to the base unit."
@@ -24,6 +24,7 @@
     "estimates": [
       "Placed supply is 73.89% of supply on these chains. It counts wallets with no public label, so an unlabeled issuer or venue wallet can count as placed.",
       "Seven-day everyday volume is 0.49% of supply on these chains. It leaves out flows to and from labeled wallets, so a missing label adds to it.",
+      "Of placed supply, $900M is in wallets linked to exchanges by a written rule, where use inside an exchange can't be seen.",
       "Solana has no wallet labeled as the issuer, so its placed figure may include issuer inventory."
     ],
     "opinions": [
@@ -53,7 +54,7 @@
     },
     {
       "id": "labels_are_partial",
-      "text": "Issuer inventory and venue supply count only wallets a public source labels. Unlabeled custody isn't counted as a venue, and can count as placed."
+      "text": "Issuer inventory and venue supply count only wallets a public source labels. Exchange holdings are a floor. Custody with no published label can count as placed, and some of it is marked as exchange-linked."
     },
     {
       "id": "short_history",

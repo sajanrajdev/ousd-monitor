@@ -7,6 +7,7 @@ import { ActivityView } from "@/components/views/activity";
 import { ChainRolesView } from "@/components/views/chain-roles";
 import { JourneyView } from "@/components/views/journey";
 import { getDataset } from "@/lib/dataset";
+import { exchangeRows } from "@/lib/exchange-rows";
 
 export default function Home() {
   const dataset = getDataset();
@@ -39,6 +40,7 @@ export default function Home() {
         kpis={kpis}
         definitions={manifest.definitions}
         state={state}
+        exchanges={exchangeRows(dataset.labels)}
       />
       <ActivityView
         activity={dataset.activity}

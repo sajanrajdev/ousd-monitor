@@ -63,6 +63,12 @@ export function formatExact(amount: Amount): string {
   });
 }
 
+// Whole dollars, rounded down, so "at least" stays true of a floor.
+export function formatFloorDollars(amount: Amount): string {
+  if (amount === null || amount === undefined) return UNKNOWN_TEXT;
+  return signed(BigInt(amount), (magnitude) => `$${withSeparators(magnitude / UNIT)}`);
+}
+
 // Base units with separators, for a table that compares to the unit.
 export function formatBaseUnits(amount: Amount): string {
   if (amount === null || amount === undefined) return UNKNOWN_TEXT;

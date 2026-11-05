@@ -8,7 +8,10 @@ with wallets as (
         close_balance,
         category,
         case
-            when category is null and still_value >= {{ min_value }} then still_value
+            when
+                (category is null or category = 'exchange_linked')
+                and still_value >= {{ min_value }}
+                then still_value
             else 0
         end as placed_part
     from {{ ref('int_wallet_placed') }}
@@ -41,6 +44,8 @@ select
         ) as hugeint
     ) as issuer_inventory,
     cast(sum(r.placed_part) as hugeint) as placed_supply,
+    cast(coalesce(sum(r.placed_part) filter (where r.category = 'exchange_linked'), 0) as hugeint)
+        as placed_exchange_linked,
     cast(coalesce(sum(r.close_balance) filter (where r.category = 'dex'), 0) as hugeint)
         as venue_dex,
     cast(coalesce(sum(r.close_balance) filter (where r.category = 'lending'), 0) as hugeint)
@@ -50,7 +55,7 @@ select
     cast(
         coalesce(
             sum(r.close_balance - r.placed_part) filter (
-                where r.category is null or r.category = 'system'
+                where r.category is null or r.category in ('system', 'exchange_linked')
             ),
             0
         ) as hugeint

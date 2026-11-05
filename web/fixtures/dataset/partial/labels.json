@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "preview": true,
   "data": [
     {
@@ -113,12 +113,17 @@
   ],
   "unnamed_clusters": {
     "rule_reference": "labels/README.md#how-unnamed-clusters-are-found",
-    "rule": "An unnamed cluster is a set of wallets found from the chain's own transfers by a written rule. No public source names them, so they have no name here, and the rule says nothing about who holds them. The redemption route (`issuer_route`) has three kinds of wallet. The hub is the wallet a chain's mints go to. Path wallets are on the fixed path from the hub into burns. Collection wallets take money from many senders, send every outgoing transfer to the hub, and hold almost no balance. A wallet that passes money through from a single sender stays unlabeled, as does any other wallet with flows into the route, however large the flows. A contract on the path may have a verified name on the chain, but that name doesn't say who runs it, so the label stays unnamed. Published data gives a count of these wallets by chain and category, with this rule. Their addresses are only in `labels/labels.csv` in this repository.",
+    "rule": "An unnamed cluster is a set of wallets found from the chain's own transfers by a written rule. No public source names them, so they have no name here, and the rule says nothing about who holds them. The redemption route (`issuer_route`) has three kinds of wallet. The hub is the wallet a chain's mints go to. Path wallets are on the fixed path from the hub into burns. Collection wallets take money from many senders, send every outgoing transfer to the hub, and hold almost no balance. A wallet that passes money through from a single sender stays unlabeled, as does any other wallet with flows into the route, however large the flows. A contract on the path may have a verified name on the chain, but that name doesn't say who runs it, so the label stays unnamed. An exchange-linked wallet (`exchange_linked`) has no public name, held at least $1M on 2026-11-03, took at least one transfer of $1M or more from wallets a public source names as an exchange, took every inflow of $1 or more from those wallets, and sent at most 2% of its inflows anywhere else. The list is fixed as of that day and changes only through a reviewed labels change, and it isn't re-tested after that date. A wallet could belong to the exchange, to its clients or to someone else, and the chain can't tell them apart. A label site's name for such a wallet is a lead, not a source, and a wallet's funding is not a source either. Its balance stays in placed supply, marked as exchange-linked. Published data gives a count of these wallets by chain and category, with this rule. Their addresses aren't in published data or on the site. They are in `labels/labels.csv` in this repository.",
     "counts": [
       {
         "chain": "base",
         "category": "issuer_route",
         "count": 1
+      },
+      {
+        "chain": "ethereum",
+        "category": "exchange_linked",
+        "count": 2
       },
       {
         "chain": "ethereum",
@@ -157,12 +162,17 @@
       {
         "source_type": "published_research",
         "meaning": "A named research publisher ties the name to the address",
-        "how_to_check": "Open the link and find the name and address. Publishers may shorten an address, as in `0x4c2c…00b8`"
+        "how_to_check": "Open the link and find the name and address. Publishers may shorten an address, as in `0x4c2c\u202600b8`"
       },
       {
         "source_type": "onchain_metadata",
         "meaning": "The chain itself records it, such as a verified contract name and its creator",
         "how_to_check": "Open the link and read the contract details"
+      },
+      {
+        "source_type": "exchange_listing",
+        "meaning": "An exchange's own page says it supports OUSD. It names no wallet, so it is never the source of a wallet's label",
+        "how_to_check": "Open the link and find OUSD on the exchange's own page"
       },
       {
         "source_type": "derived_rule",
@@ -172,6 +182,29 @@
     ],
     "reading_a_label": "a named label always has a web source you can open. A `derived_rule` label never has a name, because it describes what a wallet does, not who holds it. `confidence` is `medium` when the source leaves a gap, such as a vault page that shows no curator, or research that prints only a shortened address. Vault names come from the vault's creator, not from any company the name may suggest, so a name alone doesn't say who runs a vault. The 0x Settler labels rest on the verified contract name and on the creator the chain records for it, `deployer.zeroexprotocol.eth`. Tell us if a source no longer supports a label."
   },
+  "exchange_holdings": [
+    {
+      "chain": "ethereum",
+      "day": "2026-11-03",
+      "entity": "Sample Exchange",
+      "wallets": 1,
+      "balance": "600000000000000"
+    }
+  ],
+  "exchange_listings": [
+    {
+      "entity": "Sample Exchange",
+      "source_type": "exchange_listing",
+      "source_url": "https://example.com/sample-exchange/ousd",
+      "date_checked": "2026-11-04"
+    },
+    {
+      "entity": "Sample Listing",
+      "source_type": "exchange_listing",
+      "source_url": "https://example.com/sample-listing/ousd",
+      "date_checked": "2026-11-04"
+    }
+  ],
   "issuer_coverage": [
     {
       "chain": "tempo",

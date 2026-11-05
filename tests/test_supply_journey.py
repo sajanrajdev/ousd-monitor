@@ -149,6 +149,80 @@ def test_dust_out_keeps_the_rest_placed(tmp_path):
     assert r["venue_exchange"] == 1 * USD
 
 
+def test_exchange_linked_stays_in_placed_and_is_marked(tmp_path):
+    linked = [label("tempo", WALLET, "exchange_linked")]
+    r = journey(tmp_path, [fund(20)], linked)
+    assert r["placed_supply"] == 5_000_000 * USD
+    assert r["placed_exchange_linked"] == 5_000_000 * USD
+    assert r["placed_wallets"] == 1
+    assert r["venue_exchange"] == 0
+
+
+def test_exchange_linked_counts_only_what_stayed(tmp_path):
+    linked = [label("tempo", WALLET, "exchange_linked")]
+    r = journey(tmp_path, [fund(20), at(5, WALLET, SINK, 3_000_000 * USD)], linked)
+    assert r["placed_exchange_linked"] == 2_000_000 * USD
+    assert r["free_floating"] == 3_000_000 * USD
+
+
+def test_exchange_linked_too_new_is_free_floating(tmp_path):
+    linked = [label("tempo", WALLET, "exchange_linked")]
+    r = journey(tmp_path, [fund(3)], linked)
+    assert r["placed_exchange_linked"] == 0
+    assert r["free_floating"] == 5_000_000 * USD
+
+
+def test_exchange_holdings_sum_named_wallets_by_exchange(tmp_path):
+    named = [
+        {**label("tempo", WALLET, "exchange"), "entity": "Named Exchange"},
+        {**label("tempo", OTHER, "exchange"), "entity": "Named Exchange"},
+        label("tempo", SINK, "exchange_linked"),
+    ]
+    events = [fund(20), fund(20, 2_000_000 * USD, OTHER, 1), fund(20, 3_000_000 * USD, SINK, 2)]
+    conn = build_marts(
+        tmp_path,
+        transfers("tempo", events),
+        labels=named,
+        sync_state={"tempo": 10_000},
+        dbt_vars={"placed_days": 14, "placed_min_base_units": 1_000_000 * USD},
+    )
+    try:
+        held = conn.execute(
+            "select entity, balance, wallets from mart_exchange_holdings "
+            "where chain = 'tempo' and day_utc = ?",
+            [TODAY],
+        ).fetchall()
+        linked = conn.execute(
+            "select venue_exchange, placed_exchange_linked from mart_supply_journey "
+            "where chain = 'tempo' and day_utc = ?",
+            [TODAY],
+        ).fetchone()
+    finally:
+        conn.close()
+    assert held == [("Named Exchange", 7_000_000 * USD, 2)]
+    assert linked == (7_000_000 * USD, 3_000_000 * USD)
+
+
+def test_an_exchange_linked_sender_counts_as_active(tmp_path):
+    linked = [label("tempo", WALLET, "exchange_linked")]
+    conn = build_marts(
+        tmp_path,
+        transfers("tempo", [fund(20), at(1, WALLET, SINK, 5 * USD)]),
+        labels=linked,
+        sync_state={"tempo": 10_000},
+        dbt_vars={"placed_days": 14, "placed_min_base_units": 1_000_000 * USD},
+    )
+    try:
+        active = conn.execute(
+            "select active_wallets_7d from mart_activity_kpis "
+            "where chain = 'tempo' and day_utc = ?",
+            [TODAY - timedelta(days=1)],
+        ).fetchone()
+    finally:
+        conn.close()
+    assert active == (1,)
+
+
 def test_half_moved(tmp_path):
     r = journey(tmp_path, [fund(20), at(5, WALLET, SINK, 3_000_000 * USD)], SINK_LABEL)
     assert r["placed_supply"] == 2_000_000 * USD

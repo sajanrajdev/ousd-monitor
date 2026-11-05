@@ -108,6 +108,7 @@ function journeyRow(chain: JourneyRow["chain"], day: string, total: string): Jou
     total_supply: total,
     issuer_inventory: "0",
     placed_supply: total,
+    placed_exchange_linked: "0",
     venue_dex: "0",
     venue_lending: "0",
     venue_exchange: "0",

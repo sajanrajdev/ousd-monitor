@@ -17,7 +17,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: [issuer, issuer_route, system, dex, lending, exchange]
+                values: [issuer, issuer_route, system, dex, lending, exchange, exchange_linked]
       - name: source_type
         data_tests:
           - not_null

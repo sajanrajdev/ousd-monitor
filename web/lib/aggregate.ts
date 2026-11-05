@@ -96,7 +96,8 @@ export const JOURNEY_PARTS = [
   "free_floating",
 ] as const;
 
-const JOURNEY_AMOUNTS = ["total_supply", ...JOURNEY_PARTS] as const;
+// Sits inside placed_supply, so it is summed across chains but isn't a part of the total.
+const JOURNEY_AMOUNTS = ["total_supply", "placed_exchange_linked", ...JOURNEY_PARTS] as const;
 
 export type JourneyAmounts = Record<(typeof JOURNEY_AMOUNTS)[number], string>;
 

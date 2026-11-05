@@ -29,6 +29,8 @@ class ChainFigures:
     day: date
     total_supply: int
     placed_supply: int
+    # The part of placed supply in wallets a written rule links to exchanges.
+    placed_exchange_linked: int
     clean_everyday_7d: int
     full_window: bool
     # A wallet here carries the `issuer` label. Route wallets alone don't settle it.
@@ -143,6 +145,29 @@ def _labels_change_the_answer(inputs: VerdictInputs) -> bool:
     )
 
 
+def _exchange_links_change_the_answer(inputs: VerdictInputs) -> bool:
+    """Exchange-linked wallets count as placed, but what they hold may be in use inside an
+    exchange. If leaving them out would change the answer, the data doesn't settle it."""
+    total = sum(f.total_supply for f in inputs.chains)
+    placed = sum(f.placed_supply for f in inputs.chains)
+    sure = placed - sum(f.placed_exchange_linked for f in inputs.chains)
+    return (placed * 10_000 >= PLACED_THRESHOLD_BPS * total) != (
+        sure * 10_000 >= PLACED_THRESHOLD_BPS * total
+    )
+
+
+def _both_doubts_change_the_answer(inputs: VerdictInputs) -> bool:
+    """Each doubt alone may leave the answer standing while the two together don't."""
+    total = sum(f.total_supply for f in inputs.chains)
+    placed = sum(f.placed_supply for f in inputs.chains)
+    sure = sum(
+        f.placed_supply - f.placed_exchange_linked for f in inputs.chains if f.has_issuer_label
+    )
+    return (placed * 10_000 >= PLACED_THRESHOLD_BPS * total) != (
+        sure * 10_000 >= PLACED_THRESHOLD_BPS * total
+    )
+
+
 _PREVIEW_PREFIX = "Local preview, not a finding. "
 
 
@@ -164,6 +189,14 @@ def build_verdict(rows: VerdictInputs) -> Verdict:
             f"{_chain_list(unlabeled)} has no wallet labeled as the issuer, "
             "which could change the answer"
         ]
+    if not reasons and _exchange_links_change_the_answer(rows):
+        reasons = ["wallets linked to exchanges by a written rule could change the answer"]
+    if not reasons and _both_doubts_change_the_answer(rows):
+        unlabeled = [figures.chain for figures in chains if not figures.has_issuer_label]
+        reasons = [
+            f"{_chain_list(unlabeled)} has no wallet labeled as the issuer, and wallets linked to "
+            "exchanges by a written rule count as placed, which together could change the answer"
+        ]
     if reasons:
         where = f"On {_chain_list(scope)}, the" if scope else "The"
         return Verdict(
@@ -182,7 +215,8 @@ def build_verdict(rows: VerdictInputs) -> Verdict:
     # Floors, so a figure never reads as past a threshold it hasn't reached.
     placed_part = (
         f"{placed_bps // 100}% of supply has sat still for at least {rows.placed_days} days in "
-        f"unlabeled wallets of {format_dollars(rows.placed_min_base_units)} or more"
+        f"wallets of {format_dollars(rows.placed_min_base_units)} or more with no issuer, venue "
+        "or system label"
     )
     moved_part = (
         f"transfers under {format_dollars(rows.large_transfer_base_units)} moved "
@@ -229,6 +263,11 @@ def build_verdict(rows: VerdictInputs) -> Verdict:
     ]
     if share_estimate:
         estimates.insert(0, share_estimate)
+    if linked := sum(figures.placed_exchange_linked for figures in chains):
+        estimates.append(
+            f"Of placed supply, {format_dollars(linked)} is in wallets linked to exchanges by a "
+            "written rule, where use inside an exchange, if any, can't be seen."
+        )
     unlabeled = [figures.chain for figures in chains if not figures.has_issuer_label]
     if unlabeled:
         estimates.append(
@@ -276,7 +315,8 @@ def known_limits(
         KnownLimit(
             "labels_are_partial",
             "Issuer inventory and venue supply count only wallets a public source labels. "
-            "Unlabeled custody isn't counted as a venue, and can count as placed.",
+            "Exchange holdings are a floor. Custody with no published label can count as placed, "
+            "and some of it is marked as exchange-linked.",
         ),
         KnownLimit(
             "short_history",

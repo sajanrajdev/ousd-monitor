@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "dataset_version": "preview-20261104T060000Z",
   "generated_at": "2026-11-04T06:00:00Z",
   "time_zone": "UTC",
@@ -130,7 +130,7 @@
       "rows": 70
     },
     "activity.json": {
-      "sha256": "3fb78a015d2796855b8e74c1ad2f072cd1a18d081a70d4edce2d3736fd0f9956",
+      "sha256": "b8ead1ca87874dd861dc37febaabc3a82dbe6ecb2e9e25d9dd90d3afbe296666",
       "rows": 70
     },
     "chain_roles.csv": {
@@ -138,27 +138,27 @@
       "rows": 2
     },
     "chain_roles.json": {
-      "sha256": "a003e42241bb4eb79395de407dbf00c62b2118fce1445e79929bec31e14f72b4",
+      "sha256": "7a4debe65020a8d157c960a92de4a7af6f520f8e9ac8af8f7127398948599a8b",
       "rows": 2
     },
     "journey.csv": {
-      "sha256": "0192cf2edd60b5ae45490254f5c367135f5bd983f5af5536fca04c2178a50295",
+      "sha256": "ae6527a81e278ebe1fffddac376e7783194baacc91ef45ceb2dbd06e213e3cad",
       "rows": 42
     },
     "journey.json": {
-      "sha256": "3c6c732b48a27f4d5ad9877d89cd62e8cfc17acd057699a7c76c058d70dab92b",
+      "sha256": "4ad8045b22a19a7d57eb91f0405f2854dee5ed77a41b8f6b625e85b7c8e56c73",
       "rows": 42
     },
     "labels.json": {
-      "sha256": "34e7b4d6d06c5b33f1c00d6c7dca6c2653a67880a7b71a719709701430609ab4",
+      "sha256": "34c7f2056bc9cf6a91cc1dd17855f3027c07b27e58d2d85e8907a91ec0c20141",
       "rows": 12
     },
     "reconciliation.json": {
-      "sha256": "c9e23f3eef3beffea720be01c4d308ecb9a57acac55a22d35db27d91cb6bbb71",
+      "sha256": "b8aa7c712ca6f869df1da3b2508abf658ae92a771803eabf3f10912a4c80a3f8",
       "rows": 3
     },
     "summary.json": {
-      "sha256": "80c5515bc5870c2e4f3fe0ddc56688a7456dd03797226b65c04f030f960ba965",
+      "sha256": "98232861e9180fd0e2bdd9316a9f69f4d764c84e878ca76a0c03e515c1fc0d27",
       "rows": 2
     }
   }

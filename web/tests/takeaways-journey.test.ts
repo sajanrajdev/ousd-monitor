@@ -23,6 +23,7 @@ function row(chain: JourneyRow["chain"], total: string, placed: string): Journey
     total_supply: total,
     issuer_inventory: "0",
     placed_supply: placed,
+    placed_exchange_linked: "0",
     venue_dex: "0",
     venue_lending: "0",
     venue_exchange: "0",

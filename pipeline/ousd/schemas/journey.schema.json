@@ -10,7 +10,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "preview": {
       "type": "boolean"
@@ -26,6 +26,7 @@
           "total_supply",
           "issuer_inventory",
           "placed_supply",
+          "placed_exchange_linked",
           "venue_dex",
           "venue_lending",
           "venue_exchange",
@@ -60,6 +61,10 @@
           "placed_supply": {
             "type": "string",
             "pattern": "^-?[0-9]+$"
+          },
+          "placed_exchange_linked": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
           },
           "venue_dex": {
             "type": "string",

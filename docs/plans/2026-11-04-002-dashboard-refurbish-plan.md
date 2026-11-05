@@ -251,7 +251,7 @@ A later change to wording touches `VERDICT_SENTENCES` and `web/tests/verdict.tes
 
 A separate research task may add exchange holdings. This work adds no dataset field and changes no metric, label or pipeline code. It only makes sure the page won't need rework.
 
-**Decided:** the maintainer accepted exchange option B. The main page may name exchanges where a published source ties the name to the wallets. That lands in PR #51, not in these units.
+**Decided:** the maintainer accepted exchange option B, and exchanges may be named on the main page. PR #51 does this: `exchangeRows` in `web/lib/exchange-rows.ts` reads the rows from `labels.json`, and the supply card shows them. A row with wallets, such as "Coinbase, 7 wallets, at least $346,579", needs a public source tying the name to those wallets. Its source link goes to the named labels table, as the main page holds no address. A listed exchange with no such source, such as "Kraken, no wallet labeled", links to its own listing and claims no wallet. No wallet in the unnamed exchange-linked band is named. U3 rebuilds this card and passes these rows to `supplySegments` as `entities`.
 
 **Design requirement.** Supply segments, their legend and their notes come from one config and one mapping function, with no per-segment markup. A segment has room for a coverage marker showing that a labeled total is a floor, and for optional per-entity rows.
 
@@ -273,7 +273,7 @@ type SupplySegment = SegmentConfig & {
   amount: string;
   shareBps: number | null;
   coverage?: "floor";
-  entities?: { label: string; amount: string; sourceUrl: string }[];
+  entities?: ExchangeRow[];
 };
 
 function supplySegments(row: JourneyAmounts, extras?: SegmentExtras): SupplySegment[];
@@ -283,7 +283,7 @@ function supplySegments(row: JourneyAmounts, extras?: SegmentExtras): SupplySegm
 
 **What the research task would still need to decide,** recorded so it isn't a surprise:
 
-- `verify-output` allows no labelled entity's name on the main page. Under the decision above, real per-exchange rows need that rule changed in PR #51, with each name beside its source. Per-entity rows sit under the data toggle in a `data-labels-table` block, ready for that.
+- `verify-output` allows a labelled entity's name on the main page only as the name of an exchange row. PR #51 made that change: each row must match the dataset's name, figure and source, and every other labelled name stays blocked. The rows may move under the data toggle in U3, as the check reads `data-exchange-row` inside a closed disclosure too, but it refuses a hidden row.
 - A larger exchange segment lowers placed. That can change `verdict.state`, and so the headline, by design.
 - Fields would arrive through a schema change and generated types. `supplySegments` is the one function that then changes.
 

@@ -374,6 +374,15 @@ async function checkInView(page, where) {
       const panel = caveat.closest("[data-chain-panel]");
       if (!panel || panel.checkVisibility()) need(`the ${caveat.dataset.note} note`, caveat);
     }
+    // An exchange's name and its source. A closed disclosure may hold them, and no stylesheet may hide them.
+    for (const row of document.querySelectorAll("main [data-exchange-row]")) {
+      const panel = row.closest("[data-chain-panel]");
+      if (row.closest("details:not([open])") || (panel && !panel.checkVisibility())) continue;
+      need("an exchange row", row);
+      need("an exchange row's name", row.querySelector("[data-exchange-name]"));
+      need("an exchange row's detail", row.querySelector("[data-exchange-detail]"));
+      need("an exchange row's source", row.querySelector("[data-exchange-source]"));
+    }
     const note = document.querySelector("[data-stale-note] .freshness-text > *");
     if (!verdict && root.dataset.freshness === "stale") need("the stale note", note);
     for (const card of document.querySelectorAll(".chart-card")) {

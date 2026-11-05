@@ -24,6 +24,7 @@ const PRD_METRICS: Record<string, string> = {
   "Issuer inventory": "issuer-inventory",
   "Venue supply": "venue-supply",
   "Placed supply": "placed-supply",
+  "Exchange-linked placed": "exchange-linked-placed",
   "Free-floating supply": "free-floating",
   "Circulating supply": "circulating-supply",
   "Headline volume": "headline-volume",

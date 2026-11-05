@@ -8,6 +8,7 @@ import {
   SourceLegend,
   UnnamedClusters,
 } from "@/components/methodology-tables";
+import { ExchangeHoldingsCard, ExchangeListingsCard } from "@/components/exchange-holdings";
 import { getDataset, type Dataset } from "@/lib/dataset";
 import {
   loadMethodology,
@@ -99,6 +100,20 @@ export default function Methodology() {
             {chunk.id === "named-labels" ? (
               <NamedLabelsCard
                 labels={dataset.labels.data}
+                state={dataset.state}
+                fallbackAsOf={dataset.manifest.generated_at}
+              />
+            ) : null}
+            {chunk.id === "named-labels" ? (
+              <ExchangeHoldingsCard
+                holdings={dataset.labels.exchange_holdings}
+                state={dataset.state}
+                fallbackAsOf={dataset.manifest.generated_at}
+              />
+            ) : null}
+            {chunk.id === "named-labels" ? (
+              <ExchangeListingsCard
+                listings={dataset.labels.exchange_listings}
                 state={dataset.state}
                 fallbackAsOf={dataset.manifest.generated_at}
               />

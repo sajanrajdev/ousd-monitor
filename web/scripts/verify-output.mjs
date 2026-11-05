@@ -8,7 +8,8 @@ import { loadDatasetFiles, locateDataset } from "../lib/dataset/load.ts";
 import { deriveState } from "../lib/dataset/state.ts";
 import { allChainKpis, newestByChain } from "../lib/aggregate.ts";
 import { CARD_ANCHORS, CHAIN_NAMES, TOKEN_CONTRACTS } from "../lib/definitions.ts";
-import { formatBps, formatCompact, UNKNOWN_TEXT } from "../lib/format.ts";
+import { exchangeRows } from "../lib/exchange-rows.ts";
+import { formatBps, formatCompact, formatExact, UNKNOWN_TEXT } from "../lib/format.ts";
 import {
   activityChains,
   day0Scope,
@@ -22,6 +23,9 @@ import {
 import {
   day0Note,
   everydayNote,
+  EXCHANGE_FLOOR_LINK,
+  EXCHANGE_FLOOR_NOTE,
+  exchangeCoverageNote,
   historyNote,
   HOPS_NOTE,
   issuerUnlabeledNote,
@@ -35,7 +39,7 @@ import {
   WALLETS_NOTE,
 } from "../lib/takeaways/caveats.ts";
 import { chainRolesHeading } from "../lib/takeaways/chain-roles.ts";
-import { journeyHeading } from "../lib/takeaways/journey.ts";
+import { exchangeLinkedBands, journeyHeading } from "../lib/takeaways/journey.ts";
 import { verdictSentence, verdictTextVisible } from "../lib/verdict.ts";
 
 const INDEPENDENCE_LINE = "Independent. Not affiliated with Open Standard or Bridge.";
@@ -81,10 +85,38 @@ const OUT_OF_VIEW = [
   '[style*="visibility: hidden"]',
 ].join(", ");
 
+// What an inline style or a class can hide, read as written, however it is spaced. A class list with
+// a responsive reveal, such as "hidden md:block", shows at some width, so the browser checks judge it.
+const HIDING_STYLE = [
+  /display:none/,
+  /visibility:(hidden|collapse)/,
+  /opacity:0(\.0+)?(;|$)/,
+  /font-size:0([a-z%]*)(;|$)/,
+  /(left|right|top|bottom|margin-[a-z]+|text-indent):-\d{3,}/,
+  /translate[xyz3d]*\(-\d{3,}/,
+];
+const REVEALED_CLASS =
+  /^[a-z0-9-]+:(block|flex|grid|inline|inline-block|inline-flex|table|contents)$/;
+
+function hiddenByMarkup(element) {
+  const style = (element.getAttribute("style") ?? "").replace(/\s+/g, "").toLowerCase();
+  if (HIDING_STYLE.some((pattern) => pattern.test(style))) return true;
+  const classes = [...element.classList];
+  return classes.includes("hidden") && !classes.some((name) => REVEALED_CLASS.test(name));
+}
+
+function outOfView(element) {
+  if (element.closest(OUT_OF_VIEW)) return true;
+  for (let at = element; at; at = at.parentElement) {
+    if (hiddenByMarkup(at)) return true;
+  }
+  return false;
+}
+
 // In view with nothing opened: not hidden, and inside no details but in its summary. CSS can't be
 // read here, so the browser checks in acceptance.mjs cover what a stylesheet hides.
 function inView(element) {
-  if (element.closest(OUT_OF_VIEW)) return false;
+  if (outOfView(element)) return false;
   for (let d = element.closest("details"); d; d = d.parentElement?.closest("details")) {
     if (!d.querySelector(":scope > summary")?.contains(element)) return false;
   }
@@ -345,7 +377,7 @@ function checkTrustDetail(page, document, problems) {
 // The caveats needed to read a number, wherever a unit pins them. Each required instance is in view
 // with nothing opened and keeps its words, read whole so a date or a link can't split a sentence.
 function checkEssentialNotes(page, document, expected, problems) {
-  for (const { kind, chain, text } of expected.essentialNotes) {
+  for (const { kind, chain, text, exact } of expected.essentialNotes) {
     const selector = `[data-note="${kind}"]${chain ? `[data-chain="${chain}"]` : ""}`;
     const shown = [...document.querySelectorAll(selector)]
       .map((note) => viewText(note, "").replace(/\s+/g, " "))
@@ -353,7 +385,7 @@ function checkEssentialNotes(page, document, expected, problems) {
     const name = `the ${kind} note${chain ? ` for ${chain}` : ""}`;
     if (shown.length === 0) {
       problems.push(`${page}: ${name} isn't in view`);
-    } else if (!shown.some((words) => words.includes(text))) {
+    } else if (!shown.some((words) => (exact ? words.trim() === text : words.includes(text)))) {
       problems.push(`${page}: ${name} doesn't say "${text}"`);
     }
   }
@@ -372,6 +404,8 @@ function checkAddresses(page, texts, allowedAddresses, problems) {
   }
 }
 
+// The main page's own serialized copies. Any other, a route's tree or another page's, has no row.
+const OWN_PAYLOAD = /^(index|__next\._full|__next\.__PAGE__)\.txt$/;
 const DEFINITION_LINK = /^\/methodology\/?#[\w-]+$/;
 
 function hasSourceAndDefinition(block) {
@@ -459,26 +493,276 @@ function checkLinksAndRequests(page, document, problems) {
   }
 }
 
-function checkBlockedNames(page, html, blockedNames, problems) {
-  for (const name of blockedNames) {
-    if (escapedNameMatcher(name).test(html)) problems.push(`${page}: names "${name}"`);
+const plainText = (element) => element?.textContent.replace(/\s+/g, " ").trim() ?? "";
+
+// The rows are the dataset's, in its order, and each says exactly what the dataset gives and nothing
+// more. A row may sit in a closed disclosure, but it can't be hidden.
+function checkExchangeRows(page, document, expected, problems) {
+  const rows = [...document.querySelectorAll("[data-exchange-row]")];
+  if (rows.length !== expected.exchangeRows.length) {
+    problems.push(`${page}: there are ${rows.length} exchange rows`);
+  }
+  expected.exchangeRows.forEach(({ entity, detail, sourceHref, sourceText }, index) => {
+    const row = rows[index];
+    if (plainText(row?.querySelector("[data-exchange-name]")) !== entity) {
+      problems.push(`${page}: exchange row ${index + 1} isn't the dataset's name`);
+      return;
+    }
+    if ([row, ...row.querySelectorAll("*")].some(outOfView)) {
+      problems.push(`${page}: the row for "${entity}" is hidden`);
+    }
+    if (plainText(row.querySelector("[data-exchange-detail]")) !== detail) {
+      problems.push(`${page}: the row for "${entity}" isn't the dataset's figure`);
+    }
+    const source = row.querySelector("a[data-exchange-source]");
+    if (source?.getAttribute("href") !== sourceHref || plainText(source) !== sourceText) {
+      problems.push(`${page}: the row for "${entity}" hasn't the source the dataset gives`);
+    }
+    if (plainText(row) !== `${entity}, ${detail}. Source: ${sourceText}.`) {
+      problems.push(`${page}: the row for "${entity}" says more than the dataset gives`);
+    }
+  });
+}
+
+// What may name an exchange in the page's serialized props: its row's own name, once.
+const withoutPayloadNames = (raw, names, quote) =>
+  names.reduce(
+    (rest, name) =>
+      rest.replace(
+        `${quote}data-exchange-name${quote}:true,${quote}children${quote}:${quote}${name}${quote}`,
+        "",
+      ),
+    raw,
+  );
+
+const INVISIBLE = /[\u00ad\u200b-\u200f\u2060\ufeff]/g;
+
+// So a name reads as a name however it's written: an escape, a zero-width split, or a tag in it.
+function readable(raw) {
+  const plain = raw
+    .replace(/\\+u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .normalize("NFKC")
+    .replace(INVISIBLE, "");
+  return `${plain}\n${plain.replace(/<[^>]*>/g, "")}`;
+}
+
+// Every blocked name, as a whole word and in its own case, as ordinary words are on that list. A row's
+// name is distinctive, so it's found in any case and inside a longer word as well. Each row's own
+// source link is the one place its host may appear.
+function namesFound(raw, expected) {
+  const rows = expected.exchangeRows;
+  const text = rows.reduce((rest, row) => rest.replaceAll(row.sourceHref, ""), readable(raw));
+  const folded = text.toLowerCase();
+  const distinctive = new Set(rows.map((row) => row.entity));
+  return [...new Set([...expected.blockedNames, ...distinctive])].filter(
+    (name) =>
+      escapedNameMatcher(name).test(text) ||
+      (distinctive.has(name) && folded.includes(name.toLowerCase())),
+  );
+}
+
+function checkNames(place, raw, expected, problems) {
+  for (const name of namesFound(raw, expected)) problems.push(`${place}: names "${name}"`);
+}
+
+// Every name is blocked, and only a row's own name is taken out first, so one anywhere else is still
+// caught: the head, an attribute, a template, a sentence or serialized props.
+function checkMainNames(page, html, expected, problems) {
+  const names = expected.exchangeRows.map((row) => row.entity);
+  const { document } = new JSDOM(html).window;
+  for (const row of document.querySelectorAll("[data-exchange-row]")) {
+    const name = row.querySelector("[data-exchange-name]");
+    if (name && names.includes(name.textContent)) name.textContent = "";
+  }
+  const rest = withoutPayloadNames(document.documentElement.outerHTML, names, '\\"');
+  checkNames(page, rest, expected, problems);
+}
+
+// The page's serialized copy, which React takes over from once it loads, so what's in it is what a
+// reader ends up seeing. Each line is an id and a JSON value, and an element is ["$", type, key, props].
+function flightValues(flight) {
+  const values = new Map();
+  for (const line of flight.split("\n")) {
+    const match = /^([0-9a-f]+):(.+)$/.exec(line);
+    if (!match) continue;
+    try {
+      values.set(match[1], JSON.parse(match[2]));
+    } catch {
+      // A module or hint row, which isn't JSON and holds no words.
+    }
+  }
+  return values;
+}
+
+function flightProps(values) {
+  const found = [];
+  const walk = (node) => {
+    if (Array.isArray(node)) {
+      if (node[0] === "$" && typeof node[1] === "string" && node[3]) found.push(node[3]);
+      node.forEach(walk);
+    } else if (node && typeof node === "object") {
+      Object.values(node).forEach(walk);
+    }
+  };
+  values.forEach(walk);
+  return found;
+}
+
+function flightText(node, values, seen = new Set()) {
+  if (typeof node === "number") return String(node);
+  if (typeof node === "string") {
+    const reference = /^\$L?([0-9a-f]+)$/.exec(node);
+    if (!reference) return node.replace(/^\$\$/, "$");
+    if (seen.has(reference[1])) return "";
+    seen.add(reference[1]);
+    return flightText(values.get(reference[1]), values, seen);
+  }
+  if (!Array.isArray(node)) return "";
+  if (node[0] === "$" && typeof node[1] === "string") {
+    return flightText(node[3]?.children, values, seen);
+  }
+  return node.map((child) => flightText(child, values, seen)).join("");
+}
+
+const FLIGHT_PUSH = /self\.__next_f\.push\(\s*\[\s*1\s*,\s*("(?:[^"\\]|\\.)*")\s*\]\s*\)/g;
+
+function inlineFlight(page, document, problems) {
+  let flight = "";
+  for (const script of document.querySelectorAll("script")) {
+    for (const match of script.textContent.matchAll(FLIGHT_PUSH)) {
+      try {
+        flight += JSON.parse(match[1]);
+      } catch {
+        problems.push(`${page}: a chunk of the page's payload can't be read`);
+      }
+    }
+  }
+  return flight;
+}
+
+function flightCells(row, values) {
+  const cells = Array.isArray(row.children) ? row.children : [row.children];
+  return cells.map((cell) => flightText(cell, values).replace(/\s+/g, " ").trim());
+}
+
+// What a client component draws from: its rows' journey figures, as props.
+function flightBandAmounts(values) {
+  const found = new Map();
+  const walk = (node) => {
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+    } else if (node && typeof node === "object") {
+      if (typeof node.key === "string" && node.journey?.placed_exchange_linked !== undefined) {
+        found.set(node.key, node.journey.placed_exchange_linked);
+      }
+      Object.values(node).forEach(walk);
+    }
+  };
+  values.forEach(walk);
+  return found;
+}
+
+// The same rows, caveats and band as the HTML, or the page changes under a reader once it loads. No
+// elements to read is a failure, or a payload this check can't follow would turn the check off.
+function checkPayload(place, flight, expected, problems) {
+  const values = flightValues(flight);
+  const props = flightProps(values);
+  if (props.length === 0) {
+    problems.push(`${place}: the page's payload can't be read`);
+    return;
+  }
+  const words = (element) => flightText(element.children, values).replace(/\s+/g, " ").trim();
+  const rows = props.filter((element) => element["data-exchange-row"]);
+  if (rows.length !== expected.exchangeRows.length) {
+    problems.push(`${place}: the payload has ${rows.length} exchange rows`);
+  }
+  expected.exchangeRows.forEach(({ entity, detail, sourceHref, sourceText }, index) => {
+    const row = rows[index];
+    if (!row || words(row) !== `${entity}, ${detail}. Source: ${sourceText}.`) {
+      problems.push(`${place}: the payload's row for "${entity}" isn't the dataset's`);
+      return;
+    }
+    const inRow = flightProps(new Map([["row", row.children]]));
+    if (inRow.find((element) => element["data-exchange-source"])?.href !== sourceHref) {
+      problems.push(`${place}: the payload's row for "${entity}" hasn't the dataset's source`);
+    }
+  });
+  for (const { kind, chain, text, exact } of expected.essentialNotes) {
+    const shown = props
+      .filter(
+        (element) => element["data-note"] === kind && (!chain || element["data-chain"] === chain),
+      )
+      .map(words);
+    if (!shown.some((said) => (exact ? said === text : said.includes(text)))) {
+      problems.push(`${place}: the payload's ${kind} note isn't the dataset's`);
+    }
+  }
+  const amounts = flightBandAmounts(values);
+  const rowsOfCells = props
+    .filter((element) => element.children !== undefined)
+    .map((element) => flightCells(element, values));
+  for (const { key, name, amount, exact } of expected.bands) {
+    if (amounts.get(key) !== amount) {
+      problems.push(
+        `${place}: the payload's exchange-linked amount for ${key} isn't the dataset's`,
+      );
+    }
+    if (key !== "all" && !rowsOfCells.some((cells) => cells[0] === name && cells.includes(exact))) {
+      problems.push(`${place}: the payload's table has another exchange-linked amount for ${key}`);
+    }
+  }
+}
+
+// The band beside each bar and in the table, as the dataset gives it.
+function checkBands(page, document, expected, problems) {
+  const lines = [...document.querySelectorAll("[data-exchange-linked]")];
+  const drawn = expected.bands.filter(({ amount }) => BigInt(amount) > 0n);
+  if (lines.length !== drawn.length) {
+    problems.push(`${page}: there are ${lines.length} exchange-linked lines`);
+  }
+  for (const { key, line } of drawn) {
+    const shown = lines.find((element) => element.dataset.exchangeLinked === key);
+    if (plainText(shown) !== line) {
+      problems.push(`${page}: the exchange-linked line for ${key} isn't the dataset's`);
+    }
+  }
+  const tableRows = [...document.querySelectorAll("tr")].map((row) =>
+    [...row.children].map(plainText),
+  );
+  for (const { key, name, exact } of expected.bands) {
+    if (key !== "all" && !tableRows.some((cells) => cells[0] === name && cells.includes(exact))) {
+      problems.push(`${page}: the table has another exchange-linked amount for ${key}`);
+    }
   }
 }
 
 // Allowed only in the labels table, in the legend (its words are the labels file's own and carry
-// a label's source rule), or beside the source that names it.
-function checkMethodologyNames(page, nodes, blockedNames, problems) {
-  for (const name of blockedNames) {
-    const matcher = escapedNameMatcher(name);
-    for (const node of nodes) {
-      if (!matcher.test(node.data)) continue;
-      const element = node.parentElement;
-      const block = element.closest("tr, li, p, dd, td");
-      const sourced =
-        element.closest("[data-labels-table], [data-source-legend]") ||
-        block?.querySelector('a[href^="https://"]');
-      if (!sourced) problems.push(`${page}: names "${name}" with no source beside it`);
-    }
+// a label's source rule), or as the whole words of a link to the named party's own site.
+const SOURCE_SITES = {
+  Coinbase: "coinbase.com",
+  Crystal: "crystalintelligence.com",
+  Kraken: "kraken.com",
+};
+
+function ownSourceLink(link, name) {
+  const site = SOURCE_SITES[name];
+  if (!site || plainText(link) !== name) return false;
+  const host = new URL(link.getAttribute("href")).hostname;
+  return host === site || host.endsWith(`.${site}`);
+}
+
+function checkMethodologyNames(page, html, expected, problems) {
+  const { document } = new JSDOM(html).window;
+  for (const allowed of document.querySelectorAll(
+    "script, style, template, [data-labels-table], [data-source-legend]",
+  )) {
+    allowed.remove();
+  }
+  for (const link of document.querySelectorAll('a[href^="https://"]')) {
+    if (Object.keys(SOURCE_SITES).some((name) => ownSourceLink(link, name))) link.remove();
+  }
+  for (const name of namesFound(document.body.innerHTML, expected)) {
+    problems.push(`${page}: names "${name}" with no source beside it`);
   }
 }
 
@@ -531,11 +815,15 @@ export function verifyOutput(outDir, expected) {
       // A named label's link may hold its own address, so here it's what a reader sees.
       const seen = [document.title, ...nodes.map((node) => node.data)];
       checkAddresses(page, seen, allowedAddresses, problems);
-      checkMethodologyNames(page, nodes, expected.blockedNames, problems);
+      checkMethodologyNames(page, html, expected, problems);
     } else {
       // No page but the methodology has a reason to hold one, seen or serialized.
       checkAddresses(page, [html, text], new Set(), problems);
-      checkBlockedNames(page, `${html}\n${text}`, expected.blockedNames, problems);
+      if (page === "index.html") {
+        checkMainNames(page, html, expected, problems);
+      } else {
+        checkNames(page, document.documentElement.outerHTML, expected, problems);
+      }
     }
     if (page === "index.html") {
       checkMainFrame(page, document, expected, problems);
@@ -546,6 +834,9 @@ export function verifyOutput(outDir, expected) {
       checkLegend(page, document, problems);
       checkTrustDetail(page, document, problems);
       checkEssentialNotes(page, document, expected, problems);
+      checkExchangeRows(page, document, expected, problems);
+      checkBands(page, document, expected, problems);
+      checkPayload(page, inlineFlight(page, document, problems), expected, problems);
     }
   }
   for (const path of files) {
@@ -555,7 +846,10 @@ export function verifyOutput(outDir, expected) {
     checkEveryFile(name, content, expected, problems);
     // Serialized props, as a name or address in them is on its way to the reader.
     if (name.endsWith(".txt") && !name.startsWith(`methodology${sep}`)) {
-      checkBlockedNames(name, content, expected.blockedNames, problems);
+      const own = OWN_PAYLOAD.test(name);
+      const names = own ? expected.exchangeRows.map((row) => row.entity) : [];
+      checkNames(name, withoutPayloadNames(content, names, '"'), expected, problems);
+      if (own) checkPayload(name, content, expected, problems);
       checkAddresses(name, [content], new Set(), problems);
     }
   }
@@ -570,6 +864,11 @@ function essentialNotes({ manifest, summary, journey, activity }) {
   const scope = day0Scope(rows, summary.kpis);
   return [
     { kind: "placed", text: PLACED_NOTE },
+    {
+      kind: "exchange-floor",
+      text: `${EXCHANGE_FLOOR_NOTE} ${EXCHANGE_FLOOR_LINK}.`,
+      exact: true,
+    },
     { kind: "series-start", text: seriesStartNote(definitions) },
     { kind: "small-ticket", text: `${SMALL_TICKET_LEAD} ${SMALL_TICKET_NOTE}` },
     { kind: "velocity-denominators", text: VELOCITY_NOTE },
@@ -597,6 +896,14 @@ function essentialNotes({ manifest, summary, journey, activity }) {
         kind: "issuer-unlabeled",
         chain,
         text: issuerUnlabeledNote(chain),
+      })),
+    ...newestByChain(journey.data)
+      .filter((row) => BigInt(row.venue_exchange) === 0n)
+      .map(({ chain }) => ({
+        kind: "exchange-coverage",
+        chain,
+        text: exchangeCoverageNote(chain),
+        exact: true,
       })),
   ];
 }
@@ -657,6 +964,12 @@ export function expectedFromFiles(files, placement, webRoot = process.cwd(), now
     kpiValues: expectedKpiValues(summary.kpis),
     findings: expectedFindings(files),
     essentialNotes: essentialNotes(files),
+    exchangeRows: exchangeRows(files.labels),
+    bands: exchangeLinkedBands(files.journey.data).map((band) => ({
+      ...band,
+      name: CHAIN_NAMES[band.key] ?? band.key,
+      exact: formatExact(band.amount),
+    })),
   };
 }
 

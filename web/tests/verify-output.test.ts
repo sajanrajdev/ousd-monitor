@@ -12,11 +12,18 @@ import {
   PLANTED_LEGEND,
   PLANTED_TRUST_DETAIL,
   PLANTED_VERDICT,
+  type PlantedBand,
+  type PlantedRow,
+  plantedBands,
   plantedCard,
+  plantedExchangeRows,
+  plantedFlight,
+  plantedRowFlight,
   plantedFindings,
   plantedHeadline,
   plantedKpis,
   plantedNotes,
+  plantedNotesFlight,
 } from "./planted-first-screen";
 
 const LINE = "Independent. Not affiliated with Open Standard or Bridge.";
@@ -45,6 +52,8 @@ const sampleExpected = {
   kpiValues: PLANTED_KPI_VALUES,
   findings: PLANTED_FINDINGS,
   essentialNotes: [] as { kind: string; chain?: string; text: string }[],
+  exchangeRows: [] as PlantedRow[],
+  bands: [] as PlantedBand[],
 };
 
 const realExpected = {
@@ -72,6 +81,7 @@ function page(
     <header><p>${LINE}</p></header>
     <aside data-dataset-banner>Sample data. Nothing here is real.</aside>
     <p data-stale-note>${STALE_NOTE}</p>
+    ${plantedFlight([["$", "main", null, {}]])}
     ${body}
     <footer><p>${LINE}</p><p>Not financial advice.</p>
     <a href="https://example.com/r" rel="noopener noreferrer">Reports</a></footer></body></html>`;
@@ -465,17 +475,54 @@ describe("verifyOutput", () => {
 
     it("allows a name on the methodology page only beside its source", () => {
       const sourced = page(
-        '<table data-labels-table><tr><td>Coinbase</td></tr></table><p>Morpho, <a href="https://example.com/m" rel="noopener noreferrer">source</a></p>',
+        '<table data-labels-table><tr><td>Coinbase</td></tr></table><p><a href="https://www.coinbase.com/m" rel="noopener noreferrer">Coinbase</a></p>',
       );
       expect(verifyOutput(site({ methodology: sourced }), sampleExpected)).toEqual([]);
       const legend = page(
         "<section data-source-legend><p>The 0x Settler labels rest on this.</p></section>",
       );
       expect(verifyOutput(site({ methodology: legend }), sampleExpected)).toEqual([]);
-      const unsourced = page("<p>Coinbase holds this.</p>");
-      expect(verifyOutput(site({ methodology: unsourced }), sampleExpected)).toContain(
-        'methodology/index.html: names "Coinbase" with no source beside it',
+      for (const unsourced of [
+        "<p>Coinbase holds this.</p>",
+        '<p>Coinbase holds the exchange-linked wallets. <a href="https://www.coinbase.com/price/ousd" rel="noopener noreferrer">Its page</a></p>',
+        '<p><a href="https://example.com/m" rel="noopener noreferrer">Coinbase</a></p>',
+        '<p><a href="https://coinbase.evil.example/m" rel="noopener noreferrer">Coinbase</a></p>',
+        '<p><a href="https://notcoinbase.com/m" rel="noopener noreferrer">Coinbase</a></p>',
+        '<p><a href="https://www.coinbase.com/m" rel="noopener noreferrer">Coinbase holds the exchange-linked wallets</a></p>',
+      ]) {
+        expect(verifyOutput(site({ methodology: page(unsourced) }), sampleExpected)).toContain(
+          'methodology/index.html: names "Coinbase" with no source beside it',
+        );
+      }
+    });
+
+    it("reads a name however it's written, on the methodology and not-found pages", () => {
+      const rows = [
+        { entity: "Coinbase", detail: "d", sourceHref: "/methodology/", sourceText: "s" },
+      ];
+      const named = { ...sampleExpected, exchangeRows: rows };
+      const main = page(
+        `${MAIN}<ul>${plantedExchangeRows(rows)}</ul>${plantedFlight(rows.map(plantedRowFlight))}`,
       );
+      for (const written of [
+        "COINBASE holds this",
+        "coinbase holds this",
+        "Coin<b>base</b> holds this",
+        "Coin\u200bbase holds this",
+      ]) {
+        const methodology = page(`<p>${written}</p>`);
+        expect(verifyOutput(site({ main, methodology }), named)).toContain(
+          'methodology/index.html: names "Coinbase" with no source beside it',
+        );
+        const notFound = page(`<p>${written}</p>`);
+        expect(verifyOutput(site({ main, extra: [["404.html", notFound]] }), named)).toContain(
+          '404.html: names "Coinbase"',
+        );
+      }
+      const allowed = page(
+        '<p><a href="https://www.coinbase.com/p" rel="noopener noreferrer">Coinbase</a></p><table data-labels-table><tr><td>coinbase</td></tr></table>',
+      );
+      expect(verifyOutput(site({ main, methodology: allowed }), named)).toEqual([]);
     });
 
     it("the list has every entity in labels.csv but the issuer", () => {
@@ -485,6 +532,13 @@ describe("verifyOutput", () => {
       entities.delete("Bridge");
       expect(entities.size).toBeGreaterThan(0);
       for (const entity of entities) expect(BLOCKED).toContain(entity);
+    });
+
+    it("the list has every exchange the labels README lists", () => {
+      const readme = readFileSync("../labels/README.md", "utf8");
+      const listed = [...readme.matchAll(/^\| ([^|`]+?) \| https:\/\/\S+ \| [0-9-]+ \|$/gm)];
+      expect(listed.map((row) => row[1])).toEqual(["Coinbase", "Kraken"]);
+      for (const row of listed) expect(BLOCKED).toContain(row[1]);
     });
 
     it("the list leaves out the four chains, Bridge and Open Standard", () => {
@@ -1016,7 +1070,8 @@ describe("the first screen", () => {
       ["visually hidden", (note: string) => note.replace("<p ", '<p class="sr-only" ')],
       ["empty", (note: string) => note.replace("A dated warning.", "")],
     ])("fails on a note %s", (_name, hide) => {
-      const body = plantedNotes([notes[0]]) + hide(plantedNotes([notes[1]]));
+      const body =
+        plantedNotes([notes[0]]) + hide(plantedNotes([notes[1]])) + plantedNotesFlight(notes);
       expect(verifyOutput(mainWith(body), expected)).toEqual([
         "index.html: the velocity-warning note for ethereum isn't in view",
       ]);
@@ -1024,7 +1079,8 @@ describe("the first screen", () => {
 
     it("a warning on another chain moves the note it asks for", () => {
       const moved = [notes[0], { ...notes[1], chain: "base" }];
-      const problems = verifyOutput(mainWith(plantedNotes(notes)), {
+      const body = plantedNotes(notes) + plantedNotesFlight(moved);
+      const problems = verifyOutput(mainWith(body), {
         ...sampleExpected,
         essentialNotes: moved,
       });
@@ -1032,7 +1088,8 @@ describe("the first screen", () => {
     });
 
     it("fails on a note that keeps its kind and loses its words", () => {
-      const body = plantedNotes([notes[0], { ...notes[1], text: "Fine." }]);
+      const body =
+        plantedNotes([notes[0], { ...notes[1], text: "Fine." }]) + plantedNotesFlight(notes);
       expect(verifyOutput(mainWith(body), expected)).toEqual([
         'index.html: the velocity-warning note for ethereum doesn\'t say "A dated warning."',
       ]);
@@ -1043,7 +1100,7 @@ describe("the first screen", () => {
       const split = `<p data-note="day-0-scope"><span class="status-chip" data-kind="fact">F</span>
         Flows count from <!-- -->3 Nov 2026 UTC<!-- -->, <em>here</em>. <a href="/methodology/#x">How</a></p>`;
       expect(
-        verifyOutput(mainWith(split), {
+        verifyOutput(mainWith(split + plantedNotesFlight([{ kind: "day-0-scope", text }])), {
           ...sampleExpected,
           essentialNotes: [{ kind: "day-0-scope", text }],
         }),
@@ -1065,7 +1122,8 @@ describe("the first screen", () => {
         ["gone", () => ""],
         ["in a popover", (note: string) => inDetails(note)],
       ])("fails on one instance %s, though the other stays", (_name, hide) => {
-        const body = plantedNotes([both[0]]) + hide(plantedNotes([both[1]]));
+        const body =
+          plantedNotes([both[0]]) + hide(plantedNotes([both[1]])) + plantedNotesFlight(both);
         expect(verifyOutput(mainWith(body), twice)).toEqual([
           'index.html: the wallets-not-people note doesn\'t say "Wallets."',
         ]);
@@ -1412,6 +1470,7 @@ describe("what to expect comes from the dataset", () => {
       for (const row of payload.data) {
         const moved = BigInt(row.placed_supply);
         row.placed_supply = "0";
+        row.placed_exchange_linked = "0";
         row.free_floating = (BigInt(row.free_floating) + moved).toString();
       }
     });
@@ -1430,6 +1489,394 @@ describe("what to expect comes from the dataset", () => {
   it("reads the same dataset the build does", () => {
     const location = locateDataset({ OUSD_DATASET_DIR: "fixtures/dataset/complete" });
     expect(expectedFromDataset(location).version).toBe("20261104T060000Z");
+  });
+});
+
+describe("exchange names on the main page", () => {
+  const KRAKEN_SOURCE =
+    "https://blog.kraken.com/product/asset-listings/ousd-is-available-for-trading";
+  const rows = [
+    {
+      entity: "Coinbase",
+      detail: "7 wallets, at least $346,579",
+      sourceHref: "/methodology/#named-labels",
+      sourceText: "each wallet's label",
+    },
+    {
+      entity: "Kraken",
+      detail: "no wallet labeled",
+      sourceHref: KRAKEN_SOURCE,
+      sourceText: "its OUSD listing",
+    },
+  ];
+  const named = { ...sampleExpected, exchangeRows: rows };
+  const row = (entity: string, detail: string, href: string, text: string) =>
+    `<li data-exchange-row><span data-exchange-name>${entity}</span>, <span data-exchange-detail>${detail}</span>. Source: <a href="${href}" rel="noopener noreferrer" data-exchange-source>${text}</a>.</li>`;
+  const COINBASE = row("Coinbase", rows[0].detail, rows[0].sourceHref, rows[0].sourceText);
+  const KRAKEN = row("Kraken", rows[1].detail, rows[1].sourceHref, rows[1].sourceText);
+  const ROWS_ONLY = `<ul>${COINBASE}${KRAKEN}</ul>`;
+  const BOTH = `${ROWS_ONLY}${plantedFlight(rows.map(plantedRowFlight))}`;
+
+  it("allows a dataset's exchange as a row's name, beside its source", () => {
+    expect(verifyOutput(mainWith(BOTH), named)).toEqual([]);
+  });
+
+  it("refuses the same name anywhere else on the page", () => {
+    for (const elsewhere of [
+      "<p>Coinbase holds this.</p>",
+      "<p>Coinbase</p>",
+      "<p>Coin&#98;ase</p>",
+      '<div title="Coinbase"></div>',
+      "<template><p>Coinbase</p></template>",
+      "<noscript><p>Coinbase</p></noscript>",
+    ]) {
+      expect(verifyOutput(mainWith(`${BOTH}${elsewhere}`), named)).toEqual([
+        'index.html: names "Coinbase"',
+      ]);
+    }
+  });
+
+  it("refuses the name however it's written", () => {
+    for (const elsewhere of [
+      "<p>COINBASE holds the band</p>",
+      "<p>coinbase holds the band</p>",
+      "<p>CoinbasePrime holds the band</p>",
+      "<p>Coin<b>base</b> holds the band</p>",
+      "<p>Coin\u200bbase holds the band</p>",
+      '<div title="coinbase"></div>',
+    ]) {
+      expect(verifyOutput(mainWith(`${BOTH}${elsewhere}`), named)).toEqual([
+        'index.html: names "Coinbase"',
+      ]);
+    }
+    const main = page(`${MAIN}${BOTH}`);
+    expect(
+      verifyOutput(site({ main, extra: [["index.txt", '{"a":"Coin\\u0062ase"}']] }), named),
+    ).toContain('index.txt: names "Coinbase"');
+    expect(verifyOutput(site({ main, extra: [["index.txt", '{"a":"KRAKEN"}']] }), named)).toContain(
+      'index.txt: names "Kraken"',
+    );
+  });
+
+  it("allows a row's source link to hold its host, and no other link", () => {
+    const other = '<a href="https://blog.kraken.com/other" rel="noopener noreferrer">More</a>';
+    expect(verifyOutput(mainWith(`${BOTH}${other}`), named)).toContain(
+      'index.html: names "Kraken"',
+    );
+  });
+
+  it("refuses the name in the head", () => {
+    const main = page(`${MAIN}${BOTH}`, undefined, "[Sample] Coinbase");
+    expect(verifyOutput(site({ main }), named)).toContain('index.html: names "Coinbase"');
+  });
+
+  it("refuses a dataset's exchange outside its row, on the list or not", () => {
+    const unlisted = [{ ...rows[0], entity: "Sample Exchange" }];
+    const shown = row("Sample Exchange", rows[0].detail, rows[0].sourceHref, rows[0].sourceText);
+    const flight = plantedFlight(unlisted.map(plantedRowFlight));
+    const problems = verifyOutput(mainWith(`<ul>${shown}</ul>${flight}<p>Sample Exchange</p>`), {
+      ...sampleExpected,
+      exchangeRows: unlisted,
+    });
+    expect(problems).toEqual(['index.html: names "Sample Exchange"']);
+  });
+
+  it("allows a row's own name in the page's payload, once, and nothing more", () => {
+    expect(verifyOutput(mainWith(BOTH), named)).toEqual([]);
+    const own = '\\"data-exchange-name\\":true,\\"children\\":\\"Coinbase\\"';
+    const script = (text: string) => `<script>self.__next_f.push([1,"${text}"])</script>`;
+    for (const text of ['\\"Coinbase holds the band\\"', '\\"bandOwner\\":\\"Coinbase\\"', own]) {
+      expect(verifyOutput(mainWith(`${BOTH}${script(text)}`), named)).toContain(
+        'index.html: names "Coinbase"',
+      );
+    }
+  });
+
+  it("holds the main page's payload files to the same, and other pages' to none", () => {
+    const main = page(`${MAIN}${BOTH}`);
+    const fine: [string, string] = [
+      "index.txt",
+      `1:${JSON.stringify(rows.map(plantedRowFlight))}\n`,
+    ];
+    expect(verifyOutput(site({ main, extra: [fine] }), named)).toEqual([]);
+    for (const content of ['{"children":"Coinbase holds the band"}', '{"bandOwner":"Coinbase"}']) {
+      expect(verifyOutput(site({ main, extra: [["index.txt", content]] }), named)).toContain(
+        'index.txt: names "Coinbase"',
+      );
+    }
+    const other: [string, string] = ["_not-found/index.txt", fine[1]];
+    expect(verifyOutput(site({ main, extra: [other] }), named)).toContain(
+      `${join("_not-found", "index.txt")}: names "Coinbase"`,
+    );
+  });
+
+  it("holds a dataset's exchange to the payload rule even if the list misses it", () => {
+    const entry = { ...rows[0], entity: "Sample Exchange" };
+    const shown = row("Sample Exchange", rows[0].detail, rows[0].sourceHref, rows[0].sourceText);
+    const main = page(`${MAIN}<ul>${shown}</ul>${plantedFlight([plantedRowFlight(entry)])}`);
+    const problems = verifyOutput(
+      site({ main, extra: [["__next._tree.txt", '{"bandOwner":"Sample Exchange"}']] }),
+      { ...sampleExpected, exchangeRows: [entry] },
+    );
+    expect(problems).toEqual(['__next._tree.txt: names "Sample Exchange"']);
+  });
+
+  it("refuses a row that says more than the dataset gives", () => {
+    const added = KRAKEN.replace("</li>", " This exchange holds the unnamed band.</li>");
+    expect(verifyOutput(mainWith(`<ul>${COINBASE}${added}</ul>`), named)).toContain(
+      `index.html: the row for "Kraken" says more than the dataset gives`,
+    );
+    const second = KRAKEN.replace("</li>", "<span data-exchange-name>Coinbase</span></li>");
+    const problems = verifyOutput(mainWith(`<ul>${COINBASE}${second}</ul>`), named);
+    expect(problems).toContain(`index.html: the row for "Kraken" says more than the dataset gives`);
+    expect(problems).toContain('index.html: names "Coinbase"');
+  });
+
+  it("refuses a row hidden however the markup can say so", () => {
+    for (const hiding of [
+      'style="opacity:0"',
+      'style="font-size: 0"',
+      'style="display :none"',
+      'style="position:absolute;left:-9999px"',
+      'class="hidden"',
+    ]) {
+      const hidden = COINBASE.replace("<li ", `<li ${hiding} `);
+      expect(verifyOutput(mainWith(`<ul>${hidden}${KRAKEN}</ul>`), named)).toContain(
+        `index.html: the row for "Coinbase" is hidden`,
+      );
+    }
+    const revealed = COINBASE.replace("<li ", '<li class="hidden md:block" ');
+    const flight = plantedFlight(rows.map(plantedRowFlight));
+    expect(verifyOutput(mainWith(`<ul>${revealed}${KRAKEN}</ul>${flight}`), named)).toEqual([]);
+    const name = COINBASE.replace(
+      "<span data-exchange-name",
+      '<span style="opacity:0" data-exchange-name',
+    );
+    expect(verifyOutput(mainWith(`<ul>${name}${KRAKEN}</ul>`), named)).toContain(
+      `index.html: the row for "Coinbase" is hidden`,
+    );
+  });
+
+  describe("the page's serialized copy", () => {
+    const el = (type: string, props: object) => ["$", type, null, props];
+    const floor = { kind: "exchange-floor", text: "Exchange venues are a floor.", exact: true };
+    const withNotes = { ...named, essentialNotes: [floor] };
+    const NOTES = plantedNotes([floor]);
+    const floorProps = (children: unknown) => el("p", { "data-note": floor.kind, children });
+    const flight = (tree: unknown) => `1:${JSON.stringify(tree)}\n`;
+    const main = page(`${MAIN}${BOTH}${NOTES}`);
+    const goodRows = () => rows.map(plantedRowFlight);
+    const withRow = (index: number, detail: string, href = rows[index].sourceHref) =>
+      goodRows().map((r, at) =>
+        at === index ? plantedRowFlight({ ...rows[index], detail, sourceHref: href }) : r,
+      );
+    const run = (payload: string) =>
+      verifyOutput(site({ main, extra: [["index.txt", payload]] }), withNotes);
+    const good = [goodRows(), floorProps(floor.text)];
+
+    it("passes when it matches", () => {
+      expect(run(flight(good))).toEqual([]);
+    });
+
+    it("refuses another figure or a claim of wallets in a row", () => {
+      expect(run(flight([withRow(0, "7 wallets, at least $9"), floorProps(floor.text)]))).toEqual([
+        `index.txt: the payload's row for "Coinbase" isn't the dataset's`,
+      ]);
+      expect(run(flight([withRow(1, "3 wallets, at least $1"), floorProps(floor.text)]))).toEqual([
+        `index.txt: the payload's row for "Kraken" isn't the dataset's`,
+      ]);
+    });
+
+    it("refuses another source, a missing row and a reworded note", () => {
+      const source = withRow(1, rows[1].detail, "https://example.com/x");
+      expect(run(flight([source, floorProps(floor.text)]))).toEqual([
+        `index.txt: the payload's row for "Kraken" hasn't the dataset's source`,
+      ]);
+      expect(run(flight([goodRows()[0], floorProps(floor.text)]))).toContain(
+        "index.txt: the payload has 1 exchange rows",
+      );
+      expect(run(flight([goodRows(), floorProps("Exchange venues are fine.")]))).toEqual([
+        "index.txt: the payload's exchange-floor note isn't the dataset's",
+      ]);
+    });
+
+    it("reads the copy inside the page however its call is spaced, and follows a reference", () => {
+      const changed = [withRow(0, "1 wallet, at least $9"), floorProps(floor.text)];
+      const spaced = `<script>self.__next_f.push([1, ${JSON.stringify(flight(changed))}])</script>`;
+      const inPage = page(`${MAIN}${ROWS_ONLY}${NOTES}${spaced}`);
+      expect(verifyOutput(site({ main: inPage }), withNotes)).toContain(
+        `index.html: the payload's row for "Coinbase" isn't the dataset's`,
+      );
+      const referenced = `2:"Exchange venues are a floor."\n${flight([goodRows(), floorProps("$L2")])}`;
+      expect(run(referenced)).toEqual([]);
+    });
+
+    it("fails with nothing to read, rather than turning itself off", () => {
+      const bare = page(MAIN).replace(/<script>self\.__next_f.*?<\/script>/, "");
+      expect(verifyOutput(site({ main: bare }), sampleExpected)).toContain(
+        "index.html: the page's payload can't be read",
+      );
+      for (const name of ["index.txt", "__next._full.txt", "__next.__PAGE__.txt"]) {
+        expect(verifyOutput(site({ extra: [[name, ""]] }), sampleExpected)).toContain(
+          `${name}: the page's payload can't be read`,
+        );
+      }
+    });
+
+    it("reports a chunk it can't parse, rather than crashing", () => {
+      const broken = '<script>self.__next_f.push([1,"bad\\q"])</script>';
+      expect(verifyOutput(mainWith(broken), sampleExpected)).toContain(
+        "index.html: a chunk of the page's payload can't be read",
+      );
+    });
+
+    it("doesn't ask the route's tree or another page's payload for rows", () => {
+      const other = flight(el("div", { children: "Not found" }));
+      expect(
+        verifyOutput(
+          site({
+            main,
+            extra: [
+              ["__next._tree.txt", other],
+              ["_not-found/index.txt", other],
+            ],
+          }),
+          withNotes,
+        ),
+      ).toEqual([]);
+    });
+  });
+
+  describe("the band", () => {
+    const bands: PlantedBand[] = [
+      {
+        key: "all",
+        name: "all",
+        amount: "5000000",
+        line: "Exchange-linked, inside placed: $5 (1.00% of supply)",
+        exact: "$5",
+      },
+      {
+        key: "ethereum",
+        name: "Ethereum",
+        amount: "5000000",
+        line: "Exchange-linked, inside placed: $5 (2.00% of supply)",
+        exact: "$5",
+      },
+    ];
+    const expected = { ...sampleExpected, bands };
+
+    it("passes when each line, table row and payload amount is the dataset's", () => {
+      expect(verifyOutput(mainWith(plantedBands(bands)), expected)).toEqual([]);
+    });
+
+    it("refuses another amount in the line, the table or the payload", () => {
+      const line = plantedBands(bands).replace(": $5 (2", ": $9 (2");
+      expect(verifyOutput(mainWith(line), expected)).toContain(
+        "index.html: the exchange-linked line for ethereum isn't the dataset's",
+      );
+      const table = plantedBands(bands).replace("<td>$5</td>", "<td>$9</td>");
+      expect(verifyOutput(mainWith(table), expected)).toContain(
+        "index.html: the table has another exchange-linked amount for ethereum",
+      );
+      const changed = bands.map((band) => ({ ...band, amount: "9000000" }));
+      const payload = plantedBands(bands).replace(/<script>.*<\/script>/, "");
+      const inPage = `${payload}${plantedBands(changed).match(/<script>.*<\/script>/)![0]}`;
+      expect(verifyOutput(mainWith(inPage), expected)).toContain(
+        "index.html: the payload's exchange-linked amount for all isn't the dataset's",
+      );
+    });
+
+    it("refuses a missing line", () => {
+      expect(verifyOutput(mainWith(""), expected)).toContain(
+        "index.html: there are 0 exchange-linked lines",
+      );
+    });
+  });
+
+  it("holds a caveat marked exact to its words, and nothing added", () => {
+    const floor = { kind: "exchange-floor", text: "A floor.", exact: true };
+    const expected = { ...sampleExpected, essentialNotes: [floor] };
+    expect(verifyOutput(mainWith(plantedNotes([floor])), expected)).toEqual([]);
+    const added = plantedNotes([{ ...floor, text: "A floor. And it holds more." }]);
+    expect(verifyOutput(mainWith(added), expected)).toContain(
+      'index.html: the exchange-floor note doesn\'t say "A floor."',
+    );
+  });
+
+  it("refuses a hidden row or a hidden source, and allows a closed disclosure", () => {
+    const hiddenRow = COINBASE.replace("<li ", "<li hidden ");
+    expect(verifyOutput(mainWith(`<ul>${hiddenRow}${KRAKEN}</ul>`), named)).toContain(
+      `index.html: the row for "Coinbase" is hidden`,
+    );
+    expect(verifyOutput(mainWith(`<noscript><ul>${BOTH}</ul></noscript>`), named)).toContain(
+      `index.html: the row for "Coinbase" is hidden`,
+    );
+    const hiddenLink = KRAKEN.replace("<a ", "<a hidden ");
+    expect(verifyOutput(mainWith(`<ul>${COINBASE}${hiddenLink}</ul>`), named)).toContain(
+      `index.html: the row for "Kraken" is hidden`,
+    );
+    const toggle = `<details class="data-toggle"><summary>Table</summary>${BOTH}</details>`;
+    expect(verifyOutput(mainWith(toggle), named)).toEqual([]);
+  });
+
+  it("keeps every other labeled name blocked, even in a row's shape", () => {
+    const bybit = row("Bybit", "1 wallet, at least $1", rows[0].sourceHref, rows[0].sourceText);
+    const problems = verifyOutput(mainWith(`<ul>${COINBASE}${KRAKEN}${bybit}</ul>`), named);
+    expect(problems).toContain("index.html: there are 3 exchange rows");
+    expect(problems).toContain('index.html: names "Bybit"');
+  });
+
+  it("blocks an exchange the dataset doesn't list, as before", () => {
+    const problems = verifyOutput(mainWith(COINBASE), sampleExpected);
+    expect(problems).toContain("index.html: there are 1 exchange rows");
+    expect(problems).toContain('index.html: names "Coinbase"');
+  });
+
+  it("refuses a missing row, a wrong figure and a wrong source", () => {
+    expect(verifyOutput(mainWith(`<ul>${COINBASE}</ul>`), named)).toContain(
+      "index.html: exchange row 2 isn't the dataset's name",
+    );
+    const figure = row(
+      "Coinbase",
+      "7 wallets, at least $9",
+      rows[0].sourceHref,
+      rows[0].sourceText,
+    );
+    expect(verifyOutput(mainWith(`<ul>${figure}${KRAKEN}</ul>`), named)).toContain(
+      `index.html: the row for "Coinbase" isn't the dataset's figure`,
+    );
+    const source = row("Kraken", rows[1].detail, "https://example.com/other", rows[1].sourceText);
+    expect(verifyOutput(mainWith(`<ul>${COINBASE}${source}</ul>`), named)).toContain(
+      `index.html: the row for "Kraken" hasn't the source the dataset gives`,
+    );
+    const bare = `<li data-exchange-row><span data-exchange-name>Kraken</span>, <span data-exchange-detail>${rows[1].detail}</span>.</li>`;
+    expect(verifyOutput(mainWith(`<ul>${COINBASE}${bare}</ul>`), named)).toContain(
+      `index.html: the row for "Kraken" hasn't the source the dataset gives`,
+    );
+  });
+
+  it("keeps a wallet's address off the main page, in a row's link too", () => {
+    const address = "0x20fe51a9229eef2cf8ad9e89d91cab9312cf3b7a";
+    const linked = row(
+      "Coinbase",
+      rows[0].detail,
+      `https://basescan.org/address/${address}`,
+      rows[0].sourceText,
+    );
+    const problems = verifyOutput(mainWith(`<ul>${linked}${KRAKEN}</ul>`), named);
+    expect(problems).toContain("index.html: an address in the page");
+  });
+
+  it("expects the dataset's rows, and requires its notes", () => {
+    const expected = expectedFromDataset(at(releaseGrade()));
+    expect(expected.exchangeRows.map((entry: { entity: string }) => entry.entity)).toEqual([
+      "Sample Exchange",
+      "Sample Listing",
+    ]);
+    const kinds = expected.essentialNotes.map((note: { kind: string }) => note.kind);
+    expect(kinds).toContain("exchange-floor");
+    expect(kinds).toContain("exchange-coverage");
   });
 });
 

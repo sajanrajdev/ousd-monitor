@@ -27,7 +27,7 @@ function kpiList(figures: ReturnType<typeof allChainKpis>): Kpi[] {
     {
       label: "Placed share",
       value: figures ? formatBps(figures.placed_share_bps) : UNKNOWN_TEXT,
-      note: "Share of supply that has stayed in large unlabeled wallets for the placed window.",
+      note: "Share of supply that has stayed in large wallets with no issuer, venue or system label, for the placed window.",
       chip: "inferred",
       anchor: "placed-supply",
     },

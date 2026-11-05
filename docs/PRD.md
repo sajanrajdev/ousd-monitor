@@ -99,7 +99,8 @@ Tested against real data on 2026-11-03 for Tempo and part of Ethereum: see `docs
 |---|---|
 | **Minted, burned, net issuance** | Transfers from and to the zero address on EVM chains; mint and burn instructions on Solana. Day 0 is 2026-09-30, though test mints began earlier |
 | **Issuer inventory** | Held by wallets labeled as Bridge's or on its redemption route |
-| **Venue supply** | Held by wallets a public source labels as an exchange, DEX pool or lending market. Unlabeled custody doesn't count |
+| **Venue supply** | Held by wallets a public source labels as an exchange, DEX pool or lending market. Exchange holdings are a floor: they count only named wallets. Custody no source names isn't a venue |
+| **Exchange-linked placed** | The part of placed supply in wallets with no public name that held at least $1M on 2026-11-03, took at least one transfer of $1M or more from wallets a public source names as an exchange, took every inflow of $1 or more from those wallets, and sent at most 2% of their inflows anywhere else. The list is fixed as of that day. Shown inside placed and found by a written rule. An unnamed cluster: it doesn't say who holds a wallet or what the balance is for |
 | **Placed supply** | For a wallet with no issuer, venue or system label: the lowest its balance has been over the last 14 days, counted if that is at least $1M and the wallet is at least 14 days old. Measures dollars that stayed, and says nothing about intent |
 | **Free-floating supply** | Everything else: total minus issuer inventory, placed and venue |
 | **Circulating supply** | Total minus issuer inventory and placed. So it includes venues, shown separately |
@@ -141,6 +142,7 @@ Tested against real data on 2026-11-03 for Tempo and part of Ethereum: see `docs
 
 - **Public sources only.** Labels may come from explorer tags, project and company documentation, official statements, published research or on-chain contract metadata. Every label records its source type, URL and the date it was checked. The site and methodology page carry the source legend from `labels/README.md`, so a reader can see how we know each label.
 - **No naming by inference.** A source must tie the name to the address. A wallet that only looks like a partner stays an unnamed cluster, and private individuals are never labeled.
+- **Names on the main page.** Only an exchange's name, and only beside its source: a source tying the name to its wallets, or its own listing with "no wallet labeled". Every other labeled name stays on the methodology page, and no wallet in the unnamed exchange-linked band is named.
 - **Separate fact, estimate and opinion** visibly. Anything derived from an assumption says so.
 - **Stay neutral.** Report what the data shows, good or bad, with no predictions about partners.
 - **It isn't an attestation.** Say so, and link to Bridge's reports.

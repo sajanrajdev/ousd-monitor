@@ -374,7 +374,7 @@ The components under `components/` that later units own start as stubs that rend
   - Sample and preview output has its frame, and no "Supply reconciled on all 4 chains".
   - No page has a full `0x` plus 40 hex address or a 32 to 44 character base58 string in visible text, except the four token contracts on the methodology page.
   - Neither `detail` nor `stale_reason` strings appear anywhere in the output, including serialized props, and no `_RPC_URL` name does either.
-  - The main page has no name from `blocked-names.json`: every `entity` in `labels/labels.csv` and every name in PRD section 4, minus the four chains, Bridge and Open Standard, matched as case-sensitive whole words, so `Coinbase` and `Base` stay distinct. A test keeps that list complete against the labels file. Methodology may have these names only in the labels table or next to a source link.
+  - The main page has no name from `blocked-names.json`: every `entity` in `labels/labels.csv` and every name in PRD section 4, minus the four chains, Bridge and Open Standard, matched as case-sensitive whole words, so `Coinbase` and `Base` stay distinct. A test keeps that list complete against the labels file. Methodology may have these names only in the labels table or next to a source link. The dashboard plan, `docs/plans/2026-11-04-002-dashboard-refurbish-plan.md`, supersedes this for exchange names on the main page.
   - No `on*=` attribute, no link that isn't `https`, `mailto` or same-site, `rel="noopener noreferrer"` on outbound links, and no request host other than our own.
   - Each chart card has its source, as-of and definition link.
 - **Makefile, in this unit:**
@@ -675,7 +675,7 @@ Run in a real browser at 320, 390, 768, 1056 and 1440:
 
 A takeaway only states numbers, so it carries the chip of those numbers. Takeaway functions are pure, tested, and return the unknown text rather than guessing.
 
-**No name without a source.** The main page names only the four chains, Bridge and Open Standard, in the independence line and where issuer flows are explained. Named wallets appear only on the methodology page, each with its source. `verify-output` enforces this. Voice follows the design system: "wallet", not "user", and no predictions about partners.
+**No name without a source.** The main page names only the four chains, Bridge and Open Standard, in the independence line and where issuer flows are explained. Named wallets appear only on the methodology page, each with its source. The dashboard plan, `docs/plans/2026-11-04-002-dashboard-refurbish-plan.md`, supersedes this for exchange names on the main page. `verify-output` enforces this. Voice follows the design system: "wallet", not "user", and no predictions about partners.
 
 ## Evidence for web PRs
 

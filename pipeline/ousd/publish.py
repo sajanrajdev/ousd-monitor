@@ -47,7 +47,7 @@ from ousd.verdict import ChainFigures, VerdictInputs, build_verdict, known_limit
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SCHEMA_DIR = Path(__file__).parent / "schemas"
 DEFAULT_PUBLISHED_DIR = "data/published"
 # A sibling of the real output, so nothing that reads data/published can land on it.
@@ -64,6 +64,7 @@ PREVIEW_NOTICE = (
 )
 PREVIEW_CSV_MARK = "LOCAL PREVIEW, NOT FOR RELEASE"
 UNNAMED_RULE_REFERENCE = "labels/README.md#how-unnamed-clusters-are-found"
+LISTING_SOURCE_TYPE = "exchange_listing"
 VELOCITY_DEFINITIONS = {
     "velocity_bps": {"numerator": "clean_7d / 7", "denominator": "circulating_supply"},
     "velocity_everyday_bps": {
@@ -77,8 +78,14 @@ _STAMP = re.compile(r"^(preview-)?[0-9]{8}T[0-9]{6}Z(\.tmp)?$")
 _LEGEND_HEADING = "## How we know: the source legend"
 _RULE_HEADING = "## How unnamed clusters are found"
 _HOSTS_HEADING = "## Where each source lives"
+_LISTINGS_HEADING = "## Exchanges that say they support OUSD"
+_LISTINGS_TABLE = "| Exchange | Source | Date checked |\n|---|---|---|\n"
 _LEGEND_ROW = re.compile(r"^\| `([a-z_]+)` \| (.+?) \| (.+?) \|$")
 _HOST_ROW = re.compile(r"^\| `([a-z_]+)` \| (.+?) \|$")
+# One word, as exchange names are, so a person's name or a sentence can't pass as one.
+_LISTING_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]*")
+_LISTING_HOST_ROW = re.compile(r"^\| ([A-Z][^|]*?) \| `([^`]+)` \|$")
+_LISTING_ROW = re.compile(r"^\| ([^|]+?) \| (https://\S+) \| ([0-9]{4}-[0-9]{2}-[0-9]{2}) \|$")
 _READING_NOTE = re.compile(r"^\*\*Reading a label:\*\* (.+)$", re.MULTILINE)
 _EVM_SHAPE = re.compile(r"0[xX][0-9a-fA-F]{40}")
 # The same address with no prefix. Bounded, so it can't match part of a 64-character hash.
@@ -100,7 +107,7 @@ _KEY_SEGMENT = re.compile(
     re.IGNORECASE,
 )
 # A label's link, the one place a wallet-shaped value may be, and only after its own check.
-_LABEL_LINK_PLACE = re.compile(r"labels\.json/data/\d+/source_url")
+_LABEL_LINK_PLACE = re.compile(r"labels\.json/(data|exchange_listings)/\d+/source_url")
 # Other variables that can hold a provider URL. KEYED_RPC_ENV has the rest.
 _RPC_ENV = ("TEMPO_RPC_URL", "ETHEREUM_RPC_URL", "ETHEREUM_BLOCKSCOUT_URL")
 
@@ -118,6 +125,8 @@ _AMOUNTS = frozenset(
         "total_supply",
         "issuer_inventory",
         "placed_supply",
+        "placed_exchange_linked",
+        "balance",
         "venue_dex",
         "venue_lending",
         "venue_exchange",
@@ -335,6 +344,64 @@ def _read_source_hosts(text: str) -> dict[str, set[str]]:
     }
 
 
+def _read_listing_hosts(text: str) -> dict[str, str]:
+    return {
+        match[1]: match[2]
+        for line in _section(text, _HOSTS_HEADING).splitlines()
+        if (match := _LISTING_HOST_ROW.match(line))
+    }
+
+
+def _is_a_past_date(text: str) -> bool:
+    try:
+        return date.fromisoformat(text) <= datetime.now(UTC).date()
+    except ValueError:
+        return False
+
+
+def _read_exchange_listings(text: str) -> list[dict[str, str]]:
+    """Exchanges whose own page says they support OUSD. The page names no wallet, so its link holds
+    no address, and it must be on the host recorded for that exchange. Anything in the table that
+    doesn't read as a row refuses, so an exchange can't drop out unnoticed."""
+    before, found, table = _section(text, _LISTINGS_HEADING).partition(_LISTINGS_TABLE)
+    if not found:
+        raise PublishRefused("labels/README.md has no exchange listings table")
+    if "|" in before:
+        raise PublishRefused("labels/README.md has an exchange listing it can't read")
+    hosts = _read_listing_hosts(text)
+    rows = []
+    for line in filter(None, (line.rstrip() for line in table.splitlines())):
+        match = _LISTING_ROW.match(line)
+        if match is None or not _is_a_past_date(match[3]):
+            raise PublishRefused("labels/README.md has an exchange listing it can't read")
+        if not _LISTING_NAME.fullmatch(match[1]):
+            raise PublishRefused("an exchange listing has an entity that doesn't look like a name")
+        if match[1] not in hosts:
+            raise PublishRefused("an exchange listing isn't on the list of exchanges and hosts")
+        _refuse_bad_source(
+            {
+                "chain": "the exchange list",
+                "address": "",
+                "source_type": LISTING_SOURCE_TYPE,
+                "source_url": match[2],
+            },
+            {LISTING_SOURCE_TYPE: {hosts[match[1]]}},
+        )
+        rows.append(
+            {
+                "entity": match[1],
+                "source_type": LISTING_SOURCE_TYPE,
+                "source_url": match[2],
+                "date_checked": match[3],
+            }
+        )
+    if not rows:
+        raise PublishRefused("labels/README.md has no exchange listings")
+    if len({row["entity"] for row in rows}) != len(rows):
+        raise PublishRefused("labels/README.md lists an exchange twice")
+    return rows
+
+
 def _comparable(address: str) -> str:
     """EVM addresses are case-insensitive. Base58 addresses are not."""
     return address.lower() if address.lower().startswith("0x") else address
@@ -464,11 +531,33 @@ def _without_issuer_row(coverage: Sequence[Mapping[str, Any]]) -> list[str]:
     return [row["chain"] for row in coverage if not row["has_issuer_row"]]
 
 
+def _exchange_holdings(
+    tables: Mapping[str, Sequence[Mapping[str, Any]]], journey: Sequence[Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Each named exchange on each chain's newest published day. They must add up to that day's
+    exchange venues, or the two figures a reader sees could disagree."""
+    newest: dict[str, Mapping[str, Any]] = {}
+    for row in journey:
+        if row["chain"] not in newest or row["day"] > newest[row["chain"]]["day"]:
+            newest[row["chain"]] = row
+    rows = [
+        _published(row)
+        for row in tables["mart_exchange_holdings"]
+        if row["chain"] in newest and row["day_utc"].isoformat() == newest[row["chain"]]["day"]
+    ]
+    for chain, row in newest.items():
+        total = sum(int(held["balance"]) for held in rows if held["chain"] == chain)
+        if total != int(row["venue_exchange"]):
+            raise PublishRefused(f"exchange holdings don't add up to exchange venues on {chain}")
+    return sorted(rows, key=lambda row: (row["chain"], row["entity"]))
+
+
 def _labels_payload(
     labels: Sequence[Mapping[str, str]],
     readme: str,
     coverage: Sequence[Mapping[str, Any]],
     preview: bool,
+    exchange_holdings: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Named labels with how we know them, and unnamed clusters only as a count and their rule.
 
@@ -482,6 +571,8 @@ def _labels_payload(
     hosts = _read_source_hosts(readme)
     named = [row for row in labels if row["entity"]]
     for row in named:
+        if row["category"] == "exchange_linked":
+            raise PublishRefused(f"an exchange-linked label on {row['chain']} has a name")
         if not _looks_like_a_name(row["entity"]):
             raise PublishRefused(
                 f"a label on {row['chain']} has an entity that doesn't look like a name"
@@ -503,6 +594,10 @@ def _labels_payload(
         key=lambda row: (row["chain"], row["category"], row["entity"], row["source_url"]),
     )
     unnamed = Counter((row["chain"], row["category"]) for row in labels if not row["entity"])
+    listings = _read_exchange_listings(readme)
+    others = {row["entity"] for row in named if row["category"] != "exchange"}
+    if any(row["entity"] in others for row in listings):
+        raise PublishRefused("an exchange listing has the name of a label that isn't an exchange")
     return {
         "schema_version": SCHEMA_VERSION,
         "preview": preview,
@@ -516,6 +611,8 @@ def _labels_payload(
             ],
         },
         "source_legend": legend,
+        "exchange_holdings": list(exchange_holdings),
+        "exchange_listings": listings,
         "issuer_coverage": coverage,
         "chains_without_issuer_row": _without_issuer_row(coverage),
     }
@@ -580,6 +677,9 @@ def _summary_payload(
     preview: bool,
 ) -> dict[str, Any]:
     kpis = _kpi_rows(tables, chains)
+    held = {
+        (row["chain"], row["day_utc"].isoformat()): row for row in tables["mart_supply_journey"]
+    }
     with_issuer = {row["chain"] for row in coverage if row["has_issuer_row"]}
     bridge = [row for row in tables["mart_reconciliation"] if row["kind"] == "bridge"]
     large = int(definitions["large_transfer_base_units"])
@@ -591,6 +691,9 @@ def _summary_payload(
                     day=date.fromisoformat(row["day"]),
                     total_supply=int(row["total_supply"]),
                     placed_supply=int(row["placed_supply"]),
+                    placed_exchange_linked=int(
+                        held[row["chain"], row["day"]]["placed_exchange_linked"]
+                    ),
                     clean_everyday_7d=int(row["clean_everyday_7d"]),
                     full_window=row["headline_velocity_bps"] is not None,
                     has_issuer_label=row["chain"] in with_issuer,
@@ -860,7 +963,9 @@ def _build_files(
             **_data_payload(reconciliation, allow_partial),
             "latest_run": latest_run,
         },
-        "labels.json": _labels_payload(labels, readme, coverage, allow_partial),
+        "labels.json": _labels_payload(
+            labels, readme, coverage, allow_partial, _exchange_holdings(tables, journey)
+        ),
     }
     tabular = {"journey.csv": journey, "activity.csv": activity, "chain_roles.csv": roles}
 
