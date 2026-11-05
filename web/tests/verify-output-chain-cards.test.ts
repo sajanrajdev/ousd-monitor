@@ -6,6 +6,8 @@ import {
   plantedFooter,
   plantedRealMain,
   plantedReconciliationMain,
+  PLANTED_HEADER,
+  plantedBack,
 } from "./planted-first-screen";
 
 // Each whole-page group is a file of its own, and so a worker of its own, as one worker running
@@ -21,7 +23,7 @@ const RECONCILED_TRUST =
 function site({ main, methodology }: { main: string; methodology: string }) {
   const dir = tempDir();
   plantFile(dir, "index.html", main);
-  plantFile(dir, "methodology/index.html", methodology);
+  plantFile(dir, "methodology/index.html", plantedBack(methodology));
   plantFile(
     dir,
     "reconciliation/index.html",
@@ -51,17 +53,17 @@ describe("the velocity chart and the chain grid", { timeout: WHOLE_PAGE_TIMEOUT_
   const main = plantedRealMain(expected, TRUST);
   const page = (body: string) =>
     `<!doctype html><html data-dataset-kind="real" data-dataset-version="${expected.version}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
-    <header><a href="/">Open USD Monitor</a></header><p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
+    ${PLANTED_HEADER}<p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
     ${plantedFooter(false, { fresh: null, stale: TRUST })}</body></html>`;
   const check = (body: string) =>
     verifyOutput(site({ main: page(body), methodology: page("<main>Fine</main>") }), expected);
 
-  it("passes the page the dataset calls for, with the warning pinned beside its chain", () => {
+  it("passes the page the dataset calls for, with the warning's badge first", () => {
     expect(expected.velocity.notes[0]).toMatchObject({ kind: "velocity-warning", chain: "base" });
     expect(check(main)).toEqual([]);
   });
 
-  it("fails with the warning only in the popover, or its pin on another chain", () => {
+  it("fails with the warning's badge gone, or a pin put back beside a chain", () => {
     const moved = main.replace(/<li data-note="velocity-warning".*?<\/li>/, "");
     expect(check(moved)).toEqual(
       expect.arrayContaining([
@@ -70,11 +72,16 @@ describe("the velocity chart and the chain grid", { timeout: WHOLE_PAGE_TIMEOUT_
         ),
       ]),
     );
-    const elsewhere = main
-      .replace(/(<p class="velocity-chart__name">base)<span class="pin">1<\/span>/, "$1")
-      .replace(/(<p class="velocity-chart__name">tempo)/, '$1<span class="pin">1</span>');
-    expect(check(elsewhere)).toEqual(
-      expect.arrayContaining([expect.stringContaining("its chain pins are tempo=1, not base=1")]),
+    // The badges are the card's one set of markers, so a pin beside a chain's name fails.
+    const pinned = main.replace(
+      /(<p class="velocity-chart__name">base)/,
+      '$1<span class="pin">1</span>',
+    );
+    expect(pinned).not.toBe(main);
+    expect(check(pinned)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("a pin is in its chart or legend as well as its badges"),
+      ]),
     );
   });
 
@@ -89,22 +96,22 @@ describe("the velocity chart and the chain grid", { timeout: WHOLE_PAGE_TIMEOUT_
     );
   });
 
-  it("fails when the tooltip loses a full note, or the denominators pin leaves its headline row", () => {
+  it("fails when the tooltip loses a full note, or a pin is put on a headline row", () => {
     const full = main.replace(/<p data-full-note="velocity-denominators">.*?<\/p>/, "");
     expect(check(full)).toEqual(
       expect.arrayContaining([
         expect.stringContaining("lost the velocity-denominators note in full"),
       ]),
     );
-    // There's no legend: the pin sits on the first chain's headline row.
+    // There's no legend, and the denominators note is a badge, so a pin on the row fails.
     const pin = main.replace(
-      /(<div data-measure="headline_velocity_bps"><span class="velocity-chart__label">M)<span class="pin">\d+<\/span>/,
-      "$1",
+      /(<div data-measure="headline_velocity_bps"><span class="velocity-chart__label">M)/,
+      '$1<span class="pin">2</span>',
     );
     expect(pin).not.toBe(main);
     expect(check(pin)).toEqual(
       expect.arrayContaining([
-        expect.stringContaining("the denominators pin isn't on the first headline velocity row"),
+        expect.stringContaining("a pin is in its chart or legend as well as its badges"),
       ]),
     );
     expect(main).not.toContain("data-velocity-legend");

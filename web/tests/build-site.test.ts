@@ -18,6 +18,8 @@ import {
   plantedFooter,
   plantedRealMain,
   plantedReconciliationMain,
+  PLANTED_HEADER,
+  plantedBack,
 } from "./planted-first-screen";
 
 const VERSION = "20261104T060000Z";
@@ -32,7 +34,7 @@ const STALE_TRUST =
 // trust row is at the top, and the footer never says "Reconciled".
 function realPage(body: string) {
   return `<!doctype html><html data-dataset-kind="real" data-dataset-version="${VERSION}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
-    <header><a href="/">Open USD Monitor</a></header><p data-stale-note>${STALE_NOTE}</p>${plantedFlight([])}${body}
+    ${PLANTED_HEADER}<p data-stale-note>${STALE_NOTE}</p>${plantedFlight([])}${body}
     ${plantedFooter(false, { fresh: null, stale: STALE_TRUST })}</body></html>`;
 }
 
@@ -40,7 +42,7 @@ const realMain = () => plantedRealMain(expectedFromDataset(at(releaseGrade())), 
 
 function goodRealBuild(_webRoot: string, target: string) {
   plantFile(target, "index.html", realPage(realMain()));
-  plantFile(target, "methodology/index.html", realPage("<main>Fine</main>"));
+  plantFile(target, "methodology/index.html", plantedBack(realPage("<main>Fine</main>")));
   plantFile(target, "reconciliation/index.html", realPage(plantedReconciliationMain(STALE_TRUST)));
 }
 

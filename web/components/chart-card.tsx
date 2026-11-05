@@ -21,7 +21,7 @@ export type ChartCardProps = {
   children: ReactNode;
   // The card's anchor. Under a filter it goes on ChainPanels instead, as a panel repeats its card.
   id?: string;
-  // Short caveats, always visible, numbered to their pins in the chart.
+  // Caveats, as numbered badges on the card's last row, each with its text as a tooltip.
   notes?: PinnedNote[];
   // More for the tooltip, under the summary: the long takeaway or a note in full. Nothing essential.
   detail?: ReactNode;
@@ -33,7 +33,7 @@ export type ChartCardProps = {
   // the graphic is hidden from assistive tech, as the summary and table carry what it shows.
   plotIsContent?: boolean;
   // What goes beside the chart from the card's width that has room: its legend, and any figures. Read
-  // by assistive tech, as it's outside the hidden graphic. The notes then go under both.
+  // by assistive tech, as it's outside the hidden graphic.
   beside?: ReactNode;
   level?: 2 | 3;
 };
@@ -56,7 +56,7 @@ type CardFrameProps = Pick<
   | "id"
   | "detail"
   | "level"
-> & { children: ReactNode };
+> & { children: ReactNode; notes?: PinnedNote[] };
 
 function cardAsOf(asOf: string | AsOfRange): { dateTime: string; text: string } {
   const dateTime = typeof asOf === "string" ? asOf : asOf.to;
@@ -80,6 +80,7 @@ function CardFrame({
   detail,
   level = 2,
   children,
+  notes = [],
 }: CardFrameProps) {
   const headingId = useId();
   const Heading = level === 3 ? "h3" : "h2";
@@ -128,6 +129,7 @@ function CardFrame({
           </>
         ) : null}
       </p>
+      <PinnedNotes notes={notes} />
       <noscript>
         <p className="chart-card__source-note">
           Source: {source} ·{" "}
@@ -151,8 +153,8 @@ export function ChartCard({
   ...frame
 }: ChartCardProps) {
   return (
-    <CardFrame {...frame}>
-      <div className="chart-card__body" data-notes={(notes.length > 0 && !beside) || undefined}>
+    <CardFrame {...frame} notes={notes}>
+      <div className="chart-card__body">
         <div className="chart-card__plot" data-beside={beside ? "" : undefined}>
           {/* aria-hidden and nothing focusable inside; not inert, so hover tooltips still work. */}
           <div
@@ -171,7 +173,6 @@ export function ChartCard({
           ) : null}
           {beside ? <div className="chart-card__beside">{beside}</div> : null}
         </div>
-        <PinnedNotes notes={notes} />
       </div>
       <DataToggle label={frame.takeaway}>
         <HairlineTable {...table} />
@@ -183,15 +184,10 @@ export function ChartCard({
 
 export function TableCard({ table, notes = [], note, ...frame }: TableCardProps) {
   return (
-    <CardFrame {...frame}>
+    <CardFrame {...frame} notes={notes}>
       <div className="mt-4">
         <HairlineTable {...table} />
       </div>
-      {notes.length > 0 ? (
-        <div className="mt-3">
-          <PinnedNotes notes={notes} />
-        </div>
-      ) : null}
       <CardNote note={note} />
     </CardFrame>
   );

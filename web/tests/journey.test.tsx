@@ -60,13 +60,11 @@ const noteKeys = (panel: HTMLElement) =>
   [...panel.querySelectorAll("[data-pinned-notes] > [data-note]")].map(
     (note) => `${note.getAttribute("data-note")}:${note.getAttribute("data-chain") ?? ""}`,
   );
-// A note's words in view: its tooltip's panel shows only on hover or focus.
-const noteWords = (note: Element) => {
-  const copy = note.querySelector("p")!.cloneNode(true) as Element;
-  copy.querySelectorAll(".tip__panel").forEach((panel) => panel.remove());
-  return copy.textContent;
-};
-const noteTip = (note: Element) => note.querySelector(".tip__panel")?.textContent ?? null;
+// A note is a numbered badge. Its words, then the note in full, are in the badge's tooltip.
+const noteWords = (note: Element) =>
+  note.querySelector(".tip__panel [data-note-text]")!.textContent;
+const noteTip = (note: Element) =>
+  note.querySelector(".tip__panel [data-note-full]")?.textContent ?? null;
 
 describe("journey view", () => {
   it("renders one supply card with a bar per filter option, and a step line for each", () => {
@@ -156,9 +154,16 @@ describe("journey view", () => {
     expect((band as HTMLElement).style.background).toContain("--meaning-idle");
     expect((band as HTMLElement).style.background).not.toContain("--meaning-circulating");
     expect(band!.parentElement!.querySelector('[data-testid="part-label"]')!.className).toContain(
-      "z-10",
+      "supply-bar__label",
     );
-    expect(panel.querySelector("[data-exchange-linked]")!.textContent).toContain("of supply");
+    // Set like every other legend row: its label, then its figure and share in the value columns.
+    const line = panel.querySelector("[data-exchange-linked]")!;
+    expect(line.querySelector(".chart-legend__label")!.textContent).toBe(
+      "Exchange-linked, inside placed",
+    );
+    expect(line.querySelector(".chart-legend__values")!.textContent).toMatch(
+      /^\$[\d.]+[KMB]? \d+\.\d{2}%$/,
+    );
   });
 
   it("carries data-exchange-linked once, in the legend, and draws a band only where there is one", () => {
@@ -192,7 +197,7 @@ describe("journey view", () => {
     expect(links[1].getAttribute("rel")).toBe("noopener noreferrer");
   });
 
-  it("keeps the floor and coverage notes in view, short, with each in full as a tooltip", () => {
+  it("badges the floor and coverage notes, short and then in full in each tooltip", () => {
     const { container } = render(view().ui);
     const panel = card(container);
     const floor = panel.querySelector('[data-note="exchange-floor"]')!;
@@ -221,29 +226,26 @@ describe("journey view", () => {
     expect(container.querySelectorAll("[data-pinned-notes]")).toHaveLength(1 + VALUES.length);
   });
 
-  it("pins the issuer note on the legend's issuer row", () => {
+  it("badges the issuer note first, and pins nothing on the legend's issuer row", () => {
     const { container } = render(view().ui);
-    const pin = card(container).querySelector('[data-segment="issuer_inventory"] .pin');
-    expect(pin!.textContent).toBe("1");
+    expect(card(container).querySelector('[data-segment="issuer_inventory"] .pin')).toBeNull();
     const note = card(container).querySelector('[data-note="issuer-unlabeled"]')!;
+    expect(note.querySelector(".tip__badge")!.textContent).toBe("1");
     expect(noteWords(note)).toBe(issuerUnlabeledNote("solana"));
   });
 
-  it("numbers a legend row's pins as its notes are numbered, and leaves the bars unpinned", () => {
+  it("numbers its badges in order, its one set of markers, with no pin in its legend or bars", () => {
     const { container } = render(view().ui);
     const panel = card(container);
-    const numbered = [...panel.querySelectorAll("[data-pinned-notes] > [data-note]")].map(
-      (note) => [note.getAttribute("data-note"), note.querySelector(".pin")!.textContent],
+    const numbers = [...panel.querySelectorAll("[data-pinned-notes] > [data-note]")].map(
+      (note) => note.querySelector(".tip__badge")!.textContent,
     );
-    const pins = (key: string) =>
-      [...panel.querySelectorAll(`[data-segment="${key}"] .pin`)].map((pin) => pin.textContent);
-    const of = (kind: string) => numbered.filter(([name]) => name === kind).map(([, n]) => n);
-    expect(pins("placed_supply")).toEqual(of("placed"));
-    expect(pins("venue_exchange")).toEqual([...of("exchange-floor"), ...of("exchange-coverage")]);
+    expect(numbers).toEqual(numbers.map((_, index) => String(index + 1)));
+    expect(panel.querySelector("[data-supply-legend] .pin, .chart-stats .pin")).toBeNull();
     expect(panel.querySelector("[data-supply-bar] .pin")).toBeNull();
   });
 
-  it("holds the short placed pin in view, with the note in full as its tooltip and the card's", () => {
+  it("badges the short placed note, with the note in full in its tooltip and the card's", () => {
     const { container } = render(view().ui);
     const panel = card(container);
     const note = panel.querySelector('[data-note="placed"]')!;
@@ -398,7 +400,7 @@ describe("journey view", () => {
     expect(rows.textContent).toMatch(/\$/);
   });
 
-  it("pins the start of the series, with the note in full in its tooltip and the card's", () => {
+  it("badges the start of the series, with the note in full in its tooltip and the card's", () => {
     const { dataset, ui } = view();
     const { container } = render(ui);
     const definitions = dataset.manifest.definitions;

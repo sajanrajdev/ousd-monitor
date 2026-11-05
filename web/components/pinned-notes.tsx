@@ -5,11 +5,11 @@ import { TextTip } from "./tooltip";
 export type PinnedNote = {
   // What the note is, on `data-note`, so a check can find a caveat wherever it is pinned.
   kind: string;
-  // Names its chain or part in words, so it reads without the pin.
+  // Names its chain or part in words, so it reads without the chart.
   text: ReactNode;
   chain?: ChainName;
-  // The caveat explained in full, in a tooltip on the note's own words. The words stay the caveat, so
-  // nothing a reader needs is only in the tooltip. `interactive` when it holds a link.
+  // The caveat explained in full, under its words in the badge's tooltip. `interactive` when it, or
+  // the text, holds a link.
   tip?: ReactNode;
   interactive?: boolean;
 };
@@ -49,24 +49,33 @@ export function Pin({
   return number === null ? null : <PinMark number={number} />;
 }
 
-// Always visible, and outside the graphic. Never in a details, a noscript or a tooltip, which
-// verify-output fails.
+// Numbered badges on the card's last row, one per note, and the card's only markers. Each opens its
+// note in the shared tooltip, on hover, focus or tap: the short caveat first, then the note in full.
+// This is the maintainer's call after the whole-page review, over the earlier rule that a caveat's
+// words stay in view. Never in a details or a noscript, which verify-output fails.
 export function PinnedNotes({ notes }: { notes: PinnedNote[] }) {
   if (notes.length === 0) return null;
   return (
-    <ol className="pinned-notes" role="list" data-pinned-notes>
+    <ol className="note-badges" role="list" aria-label="Notes" data-pinned-notes>
       {notes.map((note, index) => (
         <li key={`${note.kind}:${note.chain ?? ""}`} data-note={note.kind} data-chain={note.chain}>
-          <PinMark number={index + 1} />
-          <p>
+          <TextTip
+            text={index + 1}
+            label={`Note ${index + 1}`}
+            badge
+            interactive={note.interactive}
+            align="end"
+            above
+          >
+            <span className="block font-semibold" data-note-text>
+              {note.text}
+            </span>
             {note.tip ? (
-              <TextTip text={note.text} interactive={note.interactive}>
+              <span className="mt-1 block" data-note-full>
                 {note.tip}
-              </TextTip>
-            ) : (
-              note.text
-            )}
-          </p>
+              </span>
+            ) : null}
+          </TextTip>
         </li>
       ))}
     </ol>

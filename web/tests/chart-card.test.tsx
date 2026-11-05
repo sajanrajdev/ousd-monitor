@@ -148,17 +148,17 @@ describe("chart card", () => {
     expect(link.className).toContain("target-link");
   });
 
-  it("renders its pinned notes after the plot, and none when it has none", () => {
+  it("puts its notes' badges on its last row, after the as-of line, and none when it has none", () => {
     const notes = [{ kind: "a-caveat", text: "On Tempo, a caveat." }];
     const { container, rerender } = render(<ChartCard {...props} notes={notes} />);
     const list = container.querySelector("[data-pinned-notes]")!;
-    expect(list.previousElementSibling!.className).toBe("chart-card__plot");
-    expect(list.closest("details")).toBeNull();
-    expect(container.querySelector(".chart-card__body")!.hasAttribute("data-notes")).toBe(true);
+    expect(list.previousElementSibling!.className).toContain("chart-card__meta");
+    expect(list.closest("details, .chart-card__body")).toBeNull();
+    expect(list.querySelector(".tip__badge")!.textContent).toBe("1");
+    expect(container.querySelector(".chart-card__body .pin")).toBeNull();
 
     rerender(<ChartCard {...props} />);
     expect(container.querySelector("[data-pinned-notes]")).toBeNull();
-    expect(container.querySelector(".chart-card__body")!.hasAttribute("data-notes")).toBe(false);
   });
 
   it("takes an anchor, more for the popover, and further tables under the toggle", () => {

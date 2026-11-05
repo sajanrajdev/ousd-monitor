@@ -31,8 +31,9 @@ const notesOf = (container: HTMLElement) =>
   [...container.querySelectorAll("[data-pinned-notes] > [data-note]")].map((note) => ({
     kind: note.getAttribute("data-note"),
     chain: note.getAttribute("data-chain"),
-    pin: note.querySelector(".pin")!.textContent,
-    text: note.textContent,
+    pin: note.querySelector(".tip__badge")!.textContent,
+    // The note's words and any note in full, from its badge's tooltip.
+    text: note.querySelector(".tip__panel")!.textContent,
   }));
 
 afterEach(() => {
@@ -77,12 +78,12 @@ describe("velocity by chain", () => {
     }
   });
 
-  it("pins a warning beside its chain, numbered, and moves it with the warning", () => {
+  it("numbers a warning's badge, names its chain in words, and moves it with the warning", () => {
     const { container } = mount((props) => {
       props.warnings = [WARNING];
     });
-    const ethereum = container.querySelector('[data-velocity-chain="ethereum"]')!;
-    expect(ethereum.querySelector(".velocity-chart__name .pin")!.textContent).toBe("1");
+    // The badges are the card's one set of markers: nothing in the chart is a pin.
+    expect(container.querySelector(".chart-area .pin")).toBeNull();
     const notes = notesOf(container);
     expect(notes[0]).toMatchObject({ kind: "velocity-warning", chain: "ethereum", pin: "1" });
     expect(notes[0].text).toContain("Ethereum, 3 Nov 2026 UTC");
@@ -95,29 +96,18 @@ describe("velocity by chain", () => {
       props.warnings = [{ ...WARNING, chain: "base" }];
     });
     expect(notesOf(moved.container)[0]).toMatchObject({ chain: "base", pin: "1" });
-    expect(
-      moved.container.querySelector('[data-velocity-chain="ethereum"] .velocity-chart__name .pin'),
-    ).toBeNull();
+    expect(notesOf(moved.container)[0].text).toContain("Base, 3 Nov 2026 UTC");
   });
 
-  it("has no pin and no gap without a warning, and numbers two warnings in chart order", () => {
+  it("has no gap without a warning, no pin in the chart, and numbers two warnings in chart order", () => {
     const none = mount((props) => {
       props.warnings = [{ ...WARNING, metric: "total_supply" }];
     });
     expect(notesOf(none.container)).toEqual([
       expect.objectContaining({ kind: "velocity-denominators", pin: "1" }),
     ]);
-    expect(
-      none.container.querySelector("[data-velocity-chain] .velocity-chart__name .pin"),
-    ).toBeNull();
-    // With no legend, the denominators pin sits on the first chain's headline row, and only there.
-    const pins = [...none.container.querySelectorAll("[data-velocity-chain] .pin")];
-    expect(pins).toHaveLength(1);
-    expect(pins[0].closest('[data-measure="headline_velocity_bps"]')).not.toBeNull();
-    expect(pins[0].closest("[data-velocity-chain]")).toBe(
-      none.container.querySelector("[data-velocity-chain]"),
-    );
-    expect(pins[0].textContent).toBe("1");
+    expect(none.container.querySelectorAll("[data-velocity-chain] .pin")).toHaveLength(0);
+    expect(none.container.querySelectorAll(".note-badges .tip__badge")).toHaveLength(1);
     expect(none.container.querySelector("[data-velocity-legend]")).toBeNull();
     none.unmount();
     const two = mount((props) => {

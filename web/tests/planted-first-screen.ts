@@ -47,7 +47,7 @@ export const plantedInfoTip = (label: string, panel: string) =>
 export function plantedHeadline(verdict: Verdict = PLANTED_VERDICT): string {
   const text = `<span data-verdict-text>${escaped(verdict.text)}</span>`;
   const items = verdict.items.map((item) => `<span>${escaped(item)}</span>`).join("");
-  return `<p data-section="question">A question?</p><div class="verdict-block__head"><h1>${escaped(verdict.sentence)}</h1>
+  return `<div class="verdict-block__head"><h1>${escaped(verdict.sentence)}</h1>
     ${plantedTip(
       "How we read this",
       `${verdict.textVisible ? "" : text}${items}<a href="/methodology/#verdict">How the reading is made</a>`,
@@ -108,6 +108,20 @@ export function plantedReconciliationMain(stateLine: string): string {
 
 // The page's serialized copy, as Next writes it into the page, with an id no other chunk has.
 let nextFlightId = 0x1000;
+// The header as components/site-header.tsx writes it: the name, linking home, and Methodology.
+export const PLANTED_HEADER =
+  '<header><a href="/">Open USD Monitor</a><nav aria-label="Site"><a href="/methodology">Methodology</a></nav></header>';
+
+// Every page but the dashboard has a way back to it, near the top of its main.
+export const PLANTED_BACK = '<p><a href="/">Back to the dashboard</a></p>';
+
+export function plantedBack(html: string): string {
+  if (html.includes("Back to the dashboard")) return html;
+  return html.includes("<main>")
+    ? html.replace("<main>", `<main>${PLANTED_BACK}`)
+    : html.replace("</header>", `</header><main>${PLANTED_BACK}</main>`);
+}
+
 export function plantedFlight(tree: unknown): string {
   nextFlightId += 1;
   const line = `${nextFlightId.toString(16)}:${JSON.stringify(tree)}\n`;
@@ -116,13 +130,33 @@ export function plantedFlight(tree: unknown): string {
 
 const flightElement = (type: string, props: object) => ["$", type, null, props];
 
+// A note as components/pinned-notes.tsx writes it: a numbered badge in view, and its words, then the
+// note in full where it has one, in the badge's tooltip.
+export function plantedBadge(
+  number: number,
+  words: string,
+  {
+    tip,
+    kind,
+    chain,
+    essential = false,
+  }: { tip?: string; kind: string; chain?: string; essential?: boolean },
+): string {
+  const full = tip ? `<span data-note-full>${tip}</span>` : "";
+  const panel = `<span data-note-text>${words}</span>${full}`;
+  const id = tipId();
+  const points = /<a\s/.test(panel)
+    ? `aria-expanded="false" aria-controls="${id}"`
+    : `aria-describedby="${id}"`;
+  const role = /<a\s/.test(panel) ? "" : ' role="tooltip"';
+  // The page-wide list's items lead with their own mark, so a test's `<li data-note=` finds a card's.
+  return `<li ${essential ? "data-essential " : ""}data-note="${kind}"${chain ? ` data-chain="${chain}"` : ""}><span class="tip tip--text" data-tip><button type="button" class="tip__trigger tip__badge" aria-label="Note ${number}" ${points}>${number}</button><span class="tip__panel" id="${id}"${role}>${panel}</span></span></li>`;
+}
+
 export function plantedNotes(notes: Note[]): string {
-  const html = notes
-    .map(
-      ({ kind, chain, text }) =>
-        `<p data-note="${kind}"${chain ? ` data-chain="${chain}"` : ""}>${text}</p>`,
-    )
-    .join("");
+  const html = notes.length
+    ? `<ol data-pinned-notes>${notes.map(({ kind, chain, text }, index) => plantedBadge(index + 1, text, { kind, chain, essential: true })).join("")}</ol>`
+    : "";
   return notes.length > 0 ? `${html}${plantedNotesFlight(notes)}` : html;
 }
 
@@ -130,7 +164,11 @@ export function plantedNotes(notes: Note[]): string {
 export function plantedNotesFlight(notes: Note[]): string {
   return plantedFlight(
     notes.map(({ kind, chain, text }) =>
-      flightElement("p", { "data-note": kind, "data-chain": chain, children: text }),
+      flightElement("li", {
+        "data-note": kind,
+        "data-chain": chain,
+        children: flightElement("span", { "data-note-text": true, children: text }),
+      }),
     ),
   );
 }
@@ -227,7 +265,6 @@ export type PlantedPart = {
   floor: boolean;
   band: string | null;
   bandLine: string | null;
-  pins: string[];
 };
 type PlantedPanelNote = { kind: string; chain?: string; words: string; tip?: string };
 type PlantedTable = {
@@ -276,11 +313,14 @@ function plantedTable({ columns, rows }: PlantedTable, caption = ""): string {
     .join("")}</tbody></table>`;
 }
 
-// A note's short words in view, with the note in full as a tooltip on them where it has one.
+// A card's notes as numbered badges, each with its words and any note in full in its tooltip.
 export function plantedPanelNotes(notes: PlantedPanelNote[]): string {
-  const items = notes.map(
-    ({ kind, chain, words, tip }, index) =>
-      `<li data-note="${kind}"${chain ? ` data-chain="${chain}"` : ""}><span class="pin" aria-hidden="true">${index + 1}</span><p>${tip ? plantedTip(escaped(words), escaped(tip)) : escaped(words)}</p></li>`,
+  const items = notes.map(({ kind, chain, words, tip }, index) =>
+    plantedBadge(index + 1, escaped(words), {
+      kind,
+      chain,
+      ...(tip ? { tip: escaped(tip) } : {}),
+    }),
   );
   return `<ol data-pinned-notes>${items.join("")}</ol>`;
 }
@@ -311,15 +351,13 @@ function plantedSupplyBar({ key, total, parts }: PlantedSupplyPanel): string {
 }
 
 function plantedLegend({ key, parts }: PlantedSupplyPanel): string {
-  const rows = parts.map(({ key: part, label, compact, share, floor, pins, band, bandLine }) => {
+  const rows = parts.map(({ key: part, label, compact, share, floor, band, bandLine }) => {
     const mark = floor ? '<span data-coverage="floor">≥</span>' : "";
-    const numbers = pins.map((pin) => `<span class="pin">${pin}</span>`).join("");
     const linked = band !== null && BigInt(band) > 0n ? ` data-exchange-linked="${key}"` : "";
-    const line =
-      bandLine === null ? "" : `<li data-band="${part}"><span${linked}>${bandLine}</span></li>`;
-    return `<li data-segment="${part}"><span data-segment-label>${label}</span>${numbers}<span data-segment-amount>${mark}${compact}</span><span data-segment-share>${share}</span></li>${line}`;
+    const line = bandLine === null ? "" : `<li data-band="${part}"${linked}>${bandLine}</li>`;
+    return `<li data-segment="${part}"><span data-segment-label>${label}</span><span data-segment-amount>${mark}${compact}</span><span data-segment-share>${share}</span></li>${line}`;
   });
-  return `<ul data-supply-legend>${rows.join("")}</ul>`;
+  return `<ul class="chart-legend" data-supply-legend>${rows.join("")}</ul>`;
 }
 
 // The supply card, as the view writes it: one card, a bar row per filter option, and the first
@@ -409,9 +447,8 @@ const WEEK_TABLE = [
 ].map(([key, label]) => ({ key, label }));
 
 function plantedActivityNotes(notes: PlantedActivityNote[]): string {
-  const items = notes.map(
-    ({ kind, words }, index) =>
-      `<li data-note="${kind}"><span class="pin" aria-hidden="true">${index + 1}</span><p>${escaped(words)}</p></li>`,
+  const items = notes.map(({ kind, words }, index) =>
+    plantedBadge(index + 1, escaped(words), { kind }),
   );
   return `<ol data-pinned-notes>${items.join("")}</ol>`;
 }
@@ -426,12 +463,10 @@ function plantedFullNotes(fullNotes: Record<string, string>): string {
 export function plantedWaterfallPanels(panels: PlantedWaterfallPanel[], id: string): string {
   const items = panels.map((panel) => {
     const rows = panel.steps
-      .map(({ key, figure }) => {
-        const pins = panel.notes
-          .map((note, index) => (note.step === key ? `<span class="pin">${index + 1}</span>` : ""))
-          .join("");
-        return `<li data-step="${key}"><span>S${pins}</span><span class="tabular-nums">${figure}</span></li>`;
-      })
+      .map(
+        ({ key, figure }) =>
+          `<li data-step="${key}"><span>S</span><span class="tabular-nums">${figure}</span></li>`,
+      )
       .join("");
     return `<div data-chain-panel="${panel.value}">${plantedPanelCard(
       panel.heading,
@@ -445,7 +480,6 @@ export function plantedWaterfallPanels(panels: PlantedWaterfallPanel[], id: stri
 
 export function plantedWeeklyPanels(panels: PlantedWeeklyPanel[], id: string): string {
   const items = panels.map((panel) => {
-    const pins = panel.notes.map((_, index) => `<span class="pin">${index + 1}</span>`).join("");
     const bars = panel.bars
       .map((bar) => {
         const [to, figure] = bar.split("=");
@@ -454,7 +488,7 @@ export function plantedWeeklyPanels(panels: PlantedWeeklyPanel[], id: string): s
       .join("");
     return `<div data-chain-panel="${panel.value}">${plantedPanelCard(
       panel.heading,
-      `<div class="chart-area" aria-hidden="true"><div data-chart-pins>${pins}</div>${bars}</div>${plantedActivityNotes(panel.notes)}`,
+      `<div class="chart-area" aria-hidden="true">${bars}</div>${plantedActivityNotes(panel.notes)}`,
       plantedFullNotes(panel.fullNotes),
       plantedTable({ columns: WEEK_TABLE, rows: panel.rows }),
     )}</div>`;
@@ -477,8 +511,6 @@ export type PlantedGrid = {
 
 // The velocity card and the chain grid's card, as the views write them.
 export function plantedVelocity(velocity: PlantedVelocity, id: string): string {
-  const denominators =
-    velocity.notes.findIndex((note) => note.kind === "velocity-denominators") + 1;
   const groups = new Map<string, string[]>();
   for (const bar of velocity.bars) {
     const [, chain, measure, value, width] = /^(\w+):(\w+)=(.*)@(.*)$/.exec(bar)!;
@@ -486,26 +518,15 @@ export function plantedVelocity(velocity: PlantedVelocity, id: string): string {
       width === "null" || width === "0"
         ? ""
         : `<span class="velocity-chart__bar" data-width="${width}"></span>`;
-    // The denominators note's pin sits on the first chain's headline row, as there's no legend.
-    const pin =
-      groups.size === 0 || (groups.size === 1 && groups.has(chain))
-        ? measure === "headline_velocity_bps"
-          ? `<span class="pin">${denominators}</span>`
-          : ""
-        : "";
     groups.set(chain, [
       ...(groups.get(chain) ?? []),
-      `<div data-measure="${measure}"><span class="velocity-chart__label">M${pin}</span>${drawn}<span data-velocity-value>${value}</span></div>`,
+      `<div data-measure="${measure}"><span class="velocity-chart__label">M</span>${drawn}<span data-velocity-value>${value}</span></div>`,
     ]);
   }
-  const pinOf = (chain: string) => {
-    const index = velocity.notes.findIndex((note) => note.chain === chain);
-    return index === -1 ? "" : `<span class="pin">${index + 1}</span>`;
-  };
   const chart = [...groups]
     .map(
       ([chain, rows]) =>
-        `<div data-velocity-chain="${chain}"><p class="velocity-chart__name">${chain}${pinOf(chain)}</p>${rows.join("")}</div>`,
+        `<div data-velocity-chain="${chain}"><p class="velocity-chart__name">${chain}</p>${rows.join("")}</div>`,
     )
     .join("");
   const notes = plantedPanelNotes(velocity.notes);

@@ -73,6 +73,11 @@ h2 {
   border-bottom: 1px solid var(--color-border);
 }
 
+.site-header__nav {
+  margin-left: auto;
+  font-size: var(--text-small);
+}
+
 .site-header__inner {
   display: flex;
   flex-wrap: wrap;
@@ -103,18 +108,47 @@ h2 {
   margin-top: var(--section-space);
 }
 
+/* Information on the left, actions on the right, each action level with its line. One column, in
+   reading order, below 768. */
 .site-footer__inner {
   display: grid;
-  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem 2rem;
   max-width: var(--page-max-width);
   margin: 0 auto;
   padding: 2rem var(--page-margin);
   font-size: var(--text-small);
 }
 
+@media (min-width: 768px) {
+  .site-footer__inner {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .site-footer__action {
+    justify-self: end;
+  }
+
+  /* Both of the status's texts share a cell, so each lines up at the right. */
+  .site-footer__action .freshness-text {
+    justify-items: end;
+    text-align: right;
+  }
+
+  .site-footer__info {
+    grid-column: 1;
+  }
+}
+
 .chart-card {
   /* Its width is what its tables and notes respond to, and not the viewport's. */
   container-type: inline-size;
+  /* Its own stacking context, at the page's level, so nothing drawn in it, such as a bar's label,
+     can rise over the sticky header or the chain filter. */
+  position: relative;
+  isolation: isolate;
+  z-index: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -161,13 +195,6 @@ h2 {
   min-width: 0;
 }
 
-/* A container query reads the content box: a card of 560 less its padding and borders. */
-@container (min-width: 518px) {
-  .chart-card__body[data-notes] {
-    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  }
-}
-
 .chart-card__clock {
   display: inline-block;
   margin-right: 0.25rem;
@@ -188,7 +215,7 @@ h2 {
 }
 
 /* The legend goes beside the chart when the card is at least 560 wide, with any figures under the
-   chart, and the notes go under both, in two columns, as they're too long for a narrow one. */
+   chart. A container query reads the content box: a card of 560 less its padding and borders. */
 @container (min-width: 518px) {
   .chart-card__plot[data-beside] {
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
@@ -208,12 +235,6 @@ h2 {
   .chart-card__plot[data-beside] > :not(.chart-card__beside),
   .chart-card__plot[data-beside] .chart-stats {
     grid-column: 1;
-  }
-
-  /* A grid, not CSS columns: columns rebalance when an open tooltip's panel appears in them. */
-  .chart-card__body:not([data-notes]) > .pinned-notes:has(> li + li) {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    column-gap: 1.25rem;
   }
 }
 
@@ -282,12 +303,6 @@ h2 {
   white-space: nowrap;
 }
 
-.chart-legend__band {
-  flex: 1 1 0;
-  min-width: 0;
-  color: var(--color-meta-text);
-}
-
 .chart-stats {
   display: flex;
   flex-wrap: wrap;
@@ -333,6 +348,7 @@ h2 {
 
 .supply-bar__label {
   position: relative;
+  z-index: 1;
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
@@ -650,10 +666,10 @@ html:not([data-tips]) .tip--info:is(:hover, :focus-within) > .tip__icon,
   color: var(--color-off-white);
 }
 
-/* A card is its own stacking context, as its container query contains it, so the one with an open
-   panel rises over the cards after it. It stays under the sticky header. */
+/* A card is its own stacking context, so the one with an open panel rises over the cards after it.
+   It stays under the sticky chain filter and header, which are always on top. */
 .chart-card:has(.tip:is([data-open], :hover, :focus-within)) {
-  z-index: 9;
+  z-index: 4;
 }
 
 .tip__links {
@@ -680,20 +696,48 @@ html:not([data-tips]) .tip--info:is(:hover, :focus-within) > .tip__icon,
   font-variant-numeric: tabular-nums;
 }
 
-.pinned-notes {
-  display: grid;
-  align-content: start;
-  gap: 0.5rem;
-  margin: 0;
+/* A card's notes: numbered badges at the right of its last row, beside the toggle and as-of line.
+   Each is a tooltip trigger, at least 24 px. */
+.note-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.75rem 0 0 auto;
   padding: 0;
-  font-size: var(--text-small);
   list-style: none;
 }
 
-.pinned-notes > li {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
+.chart-card > .note-badges {
+  flex: 0 0 auto;
+}
+
+.chart-card > .chart-card__meta:has(+ .note-badges) {
+  flex: 1 1 0;
+}
+
+.tip__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  background: var(--color-maroon);
+  border: 0;
+  border-radius: 50%;
+  color: var(--color-off-white);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-meta);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+html:not([data-tips]) .tip:is(:hover, :focus-within) > .tip__badge,
+.tip[data-open] > .tip__badge {
+  background: var(--color-maroon-dark);
+  outline: 2px solid var(--color-maroon);
+  outline-offset: 1px;
 }
 
 .data-toggle {
@@ -931,6 +975,11 @@ html:not([data-tips]) .tip--info:is(:hover, :focus-within) > .tip__icon,
   gap: 1rem;
 }
 
+/* Clear space between the header and the headline, when no trust row sits between them. */
+.first-screen > .verdict-block:first-child {
+  padding-top: clamp(1.5rem, 3vw, 2.5rem);
+}
+
 .trust-strip {
   position: relative;
   display: flex;
@@ -1130,6 +1179,13 @@ html[data-freshness="stale"] .freshness-text__fresh {
   visibility: hidden;
 }
 
+/* The footer is the page's last part, so its status swaps outright: nothing below it can move, and a
+   phone doesn't keep an empty line for the text that isn't showing. */
+html[data-freshness="fresh"] .site-footer .freshness-text__stale,
+html[data-freshness="stale"] .site-footer .freshness-text__fresh {
+  display: none;
+}
+
 /* Velocity by chain: a group per chain, a row per measure, and each bar's figure at the row's end. */
 .velocity-chart {
   display: grid;
@@ -1239,11 +1295,6 @@ html[data-freshness="stale"] .freshness-text__fresh {
 /* An amount and its share may wrap apart, but neither breaks inside itself. */
 .chain-grid__part {
   white-space: nowrap;
-}
-
-/* A grid card's notes go under the grid, which needs the card's whole width. */
-.chart-card__body[data-notes]:has(> .chart-card__plot [data-plot-content]) {
-  grid-template-columns: minmax(0, 1fr);
 }
 
 .chain-grid__value {
@@ -1395,15 +1446,10 @@ html[data-freshness="stale"] .freshness-text__fresh {
   }
 }
 
-/* A card spans the content width, so from a wide card its notes take a column beside the chart and
-   its legend, instead of a row under them. */
+/* A card spans the content width, so from a wide card its chart gets most of it. */
 @container (min-width: 860px) {
-  .chart-card__body:has(> .pinned-notes) {
-    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
-  }
-
-  .chart-card__body:not([data-notes]) > .pinned-notes:has(> li + li) {
-    grid-template-columns: minmax(0, 1fr);
+  .chart-card__plot[data-beside] {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   }
 
   /* The legend and the figures share the second column, and the bars take the first. */

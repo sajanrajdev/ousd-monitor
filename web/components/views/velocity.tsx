@@ -26,9 +26,6 @@ export function VelocityCard({ kpis, definitions, warnings, state }: VelocityVie
     text,
     tip,
   }));
-  const pins = Object.fromEntries(
-    chart.notes.flatMap((note, index) => (note.chain ? [[note.chain, index + 1]] : [])),
-  );
   const dust = formatCompact(definitions.active_dust_base_units);
   const secondary = formatCompact(definitions.active_secondary_base_units);
   return (
@@ -85,11 +82,7 @@ export function VelocityCard({ kpis, definitions, warnings, state }: VelocityVie
         })),
       }}
     >
-      <VelocityChart
-        chart={chart}
-        pins={pins}
-        headlinePin={chart.notes.findIndex((note) => note.kind === "velocity-denominators") + 1}
-      />
+      <VelocityChart chart={chart} />
     </ChartCard>
   );
 }

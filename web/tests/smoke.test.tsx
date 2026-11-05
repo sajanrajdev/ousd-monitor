@@ -12,8 +12,8 @@ describe("the test setup", () => {
       "At least half of Open USD (OUSD) supply is sitting still.",
     );
     expect(
-      screen.getByText(/Is Open USD \(OUSD\) supply turning into money that moves\?/),
-    ).toBeTruthy();
+      screen.queryByText(/Is Open USD \(OUSD\) supply turning into money that moves\?/),
+    ).toBeNull();
   });
 
   it("keeps id=main-content on main, so the skip link has somewhere to go", () => {

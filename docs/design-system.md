@@ -121,7 +121,7 @@ Taken from their tokens:
 | `--grid-gap` | `1rem`, between cards in the grid |
 | `--dashboard-space` | `clamp(1.5rem, 2vw, 2rem)`, between the dashboard's sections, in place of `--section-space` on the main page |
 | `--filter-height` | `2.75rem`, the chain filter's height, which `scroll-padding-top` adds from 768 while it's sticky |
-| `--pin-size` | `1.25rem`, a numbered pin |
+| `--pin-size` | `1.25rem`, the size a numbered pin had. Note badges are 1.5rem, the 24 px target |
 
 **Named widths.** The first version of this file named 1440px and 1056px and no phone width. These are the widths the site is built and checked at. Every chart card is one to a row at every width.
 
@@ -141,8 +141,8 @@ Taken from their tokens:
 | `--chart-height-tablet` | `300px` |
 | `--chart-height-desktop` | `340px` |
 
-- **Header:** sticky at every width, one row of our mark and the site name. The independence line and the methodology link are in the footer.
-- **Footer:** the independence line in body color, not a subdued one, then the reconciliation status, the methodology link, not financial advice, not an attestation, and the GitHub link.
+- **Header:** sticky at every width, one row: our mark and the site name, which link home, and the methodology link at the far right. Clear space sits between it and the headline.
+- **Footer:** two columns from 768, information on the left and actions on the right, each action level with its line. Left: the independence line in body color, not a subdued one; "Not financial advice. Not an attestation."; the line pointing to Bridge's reports. Right: the reconciliation status level with the independence line, and the methodology link level with the next. One column below 768, in that order.
 - **Stacked tables:** rows stack as label and value pairs, and long exact amounts wrap anywhere, below 768 wide or in any card narrower than 720. This covers every table on the site, so none needs horizontal scroll.
 - **Corners:** `--radius-control` is `4px` for buttons and chips, `--radius-input` is `6px` for inputs, and `--radius-card` is `12px` for chart cards.
 
@@ -153,42 +153,43 @@ Taken from their tokens:
 | `--radius-card` | `12px` |
 
 - **Shadows:** none.
-- **Grid:** one scrolling page, with no tabs, because tabs hide findings. One card to a row at every width, each spanning the content width. A card from 860 wide puts its notes in a column beside its chart and legend, rather than under them.
+- **Grid:** one scrolling page, with no tabs, because tabs hide findings. One card to a row at every width, each spanning the content width. From a card of 860 wide the chart takes two thirds and its legend the rest.
 - **Mobile first:** no horizontal page scroll. Wide tables become stacked rows.
 
 ## Components
 
 | Component | Rules |
 |---|---|
-| **Header** | Our mark and "Open USD Monitor". Stays one row and sticky |
+| **Header** | Our mark and "Open USD Monitor", linking home, and "Methodology" at the far right. Stays one row and sticky, on top of everything the page scrolls under it, the chain filter included |
 | **Reconciliation status** | On a build that passed, a green tick and the word "Reconciled" in the footer, linking to `/reconciliation/`, with the dated sentence "Supply reconciled on all 4 chains as of {time} UTC" as its tooltip on hover and focus. The word is there with the tick, so it isn't colour alone, and `--meaning-positive` meets 4.5:1. On any other build (stale, a failed newer run, preview or sample) the trust row stays at the top of the main page with its dated state, as before, and the footer says "Last reconciled …" or "Not reconciled", never "Reconciled". If the reader's clock finds a passing page old, the footer's word swaps in place and the as-of line at the top says when supply was last reconciled. State text never moves into a tooltip |
 | **Reconciliation page** | `/reconciliation/`: the trust row's former detail, its table, the checks list and what it doesn't verify, with "Back to the dashboard" and the normal header |
-| **Verdict block** | A question line, then the headline on one line at `--text-headline`, "How we read this" as a tooltip, and the data-as-of time. It may wrap on a phone and is never truncated. `verdict.text` and the verdict's groups sit in the tooltip on real data across all four chains. On sample, preview or partial data `verdict.text` stays visible, and the words "Sample, not a finding." or "Preview, not a finding." sit beside the headline in plain text. The first thing anyone reads |
+| **Verdict block** | The headline on one line at `--text-headline`, "How we read this" as a tooltip, and the data-as-of time. It may wrap on a phone and is never truncated. `verdict.text` and the verdict's groups sit in the tooltip on real data across all four chains. On sample, preview or partial data `verdict.text` stays visible, and the words "Sample, not a finding." or "Preview, not a finding." sit beside the headline in plain text. The first thing anyone reads |
 | **KPI row** | Four numbers split by hairlines, each with a label and an info tooltip holding its short note. No cards and no markers |
 | **Findings** | No separate row. Each chart's heading is its finding, in view on its card. The review's word target left no room for the same four sentences twice |
 | **Chain filter** | All, then each chain in the dataset. Native radios styled as a segmented control, with targets at least 36 px tall. Sticky from 768. On partial data the first option reads "All covered", never "All". It filters a view by showing that chain's own panel, and a view that compares chains highlights the selected one by weight and a rule, never opacity |
-| **Chart card** | A finding as its title, an info tooltip, chart, pinned notes, then the data toggle and a line with a clock, the as-of time and any Sample or Preview word, which share the last row. Takeaway, source, as-of time, definition, summary and table are required props, so a chart missing one doesn't compile. Source and definition sit in the tooltip and in a `<noscript>` note. The summary is visually hidden and read by assistive technology. A cropped card still shows its finding, scope and as-of time. A legend sits beside its chart from a card of 560 wide and under it below that. The notes go under both, or beside them from 860 |
+| **Chart card** | A finding as its title, an info tooltip, chart, then a last row with the data toggle, a line with a clock, the as-of time and any Sample or Preview word, and the numbered note badges at the right. Each card is its own stacking context, so nothing drawn in it rises over the sticky header or the filter. Takeaway, source, as-of time, definition, summary and table are required props, so a chart missing one doesn't compile. Source and definition sit in the tooltip and in a `<noscript>` note. The summary is visually hidden and read by assistive technology. A cropped card still shows its finding, scope and as-of time. A legend sits beside its chart from a card of 560 wide and under it below that |
 | **Hairline table** | Rows split by `--color-border`, right-aligned tabular numbers, color squares for categories |
 | **Tooltip** | One shared component for every explanation (see [Explanation layers](#explanation-layers)). An "i" button with a name on a card's or a KPI's head, dotted-underlined words on a note or "How we read this", or a link such as the footer's "Reconciled" |
 | **Buttons** | Primary: maroon with off-white text. Secondary: 5% maroon with dark text. Both `4px` radius |
-| **Footer** | Independence line, reconciliation status, methodology link, not financial advice, not an attestation, GitHub link |
+| **Footer** | Two columns, as under Layout: independence line, not financial advice and not an attestation, Bridge's reports on the left; reconciliation status and methodology link on the right; GitHub link when the repository is public |
+| **Methodology page** | "Back to the dashboard" at the top. "On this page" is one list of the top-level sections in order, with a section's own items indented under it in compact columns of their own |
 
 **No markers.** The maintainer's review removed the F, I and E markers and the "Our reading" tag: most of the page is inferred, and readers understand that. The methodology page still says which figures are read from the chain and which rest on rules or assumptions. The one exception is a guard that frames the verdict: on sample or preview data the headline says "Sample, not a finding." or "Preview, not a finding." in plain text.
 
 ## Explanation layers
 
-Three layers. **Essential** means findings and any caveat needed to read a number correctly, such as Ethereum's velocity note, "Wallets, not people", hops counted more than once, and "everyday means under $1M". Essential text stays visible with nothing opened, so it never sits only in a tooltip.
+Three layers. **Essential** means findings and any caveat needed to read a number correctly, such as Ethereum's velocity note, "Wallets, not people", hops counted more than once, and "everyday means under $1M". Findings stay visible with nothing opened. Since the maintainer's second review, an essential caveat is a numbered badge in view on its card, with its words in the badge's tooltip, and no longer visible text: that decision supersedes the earlier rule.
 
 | Layer | Opens by | May hold | May not hold | With JavaScript off |
 |---|---|---|---|---|
 | **Tooltip** | Hover, keyboard focus, or a tap on touch | Definition, source, as-of repeat, definition link, the long takeaway, the text summary, a pinned note in full | A finding, the only copy of a caveat needed to read a number, a stale, sample, preview or partial message | CSS opens it on `:hover` and `:focus-within`, and Tab reaches its links. Source and definition also show as a plain note |
-| **Pin and note** | Nothing: always visible | A short caveat, numbered to a mark on the chart, naming its chain or part in words, with the note in full as a tooltip on its words. Beside the chart when the card is at least 560 wide, otherwise below it | A definition, a hard-coded chain name, or a figure that isn't in the dataset or already on the page | The same |
+| **Note badge** | The badge is always visible; its words open by hover, focus or tap | A caveat naming its chain or part in words, then the note in full. The badges sit at the right of the card's last row, and are the card's only markers: nothing in the chart or legend carries a number | A definition, a hard-coded chain name, or a figure that isn't in the dataset or already on the page | CSS opens its words on focus and hover |
 | **Data toggle** | Tap, click or keyboard | The chart's table in full, with exact amounts and any further tables. It swaps the chart for the table | The only copy of a finding or caveat | Works the same |
 
 - **A tooltip floats and moves nothing.** The maintainer's review ruled this way: an explanation never pushes the page down, so it may cover what's beside it while open. One is open at a time. A card with an open tooltip rises over the cards after it, and stays under the sticky header.
 - **Tooltip behaviour:** a native button or link, at least 24 px when it stands alone, with a name. It opens on hover after a short delay and on keyboard focus, and a click or tap keeps it open until a second click, Escape, or focus or the pointer leaving. Escape closes it, and returns focus to the trigger only when focus was inside the panel, so it never scrolls a reader away. A panel with a link is a disclosure, with `aria-expanded`, and Tab moves into it. A panel of plain text is `role="tooltip"` and describes its trigger with `aria-describedby`. The enhancer keeps an open panel inside the viewport at every width, shifting it sideways and flipping it above its trigger when there's no room below. It has a maroon edge, which forced colours keep, a visible focus ring, and no animation. With no script the panel aligns to its trigger and can't be measured.
-- **Pins in a chart are decoration.** The graphic is hidden from assistive technology and out of the tab order, so a pin is never a link or a focusable element. Its note reads on its own without it. A plot that is real content, such as the chain grid's table, isn't a graphic and isn't hidden.
-- **A pin comes from the data.** It appears because the manifest or a condition in the config says so, so it can't go false when the data changes.
+- **A chart holds no markers.** The graphic is hidden from assistive technology and out of the tab order. A note reads on its own, naming its chain or part. A plot that is real content, such as the chain grid's table, isn't a graphic and isn't hidden.
+- **A note comes from the data.** It appears because the manifest or a condition in the config says so, so it can't go false when the data changes.
 
 ## Charts
 

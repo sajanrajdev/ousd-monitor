@@ -184,6 +184,19 @@ function checkEveryPage(page, document, problems) {
   if (!document.querySelector('footer a[href^="/methodology"]')) {
     problems.push(`${page}: no methodology link in the footer`);
   }
+  if (!document.querySelector('header a[href^="/methodology"]')) {
+    problems.push(`${page}: no methodology link in the header`);
+  }
+  if (!document.querySelector('header a[href="/"]')) {
+    problems.push(`${page}: the site's name in the header doesn't link to /`);
+  }
+  // Every page but the dashboard has a clear way back to it.
+  if (page !== "index.html" && !/^(404|_not-found)/.test(page)) {
+    const back = [...document.querySelectorAll('main a[href="/"]')].some(
+      (link) => viewText(link).trim() === "Back to the dashboard",
+    );
+    if (!back) problems.push(`${page}: no "Back to the dashboard" link to /`);
+  }
 }
 
 const RECONCILED = /\bReconciled\b/;
@@ -341,8 +354,9 @@ function checkHeadline(page, document, { verdict }, problems) {
   if (viewText(block?.querySelector("h1")).trim() !== verdict.sentence) {
     problems.push(`${page}: the headline isn't the verdict's sentence`);
   }
-  if (!viewText(block?.querySelector('[data-section="question"]')).trim()) {
-    problems.push(`${page}: no question line in view`);
+  // The maintainer's second review removed the question line, to give the header room.
+  if (block?.querySelector('[data-section="question"]')) {
+    problems.push(`${page}: the question line is back above the headline`);
   }
   const panel = block?.querySelector(".tip__panel");
   if (verdict.textVisible) {
@@ -465,18 +479,23 @@ function checkTooltips(page, document, problems) {
 
 const PIN_NUMBER = /^\d+$/;
 
-// A note's own words. Its pin is a number outside them, and anything else in a pin still counts.
+// A note is its numbered badge, in view, and its words, in the tooltip the badge describes or
+// controls, as the maintainer decided after the whole-page review. No badge in view, or a tooltip
+// that isn't the badge's own, gives no words.
 function noteWords(note) {
-  if (!inView(note)) return "";
-  const copy = note.cloneNode(true);
-  for (const pin of copy.querySelectorAll(".pin")) {
-    if (PIN_NUMBER.test(pin.textContent.trim())) pin.remove();
+  const badge = note.querySelector(":scope .tip > .tip__badge");
+  if (!badge || !inView(note) || !inView(badge) || !PIN_NUMBER.test(badge.textContent.trim())) {
+    return "";
   }
-  return viewText(copy, "");
+  const id = badge.getAttribute("aria-describedby") ?? badge.getAttribute("aria-controls");
+  const panel = id ? note.ownerDocument.getElementById(id) : null;
+  if (!panel || badge.nextElementSibling !== panel) return "";
+  return panel.querySelector("[data-note-text]")?.textContent ?? "";
 }
 
-// The caveats needed to read a number, wherever a unit pins them. Each required instance is in view
-// with nothing opened and keeps its words, read whole so a date or a link can't split a sentence.
+// The caveats needed to read a number, wherever a unit pins them. Each required instance has its
+// numbered badge in view and keeps its words in the badge's tooltip, read whole so a date or a link
+// can't split a sentence.
 function checkEssentialNotes(page, document, expected, problems) {
   for (const { kind, chain, text, exact } of expected.essentialNotes) {
     const selector = `[data-note="${kind}"]${chain ? `[data-chain="${chain}"]` : ""}`;
@@ -485,7 +504,7 @@ function checkEssentialNotes(page, document, expected, problems) {
       .filter((words) => words.trim());
     const name = `the ${kind} note${chain ? ` for ${chain}` : ""}`;
     if (shown.length === 0) {
-      problems.push(`${page}: ${name} isn't in view`);
+      problems.push(`${page}: ${name} has no badge in view with its words`);
     } else if (!shown.some((words) => (exact ? words.trim() === text : words.includes(text)))) {
       problems.push(`${page}: ${name} doesn't say "${text}"`);
     }
@@ -716,9 +735,7 @@ function flightText(node, values, seen = new Set()) {
   }
   if (!Array.isArray(node)) return "";
   if (node[0] === "$" && typeof node[1] === "string") {
-    // A note's pin is a number outside its words, as in noteWords.
-    if (node[3]?.className === "pin" && typeof node[3].children === "number") return "";
-    // And a tooltip's panel is out of view, as in viewText, so it isn't one of a note's words.
+    // A tooltip's panel is out of view, as in viewText. A note's words are read from inside it.
     if (node[3]?.className === "tip__panel") return "";
     return flightText(node[3]?.children, values, seen);
   }
@@ -837,17 +854,23 @@ function checkPanelNotes(where, panel, notes, problems) {
   }
   notes.forEach(({ kind, words, tip }, index) => {
     if (noteWords(shown[index]).replace(/\s+/g, " ").trim() !== words) {
-      problems.push(`${where}: its ${kind} note doesn't keep its words in view`);
+      problems.push(`${where}: its ${kind} note doesn't keep its words in its badge's tooltip`);
     }
-    // A note in full sits in a tooltip on its words, which stay the caveat.
-    const panel = shown[index].querySelector(".tip__panel");
-    if (tip && !panel?.textContent.replace(/\s+/g, " ").includes(tip)) {
+    // The note in full follows its words in the same tooltip.
+    const full = shown[index].querySelector(".tip__panel [data-note-full]");
+    if (tip && !full?.textContent.replace(/\s+/g, " ").includes(tip)) {
       problems.push(`${where}: its ${kind} note has lost its words in full`);
     }
-    if (plainText(shown[index].querySelector(".pin")) !== String(index + 1)) {
+    if (plainText(shown[index].querySelector(".tip__badge")) !== String(index + 1)) {
       problems.push(`${where}: its ${kind} note has the wrong number`);
     }
   });
+  // The badges are the card's one set of markers, so no pin sits in its chart or legend.
+  if (
+    panel.querySelector(".chart-area .pin, .chart-legend .pin, .chart-stats .pin, caption .pin")
+  ) {
+    problems.push(`${where}: a pin is in its chart or legend as well as its badges`);
+  }
 }
 
 function checkPanelBar(where, panel, { key, total, parts }, problems) {
@@ -899,7 +922,7 @@ function checkPanelLegend(where, panel, { parts }, problems) {
     problems.push(`${where}: its legend doesn't list every segment`);
     return;
   }
-  parts.forEach(({ key, label, compact, share, floor, pins, bandLine }, index) => {
+  parts.forEach(({ key, label, compact, share, floor, bandLine }, index) => {
     const row = rows[index];
     const text = (selector) => plainText(row.querySelector(selector));
     if (!viewText(row).trim()) problems.push(`${where}: its ${key} legend row isn't in view`);
@@ -914,10 +937,6 @@ function checkPanelLegend(where, panel, { parts }, problems) {
     }
     if (Boolean(row.querySelector('[data-coverage="floor"]')) !== floor) {
       problems.push(`${where}: its ${key} legend row has the wrong coverage mark`);
-    }
-    const numbers = [...row.querySelectorAll(".pin")].map(plainText);
-    if (numbers.join() !== pins.join()) {
-      problems.push(`${where}: its ${key} legend row points at notes ${numbers.join()}`);
     }
     if (bandLine !== null) {
       const line = panel.querySelector(`[data-band="${key}"]`);
@@ -1191,20 +1210,6 @@ function checkVelocity(page, document, expected, problems) {
   const drawn = want.bars.map((bar) => bar.replace(/@0$/, "@null"));
   if (bars.join() !== drawn.join()) problems.push(`${where}: its bars aren't the dataset's`);
   checkPanelNotes(where, card, want.notes, problems);
-  const pinned = [...card.querySelectorAll("[data-velocity-chain] .velocity-chart__name .pin")].map(
-    (pin) => `${pin.closest("[data-velocity-chain]").dataset.velocityChain}=${plainText(pin)}`,
-  );
-  const pins = want.notes.flatMap(({ chain }, index) => (chain ? [`${chain}=${index + 1}`] : []));
-  if (pinned.join() !== pins.join()) {
-    problems.push(`${where}: its chain pins are ${pinned.join()}, not ${pins.join()}`);
-  }
-  const denominators = want.notes.findIndex(({ kind }) => kind === "velocity-denominators") + 1;
-  const headlinePin = card.querySelector(
-    '[data-velocity-chain]:first-child [data-measure="headline_velocity_bps"] .velocity-chart__label .pin',
-  );
-  if (want.bars.length > 0 && plainText(headlinePin) !== String(denominators)) {
-    problems.push(`${where}: the denominators pin isn't on the first headline velocity row`);
-  }
   for (const [kind, words] of [
     ["velocity-denominators", VELOCITY_NOTE],
     ["velocity-jumpy", JUMPY_NOTE],
@@ -1300,13 +1305,6 @@ function checkWaterfallPanels(page, document, expected, problems) {
         problems.push(`${where}: its ${row.dataset.step} isn't the rows' own sum`);
       }
     }
-    const pinned = rows.flatMap((row) =>
-      [...row.querySelectorAll(".pin")].map((pin) => `${row.dataset.step}=${plainText(pin)}`),
-    );
-    const pins = want.notes.flatMap(({ step }, index) => (step ? [`${step}=${index + 1}`] : []));
-    if (pinned.join() !== pins.join()) {
-      problems.push(`${where}: its pins are ${pinned.join()}, not ${pins.join()}`);
-    }
     checkPanelNotes(where, panel, want.notes, problems);
     checkFullNotes(where, panel, want.fullNotes, problems);
     const tables = panel.querySelectorAll(".data-toggle table");
@@ -1345,10 +1343,6 @@ function checkWeeklyPanels(page, document, expected, problems) {
       (bar) => `${bar.dataset.week}=${viewText(bar.querySelector("[data-week-value]"), "").trim()}`,
     );
     if (bars.join() !== want.bars.join()) problems.push(`${where}: its bars aren't the dataset's`);
-    const pins = [...panel.querySelectorAll(".chart-area [data-chart-pins] .pin")].map(plainText);
-    if (pins.join() !== want.notes.map((_, index) => String(index + 1)).join()) {
-      problems.push(`${where}: its pins don't match its notes`);
-    }
     checkPanelNotes(where, panel, want.notes, problems);
     checkFullNotes(where, panel, want.fullNotes, problems);
     checkTableRows(
@@ -1391,7 +1385,12 @@ function checkPayload(place, flight, expected, problems) {
       .filter(
         (element) => element["data-note"] === kind && (!chain || element["data-chain"] === chain),
       )
-      .map(words);
+      // A note's words are in its badge's tooltip, in the element that holds them.
+      .map((element) => {
+        const inNote = flightProps(new Map([["note", element.children]]));
+        const held = inNote.find((child) => child["data-note-text"] !== undefined);
+        return held ? words(held) : "";
+      });
     if (!shown.some((said) => (exact ? said === text : said.includes(text)))) {
       problems.push(`${place}: the payload's ${kind} note isn't the dataset's`);
     }
@@ -1678,9 +1677,6 @@ function expectedPanels(files) {
           floor: segment.coverage === "floor",
           band: segment.band?.amount ?? null,
           bandLine: segment.band?.line ?? null,
-          pins: notes.flatMap((note, index) =>
-            note.segment === segment.key ? [String(index + 1)] : [],
-          ),
         })),
         stats: panel.stats,
         notes,

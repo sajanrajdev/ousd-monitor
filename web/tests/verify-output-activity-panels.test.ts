@@ -7,6 +7,8 @@ import {
   plantedFooter,
   plantedRealMain,
   plantedReconciliationMain,
+  PLANTED_HEADER,
+  plantedBack,
 } from "./planted-first-screen";
 
 // Each whole-page group is a file of its own, and so a worker of its own, as one worker running
@@ -22,7 +24,7 @@ const RECONCILED_TRUST =
 function site({ main, methodology }: { main: string; methodology: string }) {
   const dir = tempDir();
   plantFile(dir, "index.html", main);
-  plantFile(dir, "methodology/index.html", methodology);
+  plantFile(dir, "methodology/index.html", plantedBack(methodology));
   plantFile(
     dir,
     "reconciliation/index.html",
@@ -40,7 +42,7 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
   const main = plantedRealMain(expected, TRUST);
   const page = (body: string) =>
     `<!doctype html><html data-dataset-kind="real" data-dataset-version="${expected.version}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
-    <header><a href="/">Open USD Monitor</a></header><p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
+    ${PLANTED_HEADER}<p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
     ${plantedFooter(false, { fresh: null, stale: TRUST })}</body></html>`;
   const check = (body: string) =>
     verifyOutput(site({ main: page(body), methodology: page("<main>Fine</main>") }), expected);
@@ -90,11 +92,14 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     expect(faults(figure, W, "base")).toEqual(
       expect.arrayContaining([expect.stringContaining("its rows aren't the dataset's")]),
     );
+    // The badges are the card's one set of markers, so a pin put back on a row fails.
     const pin = inPanel(W, "tempo", (html) =>
-      html.replace(/(<li data-step="clean_large"><span>S)(<span class="pin">\d+<\/span>)/, "$1"),
+      html.replace('<li data-step="clean_large"><span>S', '$&<span class="pin">3</span>'),
     );
     expect(faults(pin, W, "tempo")).toEqual(
-      expect.arrayContaining([expect.stringContaining("its pins are")]),
+      expect.arrayContaining([
+        expect.stringContaining("a pin is in its chart or legend as well as its badges"),
+      ]),
     );
     const lost = inPanel(W, "tempo", (html) =>
       html.replace(/<li data-note="small-ticket">.*?<\/li>/, ""),
@@ -126,10 +131,12 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
       expect.arrayContaining([expect.stringContaining("its bars aren't the dataset's")]),
     );
     const pins = inPanel(K, "solana", (html) =>
-      html.replace(/<div data-chart-pins>.*?<\/div>/, "<div data-chart-pins></div>"),
+      html.replace('<div class="chart-area" aria-hidden="true">', '$&<span class="pin">1</span>'),
     );
     expect(faults(pins, K, "solana")).toEqual(
-      expect.arrayContaining([expect.stringContaining("its pins don't match its notes")]),
+      expect.arrayContaining([
+        expect.stringContaining("a pin is in its chart or legend as well as its badges"),
+      ]),
     );
     const note = inPanel(K, "solana", (html) => html.replace("nothing more.", "or so."));
     expect(faults(note, K, "solana")).toEqual(
@@ -139,7 +146,7 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     );
     const marker = inPanel(K, "solana", (html) =>
       html.replace(
-        /(<li data-note="history"><span class="pin" aria-hidden="true">\d+<\/span><p>)/,
+        /(<li data-note="history">)/,
         '$1<span class="status-chip" data-kind="fact">F</span> ',
       ),
     );

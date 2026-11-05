@@ -33,6 +33,7 @@ import {
 } from "./takeaways/caveats.ts";
 import {
   EXCHANGE_LINKED_LABEL,
+  exchangeLinkedFigures,
   exchangeLinkedLine,
   journeyHeading,
   seriesHeading,
@@ -180,6 +181,8 @@ export type SegmentBand = {
   amount: string;
   // Of the segment it sits in, for geometry. The line says its share of supply.
   shareOfSegmentBps: number;
+  // Its figure and share of supply, for its legend row, and those words in one line for checks.
+  figures: { amount: string; share: string };
   line: string;
 };
 
@@ -205,6 +208,7 @@ function bandOf(config: SegmentConfig, row: SegmentRow, amount: bigint): Segment
     background: `${config.band.image}, ${config.style.background}`,
     amount: banded,
     shareOfSegmentBps: floorBps(BigInt(banded), amount) ?? 0,
+    figures: exchangeLinkedFigures(row),
     line: exchangeLinkedLine(row),
   };
 }

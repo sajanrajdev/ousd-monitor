@@ -691,6 +691,25 @@ Height at 1440 went up, as the half-width tiles are now full-width rows, and sta
 
 **Checks added to `verify-output`,** each proved by planting its fault: an explanation in a push-down `<details>` on the main page; a tooltip whose trigger isn't a native, named button or link, or whose panel doesn't follow it, or a linked panel that isn't a disclosure; the footer's independence line and methodology link; "Reconciled" in the footer on a build that didn't pass; and `/reconciliation/`, with its detail, its state and its link back to `/`. The marker checks are replaced by one that fails if a marker returns.
 
+### Second round
+
+The maintainer reviewed the build on localhost and decided these, which replace the first round where they differ.
+
+| # | Decision | As built |
+|---|---|---|
+| 1 | No subtitle question, and clear space under the header | The question line is gone, and the headline sits clear of the header. `verify-output` fails if it returns |
+| 2 | Methodology in the top bar, at the far right | In the header and the footer, both checked on every page |
+| 3 | A way back from the methodology and reconciliation pages | "Back to the dashboard", to `/`, near the top of each, and the site's name in the header links home. Checked on every page but the dashboard |
+| 4 | One clean "On this page" list | The top-level sections in order, with the Definitions items indented under it in compact columns that read down, not a three-column grid of mixed levels |
+| 5 | Notes as numbered badges only | Every card's notes are numbered badges at the right of its last row, beside Table and the as-of date, and each opens its words, then the note in full, in the shared tooltip. No pin is left in a chart, a legend or the grid's caption, so each card has one set of markers, and the chart and legend take the freed width. This supersedes the rule that essential caveats stay visible as text: `verify-output` and the browser checks now require each essential caveat's badge in view and its words in that badge's tooltip |
+| 6 | The exchange-linked legend row like every other | Swatch, "Exchange-linked, inside placed" in the normal text colour, and "$177.5M 19.38%" in the value column |
+| 7 | A two-column footer | Information on the left, actions on the right, each level with its line, stacked in that order at 390 |
+| 8 | Sticky header and filter stay on top | Each card is its own stacking context, so a bar's label can no longer draw over them while scrolling. A card with an open tooltip rises only above the cards after it |
+
+After this round, by `measure-page.mjs` on the same dataset: 359 words at 1440 and 353 at 390, under the ~450 target, and 3,142 px at 1440 and 5,310 px at 390.
+
+**Decided in building it:** pins inside charts (the waterfall's rows, the velocity chart's chains, the weekly bars' corner) went with the legend's, as the review asked for one set of markers per card. A note names its row or chain in words. The footer's status swaps outright rather than keeping the hidden text's space, as nothing follows it.
+
 ## Maintainer actions
 
 | When | Action |

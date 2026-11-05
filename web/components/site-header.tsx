@@ -2,7 +2,8 @@ import Link from "next/link";
 import { SITE_NAME } from "@/lib/site";
 import { Mark } from "./mark";
 
-// Only the mark and the name. The independence line and the methodology link are in the footer.
+// The mark and the name, which link home, and the methodology link at the far right. The independence
+// line is in the footer.
 export function SiteHeader() {
   return (
     <header className="site-header">
@@ -14,6 +15,11 @@ export function SiteHeader() {
           <Mark />
           {SITE_NAME}
         </Link>
+        <nav aria-label="Site" className="site-header__nav">
+          <Link href="/methodology" className="target-link underline underline-offset-4">
+            Methodology
+          </Link>
+        </nav>
       </div>
     </header>
   );

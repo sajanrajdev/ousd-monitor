@@ -30,6 +30,8 @@ import {
   plantedReconciliationMain,
   plantedRowFlight,
   plantedTip,
+  PLANTED_HEADER,
+  plantedBack,
 } from "./planted-first-screen";
 
 const LINE = PLANTED_INDEPENDENCE;
@@ -102,7 +104,7 @@ function page(
   footer = SAMPLE_FOOTER,
 ) {
   return `<!doctype html><html ${attrs}><head><title>${title}</title>${head}</head><body>
-    <header><a href="/">Open USD Monitor</a></header>
+    ${PLANTED_HEADER}
     <aside data-dataset-banner>Sample data. Nothing here is real.</aside>
     <p data-stale-note>${STALE_NOTE}</p>
     ${plantedFlight([["$", "main", null, {}]])}
@@ -150,7 +152,7 @@ function site(
   const dir = tempDir();
   const methodology = overrides.methodology ?? page("<main>Methodology</main>");
   plantFile(dir, "index.html", overrides.main ?? page(MAIN));
-  plantFile(dir, "methodology/index.html", methodology);
+  plantFile(dir, "methodology/index.html", plantedBack(methodology));
   if (overrides.reconciliation !== null) {
     plantFile(
       dir,
@@ -998,9 +1000,12 @@ describe("the first screen", () => {
       "the headline isn't the verdict's sentence",
     ],
     [
-      "no question line",
-      change('<p data-section="question">A question?</p>', ""),
-      "no question line in view",
+      "the question line back above the headline",
+      change(
+        '<div class="verdict-block__head">',
+        '<p data-section="question">A question?</p><div class="verdict-block__head">',
+      ),
+      "the question line is back above the headline",
     ],
     [
       "verdict.text in a details on a dataset that keeps it in view",
@@ -1148,7 +1153,7 @@ describe("the first screen", () => {
     ];
     const expected = { ...sampleExpected, essentialNotes: notes };
 
-    it("passes with each in view", () => {
+    it("passes with each one's badge in view, and its words in the badge's tooltip", () => {
       expect(verifyOutput(mainWith(plantedNotes(notes)), expected)).toEqual([]);
     });
 
@@ -1156,15 +1161,22 @@ describe("the first screen", () => {
       ["gone", () => ""],
       ["in a popover", (note: string) => inDetails(note)],
       ["in a noscript", (note: string) => `<noscript>${note}</noscript>`],
-      ["hidden", (note: string) => note.replace("<p ", "<p hidden ")],
-      ["visually hidden", (note: string) => note.replace("<p ", '<p class="sr-only" ')],
+      ["hidden", (note: string) => note.replace("<li ", "<li hidden ")],
+      ["visually hidden", (note: string) => note.replace("<li ", '<li class="sr-only" ')],
+      ["with its badge hidden", (note: string) => note.replace("<button ", "<button hidden ")],
+      ["with no badge", (note: string) => note.replace(/<button[^>]*>\d+<\/button>/, "")],
+      [
+        "with its words outside the badge's tooltip",
+        (note: string) => note.replace(/(<span data-note-text>.*?<\/span>)(.*?<\/span>)/, "$2$1"),
+      ],
       ["empty", (note: string) => note.replace("A dated warning.", "")],
     ])("fails on a note %s", (_name, hide) => {
       const body =
         plantedNotes([notes[0]]) + hide(plantedNotes([notes[1]])) + plantedNotesFlight(notes);
-      expect(verifyOutput(mainWith(body), expected)).toEqual([
-        "index.html: the velocity-warning note for ethereum isn't in view",
-      ]);
+      // A badge in a details or a noscript, or a trigger gone, fails other checks as well.
+      expect(verifyOutput(mainWith(body), expected)).toContain(
+        "index.html: the velocity-warning note for ethereum has no badge in view with its words",
+      );
     });
 
     it("a warning on another chain moves the note it asks for", () => {
@@ -1174,7 +1186,9 @@ describe("the first screen", () => {
         ...sampleExpected,
         essentialNotes: moved,
       });
-      expect(problems).toEqual(["index.html: the velocity-warning note for base isn't in view"]);
+      expect(problems).toEqual([
+        "index.html: the velocity-warning note for base has no badge in view with its words",
+      ]);
     });
 
     it("fails on a note that keeps its kind and loses its words", () => {
@@ -1185,10 +1199,10 @@ describe("the first screen", () => {
       ]);
     });
 
-    it("reads a note whole, across its date, its marker and its link", () => {
+    it("reads a note whole, across its date and its link", () => {
       const text = "Flows count from 3 Nov 2026 UTC, here.";
-      const split = `<p data-note="day-0-scope"><span class="status-chip" data-kind="fact">F</span>
-        Flows count from <!-- -->3 Nov 2026 UTC<!-- -->, <em>here</em>. <a href="/methodology/#x">How</a></p>`;
+      const split = `<ol data-pinned-notes><li data-note="day-0-scope"><span class="tip" data-tip><button class="tip__trigger tip__badge" aria-expanded="false" aria-controls="split">1</button><span class="tip__panel" id="split"><span data-note-text>
+        Flows count from <!-- -->3 Nov 2026 UTC<!-- -->, <em>here</em>.</span> <a href="/methodology/#x">How</a></span></span></li></ol>`;
       expect(
         verifyOutput(mainWith(split + plantedNotesFlight([{ kind: "day-0-scope", text }])), {
           ...sampleExpected,
@@ -1214,9 +1228,9 @@ describe("the first screen", () => {
       ])("fails on one instance %s, though the other stays", (_name, hide) => {
         const body =
           plantedNotes([both[0]]) + hide(plantedNotes([both[1]])) + plantedNotesFlight(both);
-        expect(verifyOutput(mainWith(body), twice)).toEqual([
+        expect(verifyOutput(mainWith(body), twice)).toContain(
           'index.html: the wallets-not-people note doesn\'t say "Wallets."',
-        ]);
+        );
       });
     });
   });
@@ -1988,7 +2002,11 @@ describe("exchange names on the main page", () => {
     const floor = { kind: "exchange-floor", text: "Exchange venues are a floor.", exact: true };
     const withNotes = { ...named, essentialNotes: [floor] };
     const NOTES = plantedNotes([floor]);
-    const floorProps = (children: unknown) => el("p", { "data-note": floor.kind, children });
+    const floorProps = (children: unknown) =>
+      el("li", {
+        "data-note": floor.kind,
+        children: el("span", { "data-note-text": true, children }),
+      });
     const flight = (tree: unknown) => `1:${JSON.stringify(tree)}\n`;
     const main = page(`${MAIN}${BOTH}${NOTES}`);
     const goodRows = () => rows.map(plantedRowFlight);
@@ -2214,15 +2232,15 @@ describe("exchange names on the main page", () => {
   });
 });
 
-describe("a pinned note", () => {
-  it("reads a note's words without its pin's number, and only a number", () => {
+describe("a note's badge", () => {
+  it("reads a note's words from its badge's tooltip, and takes only a number for the badge", () => {
     const floor = { kind: "exchange-floor", text: "A floor.", exact: true };
     const against = { ...sampleExpected, essentialNotes: [floor] };
-    const note = (pin: string) =>
-      `<ol data-pinned-notes><li data-note="exchange-floor"><span class="pin">${pin}</span><p>A floor.</p></li></ol>${plantedNotesFlight([floor])}`;
+    const note = (badge: string) =>
+      plantedNotes([floor]).replace(/(tip__badge"[^>]*>)1</, `$1${badge}<`);
     expect(verifyOutput(mainWith(note("2")), against)).toEqual([]);
     expect(verifyOutput(mainWith(note("Added")), against)).toContain(
-      'index.html: the exchange-floor note doesn\'t say "A floor."',
+      "index.html: the exchange-floor note has no badge in view with its words",
     );
   });
 });

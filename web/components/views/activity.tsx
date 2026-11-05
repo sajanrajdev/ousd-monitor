@@ -2,7 +2,7 @@ import { ChainPanels } from "@/components/chain-panels";
 import { ChartCard } from "@/components/chart-card";
 import { HairlineTable } from "@/components/hairline-table";
 import type { PinnedNote } from "@/components/pinned-notes";
-import { WaterfallChart, WeeklyBars, type StepPins } from "@/components/views/activity-charts";
+import { WaterfallChart, WeeklyBars } from "@/components/views/activity-charts";
 import {
   PERIOD_COLUMNS,
   scopeWords,
@@ -29,13 +29,6 @@ export type ActivityViewProps = {
 const SOURCE = "Chain data and public labels";
 
 const pinnedNote = ({ kind, text }: ActivityNote): PinnedNote => ({ kind, text });
-
-// Each note's number on the row its pin sits on, by its place in the list, as PinnedNotes counts.
-function stepPins(notes: ActivityNote[]): StepPins {
-  return Object.fromEntries(
-    notes.flatMap((note, index) => (note.step ? [[note.step, index + 1]] : [])),
-  );
-}
 
 // The notes in full, for the tooltip. Nothing here is the only copy of a caveat.
 function FullNotes({ notes }: { notes: Record<string, string> }) {
@@ -80,7 +73,7 @@ function WaterfallCard({ panel, state }: { panel: WaterfallPanel; state: Dataset
         />
       }
     >
-      <WaterfallChart waterfall={panel.waterfall} pins={stepPins(panel.notes)} />
+      <WaterfallChart waterfall={panel.waterfall} />
     </ChartCard>
   );
 }
@@ -107,7 +100,7 @@ function WeeklyCard({ panel, state }: { panel: WeeklyPanel; state: DatasetState 
         rows: panel.table.rows,
       }}
     >
-      <WeeklyBars weeks={panel.weeks} pins={panel.notes.map((_, index) => index + 1)} />
+      <WeeklyBars weeks={panel.weeks} />
     </ChartCard>
   );
 }

@@ -5,12 +5,10 @@ import {
   type WaterfallStep,
   type Week,
 } from "@/lib/takeaways/activity";
-import { PinMark } from "@/components/pinned-notes";
 import { formatCompact, formatUtcDate, toChartNumber, UNKNOWN_TEXT } from "@/lib/format";
 
 // A pin's number by the waterfall row it sits on, or for the weekly bars, in note order. The card
 // works these out from its notes, so a pin can't point at another note.
-export type StepPins = Partial<Record<WaterfallStep["key"], number>>;
 
 // Hatching as well as colour marks what was taken out of headline.
 const HATCH =
@@ -31,13 +29,7 @@ function barStyle(kind: WaterfallStep["kind"], left: number, width: number) {
 // bar still has a readable label. The card's table carries the same numbers for assistive tech.
 // The card reserves a fixed chart height, and twelve rows are taller than that on a phone, so a
 // chart that sets data-flow lets its area grow to fit (in globals.css).
-export function WaterfallChart({
-  waterfall,
-  pins = {},
-}: {
-  waterfall: Waterfall | null;
-  pins?: StepPins;
-}) {
+export function WaterfallChart({ waterfall }: { waterfall: Waterfall | null }) {
   if (!waterfall) return <p className="p-4">{UNKNOWN_TEXT}</p>;
   return (
     <>
@@ -52,14 +44,7 @@ export function WaterfallChart({
               style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)" }}
             >
               <span className="flex flex-wrap justify-between gap-x-2">
-                <span>
-                  {step.label}
-                  {pins[step.key] ? (
-                    <span className="ml-1 inline-block align-middle">
-                      <PinMark number={pins[step.key]!} />
-                    </span>
-                  ) : null}
-                </span>
+                <span>{step.label}</span>
                 <span className="tabular-nums" style={{ fontWeight: 550 }}>
                   {stepFigure(step)}
                 </span>
@@ -97,21 +82,14 @@ function WeekFigure({ amount }: { amount: string }) {
   );
 }
 
-// Bars scale to the panel's own largest week. Its pins sit in the corner, for notes about every bar.
-export function WeeklyBars({ weeks, pins = [] }: { weeks: Week[]; pins?: number[] }) {
+// Bars scale to the panel's own largest week.
+export function WeeklyBars({ weeks }: { weeks: Week[] }) {
   if (weeks.length === 0) return <p className="p-4">{UNKNOWN_TEXT}</p>;
   const values = weeks.map((week) => toChartNumber(week.everyday) ?? 0);
   const max = Math.max(...values, 1);
   return (
     <>
       <figure data-flow className="m-0 p-4">
-        {pins.length > 0 ? (
-          <div className="mb-1 flex gap-1" data-chart-pins>
-            {pins.map((number) => (
-              <PinMark key={number} number={number} />
-            ))}
-          </div>
-        ) : null}
         <div className="flex items-end gap-1" style={{ height: "10rem" }}>
           {weeks.map((week, index) => (
             <div

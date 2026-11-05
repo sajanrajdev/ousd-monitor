@@ -19,7 +19,6 @@ import {
   seriesProps,
   tooltipProps,
 } from "@/components/chart-theme";
-import { PinMark } from "@/components/pinned-notes";
 import { toChartNumber, UNKNOWN_TEXT } from "@/lib/format";
 import {
   directLabel,
@@ -37,12 +36,10 @@ const widthOf = (bps: number | null) => `${(bps ?? 0) / 100}%`;
 export function SupplyBar({
   row,
   segments,
-  pins,
   bracket = true,
 }: {
   row: BarRow;
   segments: DrawnSegment[];
-  pins: Record<string, number>;
   // Whether it marks where circulating starts. Once is enough where bars stack.
   bracket?: boolean;
 }) {
@@ -85,11 +82,10 @@ export function SupplyBar({
               {label ? (
                 <span
                   data-testid="part-label"
-                  className="supply-bar__label z-10"
+                  className="supply-bar__label"
                   style={{ background: style.background }}
                 >
                   <span data-direct-label>{label}</span>
-                  {pins[segment.key] ? <PinMark number={pins[segment.key]} /> : null}
                 </span>
               ) : null}
               {segment.band && BigInt(segment.band.amount) > 0n ? (

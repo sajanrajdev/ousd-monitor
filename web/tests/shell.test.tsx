@@ -12,7 +12,7 @@ import { at, copySample } from "./dataset-helpers";
 const { state } = loadDataset(at(copySample("complete")));
 
 describe("the site shell", () => {
-  it("shows the exact independence line in the footer, and keeps the header to the name", () => {
+  it("shows the exact independence line in the footer, and the name and Methodology in the header", () => {
     expect(INDEPENDENCE_LINE).toBe("Independent. Not affiliated with Open Standard or Bridge.");
     render(
       <>
@@ -24,7 +24,15 @@ describe("the site shell", () => {
     const header = screen.getByRole("banner");
     const footer = screen.getByRole("contentinfo");
     expect(header.textContent).not.toContain(INDEPENDENCE_LINE);
-    expect(within(header).queryByRole("link", { name: "Methodology" })).toBeNull();
+    // Methodology is back in the header, at its far right, and stays in the footer too.
+    expect(within(header).getByRole("link", { name: "Methodology" }).getAttribute("href")).toMatch(
+      /^\/methodology/,
+    );
+    expect(
+      within(header)
+        .getByRole("link", { name: /Open USD Monitor/ })
+        .getAttribute("href"),
+    ).toBe("/");
     expect(within(footer).getByText(INDEPENDENCE_LINE)).toBeTruthy();
     expect(within(footer).getByText(INDEPENDENCE_LINE).closest("details, [data-tip]")).toBeNull();
     expect(within(footer).getByRole("link", { name: "Methodology" }).getAttribute("href")).toMatch(
@@ -39,7 +47,7 @@ describe("the site shell", () => {
     render(<SiteFooter state={state} />);
     const footer = screen.getByRole("contentinfo");
 
-    expect(within(footer).getByText("Not financial advice.")).toBeTruthy();
+    expect(within(footer).getByText("Not financial advice. Not an attestation.")).toBeTruthy();
     expect(footer.textContent).toContain("Not an attestation");
     expect(
       within(footer)

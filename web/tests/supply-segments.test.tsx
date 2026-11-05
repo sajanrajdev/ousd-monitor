@@ -95,7 +95,12 @@ describe("supplySegments", () => {
     const placed = segments.find((segment) => segment.key === "placed_supply")!;
     expect(placed.amount).toBe(ethereum.placed_supply);
     expect(placed.band!.amount).toBe(ethereum.placed_exchange_linked);
-    expect(placed.band!.line).toContain("of supply");
+    expect(placed.band!.line).toMatch(
+      /^Exchange-linked, inside placed \$[\d.]+[KMB]? \d+\.\d{2}%$/,
+    );
+    expect(placed.band!.line).toBe(
+      `Exchange-linked, inside placed ${placed.band!.figures.amount} ${placed.band!.figures.share}`,
+    );
     expect(segments.map((segment) => segment.key)).not.toContain("placed_exchange_linked");
     expect(segments.filter((segment) => segment.band)).toHaveLength(1);
   });
@@ -115,9 +120,7 @@ describe("supplySegments", () => {
       expect(segmentLabel(segment)).not.toContain("at least");
     }
     const row: BarRow = { key: "ethereum", journey: ethereum };
-    const { container } = render(
-      <SupplyBar row={row} segments={supplySegments(ethereum)} pins={{}} />,
-    );
+    const { container } = render(<SupplyBar row={row} segments={supplySegments(ethereum)} />);
     expect(container.textContent).not.toContain("at least");
   });
 

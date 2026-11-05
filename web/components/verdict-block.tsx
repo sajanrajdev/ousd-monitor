@@ -49,7 +49,6 @@ export function VerdictBlock({ verdict, state }: VerdictBlockProps) {
   const textVisible = verdictTextVisible(verdict, state);
   return (
     <section className="verdict-block" data-section="verdict">
-      <p data-section="question">Is Open USD (OUSD) supply turning into money that moves?</p>
       <div className="verdict-block__head">
         <h1>{verdictSentence(verdict)}</h1>
         <TextTip text="How we read this" interactive>

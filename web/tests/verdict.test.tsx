@@ -169,13 +169,13 @@ describe("the verdict block", () => {
     },
   );
 
-  it("keeps the question line above the sentence", () => {
+  it("has no question line above the sentence, as the second review removed it", () => {
     const { container } = renderBlock(sample(), () => {});
-    const question = container.querySelector('[data-section="question"]')!;
+    expect(container.querySelector('[data-section="question"]')).toBeNull();
     const heading = screen.getByRole("heading", { level: 1 });
-    expect(
-      question.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(heading.closest('[data-section="verdict"]')!.firstElementChild!.contains(heading)).toBe(
+      true,
+    );
   });
 
   it("reads true for moving or mixed with placed just under half and almost no everyday volume", () => {

@@ -22,7 +22,7 @@ describe("pins and notes", () => {
     const inChart = [...screen.getByTestId("graphic").querySelectorAll(".pin")];
     expect(inChart.map((pin) => pin.textContent)).toEqual(["2", "1"]);
     const numberOf = (kind: string) =>
-      container.querySelector(`[data-pinned-notes] [data-note="${kind}"] .pin`)!.textContent;
+      container.querySelector(`[data-pinned-notes] [data-note="${kind}"] .tip__badge`)!.textContent;
     expect(numberOf("velocity-warning")).toBe(inChart[1].textContent);
     expect(numberOf("placed")).toBe(inChart[0].textContent);
   });
@@ -51,13 +51,20 @@ describe("pins and notes", () => {
     expect(pinNumber(two, "velocity-warning", "base")).toBe(2);
   });
 
-  it("is an ordered list with the note's words outside any graphic", () => {
+  it("is an ordered list of numbered badges outside any graphic, each with its words as a tooltip", () => {
     render(<PinnedNotes notes={notes} />);
-    const list = screen.getByRole("list");
+    const list = screen.getByRole("list", { name: "Notes" });
     expect(list.tagName).toBe("OL");
     const items = within(list).getAllByRole("listitem");
-    expect(items[0].textContent).toContain("On Ethereum, a one-off jump.");
     expect(items[0].closest("[aria-hidden]")).toBeNull();
+    const badge = within(items[0]).getByRole("button", { name: "Note 1" });
+    expect(badge.textContent).toBe("1");
+    expect(badge.className).toContain("tip__badge");
+    const panel = document.getElementById(badge.getAttribute("aria-describedby")!)!;
+    expect(panel.getAttribute("role")).toBe("tooltip");
+    expect(panel.querySelector("[data-note-text]")!.textContent).toBe(
+      "On Ethereum, a one-off jump.",
+    );
   });
 
   it("marks each note so a check can find it by what it is and its chain", () => {
@@ -67,21 +74,40 @@ describe("pins and notes", () => {
     expect(container.querySelector('[data-note="placed"]')!.hasAttribute("data-chain")).toBe(false);
   });
 
-  it("keeps a note's short words in view, with the note in full as a tooltip on them", () => {
+  it("puts a note's short words and then the note in full in its badge's tooltip", () => {
     const { container } = render(
       <PinnedNotes
         notes={[{ kind: "day-0", text: "Short words.", tip: "The words in full." }, notes[1]]}
       />,
     );
     const note = container.querySelector('[data-note="day-0"]')!;
-    const trigger = note.querySelector(".tip__trigger")!;
-    expect(trigger.textContent).toBe("Short words.");
-    expect(trigger.closest(".tip__panel")).toBeNull();
-    expect(document.getElementById(trigger.getAttribute("aria-describedby")!)!.textContent).toBe(
-      "The words in full.",
-    );
-    expect(container.querySelector('[data-note="placed"] [data-tip]')).toBeNull();
+    const badge = note.querySelector(".tip__badge")!;
+    expect(badge.textContent).toBe("1");
+    const panel = document.getElementById(badge.getAttribute("aria-describedby")!)!;
+    expect(panel.querySelector("[data-note-text]")!.textContent).toBe("Short words.");
+    expect(panel.querySelector("[data-note-full]")!.textContent).toBe("The words in full.");
+    expect(container.querySelector('[data-note="placed"] [data-note-full]')).toBeNull();
     expect(container.querySelector(".status-chip")).toBeNull();
+  });
+
+  it("makes a badge whose note holds a link a disclosure", () => {
+    const { container } = render(
+      <PinnedNotes
+        notes={[
+          {
+            kind: "exchange-floor",
+            text: "A floor.",
+            tip: <a href="/methodology/#x">How</a>,
+            interactive: true,
+          },
+        ]}
+      />,
+    );
+    const badge = container.querySelector(".tip__badge")!;
+    expect(badge.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      document.getElementById(badge.getAttribute("aria-controls")!)!.getAttribute("role"),
+    ).toBeNull();
   });
 
   it("never makes a pin focusable", () => {

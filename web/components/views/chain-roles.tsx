@@ -1,5 +1,5 @@
 import { ChartCard } from "@/components/chart-card";
-import { PinMark, type PinnedNote } from "@/components/pinned-notes";
+import type { PinnedNote } from "@/components/pinned-notes";
 import { chainGrid } from "@/lib/chain-views";
 import { SERIES_COLORS } from "@/components/chart-theme";
 import { dayRange } from "@/lib/aggregate";
@@ -42,14 +42,14 @@ const LEAD_MARK = "●";
 // Measures as rows and chains as columns. A real table, with words for assistive tech, so it is the
 // card's content rather than a hidden graphic. Each cell's bar scales to its row's largest amount,
 // and prints nothing the dataset doesn't give.
-function ChainGrid({ rows, pin }: { rows: ChainRoleRow[]; pin: number }) {
+function ChainGrid({ rows }: { rows: ChainRoleRow[] }) {
   const grid = chainGrid(rows);
   const ordered = orderedChains(rows);
   return (
     <table className="chain-grid" data-chain-grid>
       <caption>
         <span aria-hidden="true">{LEAD_MARK}</span>
-        <span className="sr-only">The marked chain</span> leads. <PinMark number={pin} />
+        <span className="sr-only">The marked chain</span> leads.
       </caption>
       <thead>
         <tr>
@@ -217,7 +217,7 @@ export function ChainRolesView({
         {rows.length === 0 ? (
           <p className="p-4">{UNKNOWN_TEXT}</p>
         ) : (
-          <ChainGrid rows={chain_roles} pin={1} />
+          <ChainGrid rows={chain_roles} />
         )}
       </ChartCard>
     </section>

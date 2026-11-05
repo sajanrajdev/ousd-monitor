@@ -2,7 +2,7 @@ import { ChainPanels } from "@/components/chain-panels";
 import { ChartCard } from "@/components/chart-card";
 import { ExchangeRows } from "@/components/exchange-rows";
 import { HairlineTable } from "@/components/hairline-table";
-import { PinMark, type PinnedNote } from "@/components/pinned-notes";
+import type { PinnedNote } from "@/components/pinned-notes";
 import { dayRange } from "@/lib/aggregate";
 import type { ChainOption } from "@/lib/chain-scope";
 import type { ActivityRow, Definitions, DatasetState, JourneyRow, KpiRow } from "@/lib/dataset";
@@ -66,17 +66,7 @@ function pinnedNote({ kind, chain, text, tip, link }: SegmentNote): PinnedNote {
   };
 }
 
-// Each note's number, by the segment it belongs to. A number is the note's place in the list, as in
-// PinnedNotes, so the legend and bar can't point at another note.
-function pinsOf(notes: SegmentNote[]): Record<string, number[]> {
-  const pins: Record<string, number[]> = {};
-  notes.forEach(({ segment }, index) => {
-    if (segment) pins[segment] = [...(pins[segment] ?? []), index + 1];
-  });
-  return pins;
-}
-
-function LegendRow({ segment, pins }: { segment: SupplySegment; pins: number[] }) {
+function LegendRow({ segment }: { segment: SupplySegment }) {
   const { style } = segment;
   return (
     <li className="chart-legend__row" data-segment={segment.key}>
@@ -90,9 +80,6 @@ function LegendRow({ segment, pins }: { segment: SupplySegment; pins: number[] }
       />
       <span className="chart-legend__label">
         <span data-segment-label>{segmentLabel(segment)}</span>
-        {pins.map((number) => (
-          <PinMark key={number} number={number} />
-        ))}
       </span>
       <span className="chart-legend__values">
         <span data-segment-amount>
@@ -112,27 +99,30 @@ function LegendRow({ segment, pins }: { segment: SupplySegment; pins: number[] }
 // Every segment on every panel, zero included, so the legend doesn't jump between filter options. The
 // band's line says what it marks inside its segment, and carries data-exchange-linked only when
 // there's a band to mark.
-function SupplyLegend({ panel, pins }: { panel: SupplyPanel; pins: Record<string, number[]> }) {
+function SupplyLegend({ panel }: { panel: SupplyPanel }) {
   const key = panel.bar?.key;
   return (
     <ul className="chart-legend" data-supply-legend>
       {panel.segments.flatMap((segment) => [
-        <LegendRow key={segment.key} segment={segment} pins={pins[segment.key] ?? []} />,
+        <LegendRow key={segment.key} segment={segment} />,
         ...(segment.band
           ? [
-              <li key={`${segment.key}:band`} className="chart-legend__row" data-band={segment.key}>
+              <li
+                key={`${segment.key}:band`}
+                className="chart-legend__row"
+                data-band={segment.key}
+                data-testid="exchange-linked"
+                data-exchange-linked={BigInt(segment.band.amount) > 0n ? key : undefined}
+              >
                 <span
                   aria-hidden="true"
                   className="chart-legend__swatch"
                   data-outlined=""
                   style={{ background: segment.band.background }}
                 />
-                <span
-                  className="chart-legend__band"
-                  data-testid="exchange-linked"
-                  data-exchange-linked={BigInt(segment.band.amount) > 0n ? key : undefined}
-                >
-                  {segment.band.line}
+                <span className="chart-legend__label">{segment.band.label}</span>{" "}
+                <span className="chart-legend__values">
+                  {segment.band.figures.amount} {segment.band.figures.share}
                 </span>
               </li>,
             ]
@@ -142,15 +132,12 @@ function SupplyLegend({ panel, pins }: { panel: SupplyPanel; pins: Record<string
   );
 }
 
-function SupplyStats({ panel, walletPin }: { panel: SupplyPanel; walletPin: number }) {
+function SupplyStats({ panel }: { panel: SupplyPanel }) {
   return (
     <dl className="chart-stats">
       {panel.stats.map(({ key, label, value }) => (
         <div key={key} data-stat={key}>
-          <dt>
-            {label}
-            {key === "active-wallets" ? <PinMark number={walletPin} /> : null}
-          </dt>
+          <dt>{label}</dt>
           <dd data-stat-value>{value}</dd>
         </div>
       ))}
@@ -223,7 +210,6 @@ function SupplyRow({ panel }: { panel: SupplyPanel }) {
         <SupplyBar
           row={panel.bar}
           segments={panel.segments.map(withoutEntities)}
-          pins={{}}
           bracket={panel.option.value === "all"}
         />
       ) : (
@@ -249,8 +235,6 @@ function SupplyCard({
   const [panel] = panels;
   const { chains, rows, kpis } = panel;
   const asOf = dayRange(rows.map((row) => row.day)) ?? definitions.journey_first_day;
-  const pins = pinsOf(panel.notes);
-  const walletPin = panel.notes.findIndex((note) => note.kind === "wallets-not-people") + 1;
   const entities = panel.segments.flatMap((segment) => segment.entities ?? []);
   return (
     <ChartCard
@@ -270,8 +254,8 @@ function SupplyCard({
       beside={
         panel.bar ? (
           <>
-            <SupplyLegend panel={panel} pins={pins} />
-            <SupplyStats panel={panel} walletPin={walletPin} />
+            <SupplyLegend panel={panel} />
+            <SupplyStats panel={panel} />
           </>
         ) : null
       }
@@ -303,7 +287,6 @@ function SupplyCard({
       }
     >
       <div className="supply-rows" data-supply-rows>
-        {/* The legend carries each segment's pins, so the bars don't repeat them. */}
         {panels.map((row) => (
           <SupplyRow key={row.option.value} panel={row} />
         ))}

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChainRolesView } from "@/components/views/chain-roles";
 import { getDataset } from "@/lib/dataset";
 import { UNKNOWN_TEXT } from "@/lib/format";
+import { NO_SWAPS_NOTE } from "@/lib/takeaways/caveats";
 
 function mount(edit?: (props: Parameters<typeof ChainRolesView>[0]) => void) {
   vi.stubEnv("OUSD_DATASET_DIR", "fixtures/dataset/complete");
@@ -243,12 +244,13 @@ describe("the chain roles view", () => {
       expect(grid(same.container).querySelector('[data-grid-measure="as-of"]')).toBeNull();
     });
 
-    it("pins the no-swaps note to the grid, in view", () => {
+    it("gives the no-swaps note a badge with its words in the tooltip, and no pin in the grid", () => {
       const { container } = mount();
-      expect(grid(container).querySelector("caption .pin")!.textContent).toBe("1");
+      expect(grid(container).querySelector(".pin")).toBeNull();
       const note = container.querySelector('[data-pinned-notes] [data-note="no-swaps"]')!;
       expect(note.closest("details, noscript")).toBeNull();
-      expect(note.querySelector(".pin")!.textContent).toBe("1");
+      expect(note.querySelector(".tip__badge")!.textContent).toBe("1");
+      expect(note.querySelector(".tip__panel [data-note-text]")!.textContent).toBe(NO_SWAPS_NOTE);
     });
 
     it("never calls a chain's role settlement", () => {

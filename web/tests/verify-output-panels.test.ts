@@ -8,6 +8,8 @@ import {
   plantedFooter,
   plantedRealMain,
   plantedReconciliationMain,
+  PLANTED_HEADER,
+  plantedBack,
 } from "./planted-first-screen";
 
 // In a file of their own, so a worker of their own: each test parses a whole planted main page several
@@ -21,7 +23,7 @@ const RECONCILED_TRUST =
 function site({ main, methodology }: { main: string; methodology: string }) {
   const dir = tempDir();
   plantFile(dir, "index.html", main);
-  plantFile(dir, "methodology/index.html", methodology);
+  plantFile(dir, "methodology/index.html", plantedBack(methodology));
   plantFile(
     dir,
     "reconciliation/index.html",
@@ -40,7 +42,7 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
   const main = plantedRealMain(expected, TRUST);
   const realPage = (body: string) =>
     `<!doctype html><html data-dataset-kind="real" data-dataset-version="${expected.version}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
-    <header><a href="/">Open USD Monitor</a></header><p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
+    ${PLANTED_HEADER}<p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
     ${plantedFooter(false, { fresh: null, stale: TRUST })}</body></html>`;
   const check = (body: string, against = expected) =>
     verifyOutput(
@@ -242,7 +244,7 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
 
   it("refuses a band line that isn't the dataset's", () => {
     const wrong = inCard((html) =>
-      html.replace(/(<li data-band="placed_supply"><span[^>]*>)[^<]*/, "$1Exchange-linked: lots"),
+      html.replace(/(<li data-band="placed_supply"[^>]*>)[^<]*/, "$1Exchange-linked: lots"),
     );
     expect(cardFaults(wrong)).toContain(`${CARD}: its placed_supply band line isn't the dataset's`);
     expect(check(wrong)).toContain(
@@ -293,7 +295,7 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     );
   });
 
-  it("refuses a caveat lost, hidden, reworded, moved into its tooltip, or for another chain", () => {
+  it("refuses a caveat lost, hidden, reworded, without its badge, or for another chain", () => {
     const lost = inCard((html) => html.replace(/<li data-note="exchange-floor">.*?<\/li>/, ""));
     expect(cardFaults(lost)).toEqual(
       expect.arrayContaining([expect.stringContaining("its notes are")]),
@@ -305,36 +307,32 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
       ),
     );
     expect(cardFaults(folded)).toContain(
-      `${CARD}: its exchange-floor note doesn't keep its words in view`,
+      `${CARD}: its exchange-floor note doesn't keep its words in its badge's tooltip`,
     );
     const reworded = inCard((html) =>
       html.replace("Exchange venues are a floor.", "Exchange venues are about right."),
     );
     expect(cardFaults(reworded)).toContain(
-      `${CARD}: its exchange-floor note doesn't keep its words in view`,
+      `${CARD}: its exchange-floor note doesn't keep its words in its badge's tooltip`,
     );
-    // The short words moved into the tooltip leave nothing in view, which is the caveat lost.
-    const tucked = inCard((html) =>
-      html.replace(
-        /(<li data-note="placed">.*?<button[^>]*>)([^<]*)(<\/button><span class="tip__panel"[^>]*>)/,
-        "$1$3$2 ",
-      ),
+    // Words with no badge to open them can't be reached, which is the caveat lost.
+    const unbadged = inCard((html) =>
+      html.replace(/(<li data-note="placed">.*?)<button[^>]*>\d+<\/button>/, "$1"),
     );
-    expect(tucked).not.toBe(main);
-    expect(cardFaults(tucked)).toContain(`${CARD}: its placed note doesn't keep its words in view`);
-    // And the note in full, in its tooltip, keeps its words too.
+    expect(unbadged).not.toBe(main);
+    expect(cardFaults(unbadged)).toContain(
+      `${CARD}: its placed note doesn't keep its words in its badge's tooltip`,
+    );
+    // And the note in full, in the same tooltip, keeps its words too.
     const full = inCard((html) =>
-      html.replace(
-        /(<li data-note="placed">.*?<span class="tip__panel"[^>]*>)[^<]*/,
-        "$1Placed is fine.",
-      ),
+      html.replace(/(<li data-note="placed">.*?<span data-note-full>)[^<]*/, "$1Placed is fine."),
     );
     expect(full).not.toBe(main);
     expect(cardFaults(full)).toContain(`${CARD}: its placed note has lost its words in full`);
     const other = inCard((html) =>
       html.replace(
         '<li data-note="placed">',
-        '<li data-note="exchange-coverage" data-chain="base"><span class="pin">9</span><p>Base: no wallet.</p></li><li data-note="placed">',
+        '<li data-note="exchange-coverage" data-chain="base"><button class="tip__badge">9</button></li><li data-note="placed">',
       ),
     );
     expect(cardFaults(other)).toEqual(
@@ -342,21 +340,25 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     );
   });
 
-  it("refuses a note with the wrong number, and a legend pin that points elsewhere", () => {
+  it("refuses a badge with the wrong number, and a pin put back in the legend", () => {
     const note = inCard((html) =>
-      html.replace(
-        '<span class="pin" aria-hidden="true">1</span>',
-        '<span class="pin" aria-hidden="true">7</span>',
-      ),
+      html.replace(/(class="tip__trigger tip__badge"[^>]*>)1</, "$17<"),
     );
+    expect(note).not.toBe(main);
     expect(cardFaults(note)).toEqual(
       expect.arrayContaining([expect.stringContaining("has the wrong number")]),
     );
     const pin = inCard((html) =>
-      html.replace(/(data-segment="placed_supply">.*?<span class="pin">)\d+/, "$14"),
+      html.replace(
+        /(data-segment="placed_supply"><span data-segment-label>[^<]*<\/span>)/,
+        '$1<span class="pin">2</span>',
+      ),
     );
+    expect(pin).not.toBe(main);
     expect(cardFaults(pin)).toEqual(
-      expect.arrayContaining([expect.stringContaining("placed_supply legend row points at notes")]),
+      expect.arrayContaining([
+        expect.stringContaining("a pin is in its chart or legend as well as its badges"),
+      ]),
     );
   });
 

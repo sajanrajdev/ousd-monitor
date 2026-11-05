@@ -43,9 +43,8 @@ describe("the main page", () => {
       .map((element) => element.getAttribute("data-section"))
       .filter((name) => name !== "question");
     expect(order).toEqual(SECTIONS);
-    const question = container.querySelector('[data-section="question"]')!;
-    expect(question.textContent).toBe("Is Open USD (OUSD) supply turning into money that moves?");
-    expect(container.querySelector('[data-section="verdict"]')!.contains(question)).toBe(true);
+    // The second review removed the question line, to give the header room.
+    expect(container.querySelector('[data-section="question"]')).toBeNull();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
       "At least half of Open USD (OUSD) supply is sitting still.",
     );

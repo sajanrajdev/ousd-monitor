@@ -110,9 +110,18 @@ function shareBps(part: string, total: string): number | null {
 
 export type BandFigures = { total_supply: string; placed_exchange_linked: string };
 
+// The band's legend row, set like every other row: its figure and its share of supply.
+export function exchangeLinkedFigures(row: BandFigures): { amount: string; share: string } {
+  return {
+    amount: formatCompact(row.placed_exchange_linked),
+    share: formatBps(shareBps(row.placed_exchange_linked, row.total_supply)),
+  };
+}
+
+// The row's words as a reader takes them in: its label, then its figure and share.
 export function exchangeLinkedLine(row: BandFigures): string {
-  const share = formatBps(shareBps(row.placed_exchange_linked, row.total_supply));
-  return `${EXCHANGE_LINKED_LABEL}: ${formatCompact(row.placed_exchange_linked)} (${share} of supply)`;
+  const { amount, share } = exchangeLinkedFigures(row);
+  return `${EXCHANGE_LINKED_LABEL} ${amount} ${share}`;
 }
 
 // The band as the supply card shows it: across all chains, then per chain, on each one's newest day.

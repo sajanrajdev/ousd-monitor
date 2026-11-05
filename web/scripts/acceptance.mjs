@@ -88,9 +88,8 @@ async function loadHarness() {
     server: { middlewareMode: true, hmr: false, ws: false, watch: null },
   });
   const load = (path) => vite.ssrLoadModule(path);
-  const [{ ChartCard }, { Pin }, verdict] = await Promise.all([
+  const [{ ChartCard }, verdict] = await Promise.all([
     load("/components/chart-card.tsx"),
-    load("/components/pinned-notes.tsx"),
     load("/lib/verdict.ts"),
   ]);
   const card = (name, props) => {
@@ -129,7 +128,7 @@ async function loadHarness() {
         },
         ...props,
       },
-      h(Pin, { notes, kind: "harness" }),
+      h("div", { "data-harness-chart": "" }, `A made-up chart of ${name}`),
     );
   };
   const markup = renderToStaticMarkup(
@@ -360,7 +359,6 @@ async function checkInView(page, where) {
     if (root.dataset.frame) need("the banner", document.querySelector("[data-dataset-banner]"));
     const verdict = document.querySelector('[data-section="verdict"]');
     if (verdict) {
-      need("the question line", verdict.querySelector('[data-section="question"]'));
       need("the headline", verdict.querySelector("h1"));
       const text = verdict.querySelector("[data-verdict-text]");
       if (text?.closest(".tip__panel")) {
@@ -415,11 +413,13 @@ async function checkInView(page, where) {
       if (root.dataset.frame) {
         need("a card's frame word", card.querySelector(".chart-card__frame-word"));
       }
+      // A note is its numbered badge on the card's last row. Its words are the badge's tooltip,
+      // which the floating check opens.
       for (const item of card.querySelectorAll("[data-pinned-notes] > li")) {
-        need("a pinned note", item);
-        need("a note's number", item.querySelector(".pin"));
-        // A note's words are its trigger when it has a tooltip, and stay in view either way.
-        need("a note's words", item.querySelector(":scope > p > .tip > .tip__trigger") ?? item);
+        need("a note's badge", item.querySelector(".tip__badge"));
+      }
+      if (card.querySelector(".chart-area .pin, .chart-legend .pin")) {
+        lacking.push("one set of markers: a pin is in a chart or legend");
       }
     }
     window.scrollTo({ left: startX, top: startY, behavior: "instant" });
@@ -439,6 +439,7 @@ async function checkFocusRings(page, where) {
   for (const selector of [
     ".tip__icon",
     ".tip__words",
+    ".tip__badge",
     ".data-toggle > summary",
     ".chain-filter input:checked",
     "header a",
@@ -556,7 +557,7 @@ async function checkOneAtATime(page, where, js) {
 async function checkFloating(page, where, js) {
   const results = await page.evaluate(() => {
     const WATCHED =
-      ".chart-area, .hairline-table, .pinned-notes > li, .chart-card__meta, .chart-card h2, .chart-card h3, .data-toggle > summary, h1, [data-section='question'], .freshness-text, [data-verdict-text], [data-kpi-value], [data-section='kpi-row'] dt, [data-section='kpi-row'] > p, footer";
+      ".chart-area, .hairline-table, .note-badges > li, .chart-card__meta, .chart-card h2, .chart-card h3, .data-toggle > summary, h1, .freshness-text, [data-verdict-text], [data-kpi-value], [data-section='kpi-row'] dt, [data-section='kpi-row'] > p, footer";
     // What a hidden filter panel holds has no box, so it can't move, whatever the scroll does.
     const layout = () =>
       [...document.querySelectorAll(WATCHED)].map((element) => {
@@ -730,7 +731,7 @@ async function checkTargets(page, where) {
           .map((element) => element.getBoundingClientRect());
       return [
         ...boxes(
-          ".tip__icon, .data-toggle > summary, .trust-strip a, footer [data-footer-status] a, footer nav a",
+          ".tip__icon, .tip__badge, .data-toggle > summary, .trust-strip a, footer [data-footer-status] a, footer nav a, header nav a",
         ).filter((box) => box.width < minimum || box.height < minimum),
         ...boxes(".chain-filter label").filter((box) => box.height < filterMinimum),
       ].length;
@@ -1147,7 +1148,8 @@ async function checkClockSwap(browser, origin, where, width) {
     page.evaluate(() =>
       [
         ...document.querySelectorAll(
-          "header, main, main [data-section], h1, .freshness-text, [data-kpi-value], footer, footer [data-footer-status]",
+          // Everything above the footer, which is last, so its status swaps outright.
+          "header, main, main [data-section], h1, main .freshness-text, [data-kpi-value]",
         ),
       ].map((element) => {
         const box = element.getBoundingClientRect();
@@ -1593,9 +1595,6 @@ async function checkActivityOptions(page, where) {
         .every((row) =>
           getComputedStyle(row.querySelector("[data-bar]")).backgroundImage.includes("gradient"),
         );
-      const pinsOnRows = pins.every(
-        (pin) => pin.closest("[data-step]") && pin.closest("[aria-hidden='true']"),
-      );
       const figures = [...weekly.querySelectorAll("[data-week]")].map((week) => {
         const own = week.getBoundingClientRect();
         const text = week.querySelector("[data-week-value]").getBoundingClientRect();
@@ -1605,12 +1604,12 @@ async function checkActivityOptions(page, where) {
         unknown,
         removals: removals.length,
         pins: pins.length,
+        notes: waterfall.querySelectorAll(".note-badges .tip__badge").length,
         numbersWhole,
         rows: rows.length,
         ordered: tops.every((top, index) => index === 0 || top > tops[index - 1]),
         outside: outside.map((row) => row.dataset.step),
         hatched,
-        pinsOnRows,
         figuresInside: figures.every(Boolean),
         weeks: figures.length,
       };
@@ -1619,9 +1618,9 @@ async function checkActivityOptions(page, where) {
     if (!seen.unknown) {
       check("the waterfall has its twelve rows", where, seen.rows === 12, `${value}: ${seen.rows}`);
       check(
-        "the waterfall's removals and pins are there to check",
+        "the waterfall's removals and note badges are there to check",
         where,
-        seen.removals === 9 && seen.pins > 0,
+        seen.removals === 9 && seen.notes > 0,
         value,
       );
     }
@@ -1635,9 +1634,9 @@ async function checkActivityOptions(page, where) {
     );
     check("the removals are hatched", where, seen.hatched, value);
     check(
-      "the waterfall's pins sit on their rows, hidden from assistive tech",
+      "the waterfall's chart holds no pin, as its badges are its markers",
       where,
-      seen.pinsOnRows,
+      seen.pins === 0,
       value,
     );
     check("each week's figure stays over its own bar", where, seen.figuresInside, value);
