@@ -2,6 +2,7 @@ import { floorBps } from "../aggregate.ts";
 import type { ActivityRow, ChainName, KpiRow, ManifestWarning } from "../dataset/rows.ts";
 import { CHAIN_NAMES, DAY_ZERO } from "../definitions.ts";
 import { formatBps, formatCompact, formatUtcDate, UNKNOWN_TEXT } from "../format.ts";
+import { scopedHeading } from "./journey.ts";
 
 const fromDayZero = (rows: ActivityRow[]) => rows.filter((row) => row.day >= DAY_ZERO);
 
@@ -127,6 +128,10 @@ export function perChain(allRows: ActivityRow[]): PerChainPeriod[] {
   });
 }
 
+export function activityChains(rows: ActivityRow[]): ChainName[] {
+  return perChain(rows).map((chain) => chain.chain);
+}
+
 export function historyDays(rows: ActivityRow[]): number {
   return new Set(fromDayZero(rows).map((row) => row.day)).size;
 }
@@ -165,14 +170,29 @@ export function weeklyEveryday(allRows: ActivityRow[]): Week[] {
   return weeks;
 }
 
+function cleanTotal(waterfall: Waterfall): bigint {
+  return (
+    BigInt(waterfallAmount(waterfall, "clean_large")) +
+    BigInt(waterfallAmount(waterfall, "clean_everyday"))
+  );
+}
+
 // Sentences say how much is left and how much was taken out. They never say what transfers were for.
 export function waterfallTakeaway(waterfall: Waterfall | null): string {
   if (!waterfall) return UNKNOWN_TEXT;
-  const clean =
-    BigInt(waterfallAmount(waterfall, "clean_large")) +
-    BigInt(waterfallAmount(waterfall, "clean_everyday"));
+  const clean = cleanTotal(waterfall);
   const share = formatBps(floorBps(clean, BigInt(waterfall.headline)));
   return `Of ${formatCompact(waterfall.headline)} in headline transfers, ${formatCompact(clean.toString())} (${share}) is left as clean volume after the removals.`;
+}
+
+export function waterfallHeading(waterfall: Waterfall | null, chains: ChainName[]): string {
+  if (!waterfall) return UNKNOWN_TEXT;
+  const clean = cleanTotal(waterfall);
+  const share = formatBps(floorBps(clean, BigInt(waterfall.headline)));
+  return scopedHeading(
+    chains,
+    `${formatCompact(clean)} of ${formatCompact(waterfall.headline)} headline transfers is clean volume (${share}).`,
+  );
 }
 
 export function weeklyTakeaway(weeks: Week[]): string {
@@ -184,6 +204,18 @@ export function weeklyTakeaway(weeks: Week[]): string {
   }
   const before = weeks[weeks.length - 2];
   return `Everyday clean volume was ${now} in the week to ${formatUtcDate(latest.to)}, against ${formatCompact(before.everyday)} the week before.`;
+}
+
+// A block is counted from the data's first day and can end up to 6 days before its newest, so the
+// heading dates it: it can't say "last 7 days", and isn't a calendar week.
+export function weeklyHeading(weeks: Week[], chains: ChainName[]): string {
+  if (weeks.length === 0) return UNKNOWN_TEXT;
+  const latest = weeks[weeks.length - 1];
+  const now = formatCompact(latest.everyday);
+  const to = formatUtcDate(latest.to).replace(/ \d{4} UTC$/, "");
+  const before =
+    weeks.length > 1 ? `, ${formatCompact(weeks[weeks.length - 2].everyday)} before` : "";
+  return scopedHeading(chains, `Everyday clean volume: ${now} over 7 days to ${to}${before}.`);
 }
 
 export function velocityTakeaway(kpis: KpiRow[]): string {

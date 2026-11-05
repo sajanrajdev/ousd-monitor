@@ -1,6 +1,7 @@
 // Local only, and never run by `make check`. Reaches the built site in a real browser, with what a
 // unit test can't see: layout, focus, hover, touch and the native behaviour with JavaScript off.
-// Each unit adds its checks. Usage: acceptance.mjs [built folder ...], by default both samples.
+// Each unit adds its checks. Usage: acceptance.mjs [--widths=390,1440] [built folder ...], by default
+// both samples at every width. Checks that need real data say "Not run" when no folder holds any.
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,23 +12,39 @@ import { createServer } from "vite";
 import { launch, serve } from "./local-browser.mjs";
 
 const WEB_DIR = fileURLToPath(new URL("..", import.meta.url));
-const WIDTHS = [320, 390, 768, 1056, 1440];
+const ALL_WIDTHS = [320, 390, 768, 1056, 1440];
 const AXE_WIDTHS = new Set([390, 1440]);
 const HEIGHT = 900;
+const BREAKPOINT_MD = 768;
 const TWO_COLUMNS_FROM = 1056;
 const MIN_TARGET = 24;
 const MIN_FILTER_TARGET = 36;
+const LEGEND_TRIGGER_GAP = 12;
+const CLOCK_JUMP_MS = 72 * 60 * 60 * 1000;
+// The plan's fold, on real data: a sample or preview adds its banner, and may run longer.
+const FOLDS = [
+  {
+    viewport: { width: 1440, height: 900 },
+    above: ["trust-strip", "verdict", "kpi-row", "findings", "marker-legend"],
+  },
+  {
+    viewport: { width: 390, height: 844 },
+    above: ["trust-strip", "verdict", "kpi-row"],
+    starts: "findings",
+  },
+];
 // Longer than the enhancer's hover delays, so a panel has had the chance to change.
 const HOVER_SETTLE_MS = 500;
 const STEP_TIMEOUT_MS = 5000;
 const BOX_SLACK_PX = 0.5;
 // The frame's hatched edges are pseudo-elements, which leave axe unable to judge the text near them.
 const WITHOUT_FRAME_EDGES = `html[data-frame] body::before, html[data-frame] body::after,
-  .chart-card[data-frame]::before { content: none !important; }`;
+  .chart-card[data-frame]::before, .finding[data-frame]::before { content: none !important; }`;
 
 const counts = new Map();
 const undeterminedContrast = [];
 const failures = [];
+const notRun = new Set();
 
 function check(name, where, ok, detail = "") {
   const count = counts.get(name) ?? { pass: 0, fail: 0 };
@@ -45,7 +62,7 @@ async function guarded(name, where, run) {
   }
 }
 
-// The filter and legend aren't on the page yet, and no page has the two-column grid. So this renders
+// The filter isn't on the page yet, and no page has the two-column grid. So this renders
 // the real components with made-up amounts, and puts them in the built page, where the real CSS and
 // enhancer apply. Drop each part as a later unit mounts the real thing.
 async function loadHarness() {
@@ -58,14 +75,14 @@ async function loadHarness() {
     server: { middlewareMode: true, hmr: false, ws: false, watch: null },
   });
   const load = (path) => vite.ssrLoadModule(path);
-  const [{ ChainFilter }, { ChainPanels }, { ChartCard }, { MarkerLegend }, { Pin }, scope] =
+  const [{ ChainFilter }, { ChainPanels }, { ChartCard }, { Pin }, scope, verdict] =
     await Promise.all([
       load("/components/chain-filter.tsx"),
       load("/components/chain-panels.tsx"),
       load("/components/chart-card.tsx"),
-      load("/components/marker-legend.tsx"),
       load("/components/pinned-notes.tsx"),
       load("/lib/chain-scope.ts"),
+      load("/lib/verdict.ts"),
     ]);
   const card = (name, props) => {
     const notes = [{ kind: "harness", text: `On ${name}, a made-up caveat.` }];
@@ -113,7 +130,6 @@ async function loadHarness() {
       h(
         "section",
         { "data-harness": "" },
-        h(MarkerLegend),
         h(ChainFilter, { options }),
         h(
           "div",
@@ -125,7 +141,11 @@ async function loadHarness() {
       { identifierPrefix: "harness-" },
     );
   };
-  return { markup, close: () => vite.close() };
+  return {
+    markup,
+    oneLineHeadline: verdict.VERDICT_SENTENCES.mostly_placed,
+    close: () => vite.close(),
+  };
 }
 
 // The enhancer has mounted once Escape closes an open popover. Nothing on the page says so otherwise.
@@ -259,10 +279,52 @@ async function checkFilter(page, where, js, chains) {
 // What must be in view with nothing opened. A stylesheet can hide what verify-output can't read.
 async function checkInView(page, where) {
   const missing = await page.evaluate(() => {
+    const startX = window.scrollX;
+    const startY = window.scrollY;
+    // Whether the element is what's at a point, once scrolled to. A clip, a cover or an off-screen
+    // box leaves something else there, or nothing.
+    const hits = (element, rectOf) => {
+      const before = rectOf();
+      window.scrollBy({
+        left: before.left + before.width / 2 - window.innerWidth / 2,
+        top: before.top + before.height / 2 - window.innerHeight / 2,
+        behavior: "instant",
+      });
+      const box = rectOf();
+      const at = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return element.contains(at);
+    };
+    // The first and last lines of its text, so clipping part of a note counts as well.
+    const textLines = (element) => {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      const ranges = [];
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const parent = node.parentElement;
+        if (!node.data.trim() || parent.closest(".sr-only") || !parent.checkVisibility()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        if (range.getClientRects().length > 0) ranges.push(range);
+      }
+      if (ranges.length === 0) return [];
+      return [
+        () => ranges[0].getClientRects()[0],
+        () => [...ranges.at(-1).getClientRects()].at(-1),
+      ];
+    };
     const seen = (element) => {
       if (!element?.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true })) return false;
       const box = element.getBoundingClientRect();
-      return box.width > 1 && box.height > 1;
+      if (box.width <= 1 || box.height <= 1) return false;
+      const { scrollWidth, scrollHeight } = document.documentElement;
+      const onPage =
+        box.right + window.scrollX > 0 &&
+        box.left + window.scrollX < scrollWidth &&
+        box.bottom + window.scrollY > 0 &&
+        box.top + window.scrollY < scrollHeight;
+      if (!onPage) return false;
+      // The first fragment's centre: a wrapped inline box's own centre can fall outside its text.
+      const spots = [() => element.getClientRects()[0], ...textLines(element)];
+      return spots.every((rectOf) => hits(element, rectOf));
     };
     const lacking = [];
     const need = (name, element) => {
@@ -274,7 +336,14 @@ async function checkInView(page, where) {
     if (root.dataset.frame) need("the banner", document.querySelector("[data-dataset-banner]"));
     const verdict = document.querySelector('[data-section="verdict"]');
     if (verdict) {
+      need("the question line", verdict.querySelector('[data-section="question"]'));
       need("the headline", verdict.querySelector("h1"));
+      const text = verdict.querySelector("[data-verdict-text]");
+      if (text?.closest("details")) {
+        if (root.dataset.datasetKind !== "real") lacking.push("verdict.text, on non-real data");
+      } else {
+        need("verdict.text", text);
+      }
       need("the headline's marker", verdict.querySelector('.status-chip[data-kind="opinion"]'));
       const when = [...verdict.querySelectorAll(".freshness-text > *")];
       if (!when.some(seen)) lacking.push("the as-of line");
@@ -284,6 +353,26 @@ async function checkInView(page, where) {
       for (const chip of document.querySelectorAll('[data-section="kpi-row"] .status-chip')) {
         need("a KPI marker", chip.querySelector("[aria-hidden]") ?? chip);
       }
+      for (const label of document.querySelectorAll('[data-section="kpi-row"] dt')) {
+        need("a KPI label", label);
+      }
+      need("the KPI row's chains", document.querySelector('[data-section="kpi-row"] > p'));
+      const findings = document.querySelectorAll("[data-finding-link]");
+      if (findings.length === 0) lacking.push("the findings");
+      for (const finding of findings) {
+        need("a finding", finding.querySelector(".finding__text"));
+        const chip = finding.querySelector(".status-chip");
+        need("a finding's marker", chip?.querySelector("[aria-hidden]") ?? chip);
+        if (root.dataset.frame) {
+          need("a finding's word", finding.querySelector(".chart-card__frame-word"));
+        }
+      }
+      need("the legend", document.querySelector('[data-section="marker-legend"] > p'));
+    }
+    // Every caveat, wherever a unit pins it. A note in a filter panel counts while its panel shows.
+    for (const caveat of document.querySelectorAll("main [data-note]")) {
+      const panel = caveat.closest("[data-chain-panel]");
+      if (!panel || panel.checkVisibility()) need(`the ${caveat.dataset.note} note`, caveat);
     }
     const note = document.querySelector("[data-stale-note] .freshness-text > *");
     if (!verdict && root.dataset.freshness === "stale") need("the stale note", note);
@@ -302,6 +391,7 @@ async function checkInView(page, where) {
         need("a note's number", item.querySelector(".pin"));
       }
     }
+    window.scrollTo({ left: startX, top: startY, behavior: "instant" });
     return lacking;
   });
   check(
@@ -320,6 +410,8 @@ async function checkFocusRings(page, where) {
     ".data-toggle > summary",
     ".chain-filter input:checked",
     "header a",
+    ".trust-strip summary",
+    "[data-finding-link]",
   ]) {
     const target = page.locator(selector).first();
     await target.focus();
@@ -387,7 +479,7 @@ async function checkWithoutHas(browser, origin, folder, markup, chains, where, o
 }
 
 async function checkOneAtATime(page, where) {
-  const triggers = page.locator("[data-harness] .info-popover > summary");
+  const triggers = page.locator("[data-harness] .info-popover > summary:visible");
   await triggers.nth(0).click();
   await triggers.nth(1).click();
   check("one popover opens at a time", where, (await openCount(page)) === 1);
@@ -403,7 +495,7 @@ async function checkOneAtATime(page, where) {
 async function checkNothingCovered(page, where) {
   const results = await page.evaluate(() => {
     const WATCHED =
-      ".chart-area, .hairline-table, .pinned-notes > li, .chart-card__meta, .chart-card h2, .chart-card h3, .status-chip, .data-toggle > summary, [data-section='kpi-row'] > *";
+      ".chart-area, .hairline-table, .pinned-notes > li, .chart-card__meta, .chart-card h2, .chart-card h3, .status-chip, .data-toggle > summary, h1, [data-section='question'], .freshness-text, [data-verdict-text], [data-kpi-value], [data-section='kpi-row'] dt, [data-section='kpi-row'] > p, [data-finding-link], [data-section='marker-legend'] > p";
     const out = [];
     for (const popover of document.querySelectorAll(".info-popover")) {
       // A hidden filter panel's popover has no box to check.
@@ -450,9 +542,12 @@ async function checkHover(page, where) {
   const settle = () => page.waitForTimeout(HOVER_SETTLE_MS);
 
   await page.evaluate(() => document.activeElement?.blur());
+  await away();
+  await settle();
+  check("no popover is open before a hover", where, (await openCount(page)) === 0);
   await trigger.hover();
   await settle();
-  check("hover opens", where, await isOpen(popover));
+  check("hover opens", where, await isOpen(popover), `${await openCount(page)} open`);
   await panel.hover();
   await settle();
   check("moving onto the panel keeps it open", where, await isOpen(popover));
@@ -498,10 +593,12 @@ async function checkTap(browser, origin, folder, markup, where, options) {
     ...options,
     touch: true,
   });
-  const popovers = page.locator("[data-harness] .info-popover");
-  await popovers.nth(0).locator("summary").tap();
-  check("tap opens", where, await isOpen(popovers.nth(0)));
-  await popovers.nth(1).locator("summary").tap();
+  const triggers = page.locator("[data-harness] .info-popover > summary:visible");
+  const first = triggers.nth(0);
+  const firstPopover = first.locator("..");
+  await first.tap();
+  check("tap opens", where, await isOpen(firstPopover));
+  await triggers.nth(1).tap();
   check("a second tap leaves one open", where, (await openCount(page)) === 1);
   await context.close();
 }
@@ -552,9 +649,9 @@ async function checkTargets(page, where) {
           .filter((element) => element.getClientRects().length > 0)
           .map((element) => element.getBoundingClientRect());
       return [
-        ...boxes(".info-popover > summary, .data-toggle > summary").filter(
-          (box) => box.width < minimum || box.height < minimum,
-        ),
+        ...boxes(
+          ".info-popover > summary, .data-toggle > summary, .trust-strip summary, [data-finding-link]",
+        ).filter((box) => box.width < minimum || box.height < minimum),
         ...boxes(".chain-filter label").filter((box) => box.height < filterMinimum),
       ].length;
     },
@@ -696,15 +793,291 @@ async function checkWithoutJavaScript(page, where) {
   check("the step line says it needs JavaScript", where, (await needsJs.count()) === 1);
   check("and the note is visible", where, await needsJs.isVisible());
   check("and points to the Table button", where, (await needsJs.innerText()).includes("The Table"));
+  const kpiNotes = page.locator(".kpi-cell__note");
+  check("each KPI's note shows in plain text", where, (await kpiNotes.count()) === 4);
+  check(
+    "and is visible, with its definition",
+    where,
+    (await kpiNotes.first().isVisible()) && (await kpiNotes.first().locator("a").count()) === 1,
+  );
+  const reading = page.locator(
+    '[data-section="verdict"] noscript a, [data-section="verdict"] > p a',
+  );
+  check("the reading's definition shows in plain text", where, await reading.first().isVisible());
 }
 
-async function checkFolder(browser, folder, harness) {
+const boxOf = (page, selector) =>
+  page.evaluate((target) => {
+    const box = document.querySelector(target)?.getBoundingClientRect();
+    if (!box) return null;
+    // pageTop, for comparing two moments: a click can scroll the page between them.
+    return {
+      top: box.top,
+      bottom: box.bottom,
+      left: box.left,
+      right: box.right,
+      pageTop: box.top + window.scrollY,
+    };
+  }, selector);
+
+// Each finding lands on its card, with the card clear of the sticky header. A click with the filter
+// on one chain goes back to All, as a finding speaks for every chain it covers.
+async function checkFindingLinks(page, where, js) {
+  const links = page.locator("[data-finding-link]");
+  const total = await links.count();
+  check("the page has four findings", where, total === 4, `${total}`);
+  for (let index = 0; index < total; index += 1) {
+    const link = links.nth(index);
+    const href = await link.getAttribute("href");
+    if (index === 0) {
+      await link.focus();
+      await page.keyboard.press("Enter");
+    } else {
+      await link.click();
+    }
+    await page.waitForFunction((target) => location.hash === target, href);
+    const card = await boxOf(page, href);
+    const header = await boxOf(page, "header");
+    check(
+      "a finding lands on its card, clear of the header",
+      where,
+      card !== null && card.top >= header.bottom - 1 && card.top < HEIGHT,
+      `${href}: ${card ? Math.round(card.top) : "no card"}, header ${Math.round(header.bottom)}`,
+    );
+  }
+  await page.evaluate(() => {
+    history.replaceState(null, "", location.pathname);
+    window.scrollTo(0, 0);
+  });
+  if (!js) return;
+  await page.locator(".chain-filter label").nth(1).click();
+  check("the filter is off All", where, (await shownPanels(page))[0] !== "all");
+  await links.first().click();
+  check("a finding sets the filter to All", where, (await shownPanels(page))[0] === "all");
+  await page.evaluate(() => {
+    history.replaceState(null, "", location.pathname);
+    window.scrollTo(0, 0);
+  });
+}
+
+// A popover on a KPI pushes what follows down, and hides nothing it leaves behind.
+async function checkKpiPopover(page, where) {
+  const trigger = page.locator('[data-section="kpi-row"] .info-popover > summary').nth(1);
+  const before = await boxOf(page, '[data-section="findings"]');
+  await trigger.click();
+  await page.mouse.move(0, 0);
+  const panel = page.locator('[data-section="kpi-row"] .info-popover[open] .info-popover__panel');
+  check("a KPI's popover opens", where, await panel.isVisible());
+  check(
+    "and holds its definition",
+    where,
+    await panel.locator('a[href^="/methodology/#"]').isVisible(),
+  );
+  const after = await boxOf(page, '[data-section="findings"]');
+  check("and pushes the findings down", where, after.pageTop > before.pageTop);
+  check(
+    "and every KPI value stays in view",
+    where,
+    await page.evaluate(() =>
+      [...document.querySelectorAll("[data-kpi-value]")].every((value) => value.checkVisibility()),
+    ),
+  );
+  await trigger.click();
+  const closed = await boxOf(page, '[data-section="findings"]');
+  check(
+    "and closing it puts them back",
+    where,
+    Math.abs(closed.pageTop - before.pageTop) <= BOX_SLACK_PX,
+  );
+}
+
+// The headline's popover holds verdict.text where the dataset lets it, and the rest in any case.
+async function checkHeadlinePopover(page, where) {
+  const popover = page.locator('[data-section="verdict"] .info-popover');
+  await popover.locator("> summary").click();
+  await page.mouse.move(0, 0);
+  const panel = popover.locator(".info-popover__panel");
+  check(
+    "the headline's popover links its definition",
+    where,
+    await panel.locator('a[href="/methodology/#verdict"]').isVisible(),
+  );
+  const moved = await panel.locator("[data-verdict-text]").count();
+  const real = (await page.evaluate(() => document.documentElement.dataset.datasetKind)) === "real";
+  if (moved > 0) {
+    check("verdict.text is in the popover only on real data", where, real);
+    check("and it's readable there", where, await panel.locator("[data-verdict-text]").isVisible());
+  }
+  await popover.locator("> summary").click();
+}
+
+// The legend's trigger sits right after its last item at every width, and stays there as it opens.
+async function checkLegendTrigger(page, where) {
+  const legend = '[data-section="marker-legend"]';
+  const trigger = `${legend} .info-popover > summary`;
+  const last = await boxOf(page, `${legend} > p > span:last-child`);
+  const closed = await boxOf(page, trigger);
+  const gap = closed.left - last.right;
+  check(
+    "the legend's trigger sits right after its last item",
+    where,
+    gap >= 0 && gap <= LEGEND_TRIGGER_GAP && closed.top < last.bottom,
+    `gap ${gap}`,
+  );
+  await page.locator(trigger).click();
+  await page.mouse.move(0, 0);
+  const open = await boxOf(page, trigger);
+  check(
+    "and it stays put as the legend opens",
+    where,
+    open.left === closed.left && open.pageTop === closed.pageTop,
+  );
+  await page.locator(trigger).click();
+}
+
+// The trust row's one disclosure opens under the row, and leaves the state in view above it.
+async function checkTrustDisclosure(page, where, width) {
+  const details = page.locator('[data-section="trust-strip"] details');
+  check("the trust row has one disclosure", where, (await details.count()) === 1);
+  const summary = details.locator("> summary");
+  const status = '[data-section="trust-strip"] .trust-strip__status';
+  const trigger = '[data-section="trust-strip"] details > summary';
+  const before = await boxOf(page, status);
+  const closedTrigger = await boxOf(page, trigger);
+  await summary.click();
+  check("it shows the table when open", where, await details.locator("table").first().isVisible());
+  check(
+    "it shows what it doesn't verify",
+    where,
+    (await details.innerText()).includes("doesn't verify placed share or velocity"),
+  );
+  const after = await boxOf(page, status);
+  check(
+    "the state stays where it was",
+    where,
+    Math.abs(after.pageTop - before.pageTop) <= BOX_SLACK_PX,
+  );
+  const panel = await boxOf(page, '[data-section="trust-strip"] details > div');
+  check("the detail opens beneath the state", where, panel.top >= after.bottom - BOX_SLACK_PX);
+  if (width >= BREAKPOINT_MD) {
+    const openTrigger = await boxOf(page, trigger);
+    check(
+      "the trigger stays put as it opens",
+      where,
+      Math.abs(openTrigger.pageTop - closedTrigger.pageTop) <= BOX_SLACK_PX,
+    );
+  }
+  await summary.click();
+}
+
+async function checkHeadlineLines(page, where, width, oneLine) {
+  if (width < TWO_COLUMNS_FROM) return;
+  const { text, lines } = await page.evaluate(() => {
+    const heading = document.querySelector("h1");
+    const { lineHeight } = getComputedStyle(heading);
+    return {
+      text: heading.textContent,
+      lines: Math.round(heading.getBoundingClientRect().height / parseFloat(lineHeight)),
+    };
+  });
+  if (text === oneLine) check("the usual headline fits one line from 1056", where, lines === 1);
+}
+
+// Only what the plan's fold says, on real data. Anything else is a build the fold doesn't speak for.
+async function checkFold(browser, origin, where) {
+  for (const { viewport, above, starts } of FOLDS) {
+    const context = await browser.newContext({ viewport });
+    const page = await context.newPage();
+    await page.goto(`${origin}/`, { waitUntil: "networkidle" });
+    await page.evaluate(() => document.fonts.ready);
+    const at = `${where} ${viewport.width}x${viewport.height}`;
+    for (const name of above) {
+      const box = await boxOf(page, `[data-section="${name}"]`);
+      check(
+        "above the fold on real data",
+        at,
+        box !== null && box.bottom <= viewport.height,
+        `${name}: ${box ? Math.round(box.bottom) : "gone"}`,
+      );
+    }
+    if (starts) {
+      const box = await boxOf(page, `[data-section="${starts}"]`);
+      check(
+        "the next part starts above the fold",
+        at,
+        box !== null && box.top < viewport.height,
+        `${starts}: ${box ? Math.round(box.top) : "gone"}`,
+      );
+    }
+    await context.close();
+  }
+}
+
+// Past its limit under a fake clock the page swaps both texts in place. Nothing above or below moves.
+async function checkClockSwap(browser, origin, where, width) {
+  const context = await browser.newContext({ viewport: { width, height: HEIGHT } });
+  const page = await context.newPage();
+  await page.clock.install({ time: new Date() });
+  await page.goto(`${origin}/`, { waitUntil: "networkidle" });
+  await page.evaluate(() => document.fonts.ready);
+  const shown = () => page.evaluate(() => document.documentElement.dataset.freshness);
+  if ((await shown()) !== "fresh") {
+    notRun.add("the clock swap, on a build that's already stale, as it has nothing to swap");
+    await context.close();
+    return;
+  }
+  const layout = () =>
+    page.evaluate(() =>
+      [
+        ...document.querySelectorAll(
+          "header, main, main [data-section], h1, .freshness-text, [data-kpi-value], [data-finding-link], footer",
+        ),
+      ].map((element) => {
+        const box = element.getBoundingClientRect();
+        return [box.top + window.scrollY, box.left, box.width, box.height].map(Math.round).join();
+      }),
+    );
+  const swapped = () =>
+    page.evaluate(() => {
+      const seen = (selector) => {
+        const element = document.querySelector(selector);
+        return element ? getComputedStyle(element).visibility === "visible" : false;
+      };
+      return {
+        verdict: seen('[data-section="verdict"] .freshness-text__stale'),
+        trust: seen(
+          '[data-section="trust-strip"] .trust-strip__status > .freshness-text .freshness-text__stale',
+        ),
+        freshGone: !seen('[data-section="verdict"] .freshness-text__fresh'),
+      };
+    });
+  const before = await layout();
+  check("the page starts on its fresh text", where, !(await swapped()).verdict);
+  await page.clock.fastForward(CLOCK_JUMP_MS);
+  await page.waitForFunction(() => document.documentElement.dataset.freshness === "stale");
+  const { verdict, trust, freshGone } = await swapped();
+  check("the as-of line swaps to its stale text", where, verdict && freshGone);
+  check("the trust status swaps to its stale text", where, trust);
+  const after = await layout();
+  const moved = before.filter((box, index) => box !== after[index]).length;
+  check("the swap moves nothing", where, moved === 0 && before.length > 0, `${moved} moved`);
+  await context.close();
+}
+
+async function checkFolder(browser, folder, harness, widths) {
   const partial = basename(folder) === "partial";
   const chains = partial ? ["tempo", "solana"] : ["tempo", "ethereum", "base", "solana"];
   const markup = harness.markup(chains);
   const server = await serve(folder);
   const origin = `http://127.0.0.1:${server.address().port}`;
-  for (const width of WIDTHS) {
+  const real = readFileSync(join(folder, "index.html"), "utf8").includes(
+    'data-dataset-kind="real"',
+  );
+  if (real) {
+    await guarded("the fold", basename(folder), () => checkFold(browser, origin, basename(folder)));
+    realFolders += 1;
+  }
+  for (const width of widths) {
     for (const js of [true, false]) {
       const where = `${basename(folder)} ${width} js ${js ? "on" : "off"}`;
       const options = { width, js };
@@ -712,7 +1085,15 @@ async function checkFolder(browser, folder, harness) {
       const group = (name, run) => guarded(name, where, run);
       await group("in view", () => checkInView(page, where));
       await group("focus", () => checkFocusRings(page, where));
+      await group("the headline's lines", () =>
+        checkHeadlineLines(page, where, width, harness.oneLineHeadline),
+      );
       await group("the filter", () => checkFilter(page, where, js, chains));
+      await group("the findings", () => checkFindingLinks(page, where, js));
+      await group("a KPI's popover", () => checkKpiPopover(page, where));
+      await group("the headline's popover", () => checkHeadlinePopover(page, where));
+      await group("the legend's trigger", () => checkLegendTrigger(page, where));
+      await group("the trust row", () => checkTrustDisclosure(page, where, width));
       await group("one at a time", () => checkOneAtATime(page, where));
       await group("nothing covered", () => checkNothingCovered(page, where));
       if (js) await group("hover", () => checkHover(page, where));
@@ -724,6 +1105,9 @@ async function checkFolder(browser, folder, harness) {
       if (js && AXE_WIDTHS.has(width)) await group("axe", () => checkAxe(page, where));
       check("no console errors", where, errors.length === 0, errors.slice(0, 3).join(" | "));
       await context.close();
+      if (js) {
+        await guarded("the clock swap", where, () => checkClockSwap(browser, origin, where, width));
+      }
       await guarded("tap", where, () => checkTap(browser, origin, folder, markup, where, options));
       await guarded("methodology", where, () => checkMethodologyPage(browser, origin, where, js));
       await guarded("forced colours", where, () =>
@@ -737,7 +1121,11 @@ async function checkFolder(browser, folder, harness) {
   server.close();
 }
 
-const folders = process.argv.slice(2).map((folder) => resolve(folder));
+let realFolders = 0;
+const args = process.argv.slice(2);
+const widthsArg = args.find((arg) => arg.startsWith("--widths="));
+const widths = widthsArg ? widthsArg.slice("--widths=".length).split(",").map(Number) : ALL_WIDTHS;
+const folders = args.filter((arg) => !arg.startsWith("--")).map((folder) => resolve(folder));
 if (folders.length === 0) {
   folders.push(join(WEB_DIR, ".build/complete"), join(WEB_DIR, ".build/partial"));
 }
@@ -751,7 +1139,7 @@ for (const folder of folders) {
 const harness = await loadHarness();
 const browser = await launch();
 try {
-  for (const folder of folders) await checkFolder(browser, folder, harness);
+  for (const folder of folders) await checkFolder(browser, folder, harness, widths);
 } finally {
   await browser.close();
   await harness.close();
@@ -761,6 +1149,8 @@ for (const [name, { pass, fail }] of counts)
   console.log(`${fail ? "FAIL" : "ok  "} ${pass}/${pass + fail} ${name}`);
 // Not a pass or a fail: what axe couldn't judge, such as text on the hatched fills.
 for (const line of undeterminedContrast) console.log(`Contrast axe couldn't judge, ${line}`);
+if (realFolders === 0) notRun.add("the fold, as no folder holds real data");
+for (const reason of notRun) console.log(`Not run: ${reason}`);
 for (const failure of failures) console.error(`FAIL ${failure}`);
 console.log(
   `${failures.length === 0 ? "Passed" : "Failed"}: ${counts.size} checks, ${failures.length} failures.`,

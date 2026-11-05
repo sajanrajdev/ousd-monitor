@@ -66,7 +66,7 @@ export function WaterfallChart({ waterfall }: { waterfall: Waterfall | null }) {
   );
 }
 
-export function WeeklyBars({ weeks, history }: { weeks: Week[]; history: string }) {
+export function WeeklyBars({ weeks, note }: { weeks: Week[]; note: string }) {
   if (weeks.length === 0) return <p className="p-4">{UNKNOWN_TEXT}</p>;
   const values = weeks.map((week) => toChartNumber(week.everyday) ?? 0);
   const max = Math.max(...values, 1);
@@ -97,8 +97,8 @@ export function WeeklyBars({ weeks, history }: { weeks: Week[]; history: string 
             </span>
           ))}
         </div>
-        <figcaption className="mt-2" style={{ fontSize: "var(--text-meta)" }}>
-          Weeks end on the date shown, in UTC. {history}.
+        <figcaption className="mt-2" style={{ fontSize: "var(--text-meta)" }} data-note="history">
+          {note}
         </figcaption>
       </figure>
     </>

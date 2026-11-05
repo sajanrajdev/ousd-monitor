@@ -29,6 +29,31 @@ function real(change?: (manifest: Json) => void, now = GENERATED + 2 * HOUR): Da
 }
 
 describe("the trust strip", () => {
+  it("is one row: the state in view, and one disclosure holding the words and table", () => {
+    const container = strip(real());
+    const details = container.querySelectorAll("details");
+    expect(details).toHaveLength(1);
+    expect(details[0].querySelector("summary")!.textContent).toBe("Reconciliation detail");
+    const status = container.querySelector(".trust-strip__status")!;
+    expect(status.closest("details")).toBeNull();
+    expect(status.textContent).toContain(FRESH_SENTENCE);
+    for (const piece of [
+      "What this covers",
+      "It doesn't verify placed share or velocity.",
+      "Checks before this data was published",
+    ]) {
+      expect(details[0].textContent).toContain(piece);
+    }
+    expect(details[0].querySelector("table")).not.toBeNull();
+    expect(details[0].querySelector('a[href$="#reconciliation"]')).not.toBeNull();
+  });
+
+  it("is never a popover, as nothing here takes turns with one", () => {
+    const container = strip(real());
+    expect(container.querySelector(".info-popover")).toBeNull();
+    expect(container.querySelector("details")!.hasAttribute("name")).toBe(false);
+  });
+
   it("fresh: the dated sentence is shown, with a tick", () => {
     const container = strip(real());
     expect(

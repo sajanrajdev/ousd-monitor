@@ -25,6 +25,16 @@ export const DEFINITION_ANCHORS = [
   "fact-estimate-opinion",
 ] as const;
 
+// The main page's card anchors, so a finding's link and its card can't drift apart.
+export const CARD_ANCHORS = {
+  supply: "where-supply-sits",
+  series: "placed-vs-circulating",
+  waterfall: "headline-to-clean",
+  weekly: "everyday-by-week",
+  velocity: "velocity-by-chain",
+  chainRoles: "what-each-chain-does",
+} as const;
+
 export type DefinitionAnchor = (typeof DEFINITION_ANCHORS)[number];
 
 // With the trailing slash, as a static host serves this page there.

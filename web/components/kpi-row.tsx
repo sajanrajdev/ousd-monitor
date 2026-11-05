@@ -2,6 +2,7 @@ import type { DatasetState, KpiRow as KpiRowData } from "@/lib/dataset";
 import { allChainKpis } from "@/lib/aggregate";
 import { CHAIN_NAMES, definitionHref, type DefinitionAnchor } from "@/lib/definitions";
 import { formatAsOf, formatBps, formatCompact, UNKNOWN_TEXT } from "@/lib/format";
+import { InfoPopover } from "./info-popover";
 import { StatusChip, type ChipKind } from "./status-chip";
 
 export type KpiRowProps = {
@@ -47,38 +48,52 @@ function kpiList(figures: ReturnType<typeof allChainKpis>): Kpi[] {
   ];
 }
 
+// The as-of line above the row covers these figures, so the row repeats a date only if it differs.
+function scopeLine(figures: NonNullable<ReturnType<typeof allChainKpis>>, state: DatasetState) {
+  const across = `Across ${figures.chains.map((chain) => CHAIN_NAMES[chain]).join(", ")}.`;
+  const asOf = formatAsOf(figures.asOf);
+  return state.dataAsOf && formatAsOf(state.dataAsOf) === asOf ? across : `${across} As of ${asOf}`;
+}
+
 export function KpiRow({ kpis, state }: KpiRowProps) {
   const figures = allChainKpis(kpis);
   return (
     <section className="kpi-row" aria-label="Key figures" data-section="kpi-row">
-      <dl className="m-0 grid grid-cols-2 gap-px border border-(--color-border) bg-(--color-border) min-[1056px]:grid-cols-4">
+      <dl className="kpi-row__cells">
         {kpiList(figures).map((kpi) => (
-          <div key={kpi.label} className="grid content-start gap-2 bg-(--color-off-white) p-4">
-            <dt className="text-(length:--text-small)">{kpi.label}</dt>
-            <dd className="m-0 grid gap-2">
-              <span
-                className="font-(family-name:--font-display) text-(length:--text-kpi) leading-none"
-                data-kpi-value
-              >
-                {kpi.value}
-              </span>
-              <span>
-                <StatusChip kind={kpi.chip} />
-              </span>
-              <span className="text-(length:--text-meta)">
-                {kpi.note}{" "}
-                <a href={definitionHref(kpi.anchor)} className="underline underline-offset-4">
-                  Definition
-                </a>
-              </span>
+          <div key={kpi.label} className="kpi-cell explain-head">
+            <dt>{kpi.label}</dt>
+            <dd className="kpi-cell__figure">
+              <span data-kpi-value>{kpi.value}</span>
+              <StatusChip kind={kpi.chip} />
+            </dd>
+            <dd className="kpi-cell__more">
+              <InfoPopover label={`About: ${kpi.label}`}>
+                <p data-kpi-note>{kpi.note}</p>
+                {figures ? <p>As of {formatAsOf(figures.asOf)}</p> : null}
+                <p>
+                  <a
+                    href={definitionHref(kpi.anchor)}
+                    className="target-link underline underline-offset-4"
+                  >
+                    Definition
+                  </a>
+                </p>
+              </InfoPopover>
+              <noscript>
+                <p className="kpi-cell__note">
+                  {kpi.note}{" "}
+                  <a href={definitionHref(kpi.anchor)} className="underline underline-offset-4">
+                    Definition
+                  </a>
+                </p>
+              </noscript>
             </dd>
           </div>
         ))}
       </dl>
       <p className="chart-card__meta mt-2">
-        {figures
-          ? `Across ${figures.chains.map((chain) => CHAIN_NAMES[chain]).join(", ")}. As of ${formatAsOf(figures.asOf)}`
-          : UNKNOWN_TEXT}
+        {figures ? scopeLine(figures, state) : UNKNOWN_TEXT}
         {state.frameWord ? (
           <>
             {" "}

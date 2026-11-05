@@ -2,8 +2,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ActivityRow, KpiRow } from "@/lib/dataset";
-import { UNKNOWN_TEXT } from "@/lib/format";
+import { formatBps, formatCompact, formatUtcDate, UNKNOWN_TEXT } from "@/lib/format";
 import {
+  activityChains,
   barPosition,
   historyDays,
   historyLabel,
@@ -11,8 +12,10 @@ import {
   velocityTakeaway,
   waterfall,
   waterfallAmount,
+  waterfallHeading,
   waterfallTakeaway,
   weeklyEveryday,
+  weeklyHeading,
   weeklyTakeaway,
 } from "@/lib/takeaways/activity";
 
@@ -20,6 +23,8 @@ const sample = (name: string) =>
   JSON.parse(readFileSync(join(process.cwd(), "fixtures/dataset/complete", name), "utf8"));
 const activity: ActivityRow[] = sample("activity.json").data;
 const kpis: KpiRow[] = sample("summary.json").kpis;
+
+const shortDate = (day: string) => formatUtcDate(day).replace(/ \d{4} UTC$/, "");
 
 const zeroRow = (over: Partial<ActivityRow> = {}): ActivityRow => ({
   ...activity[0],
@@ -166,6 +171,121 @@ describe("the takeaways", () => {
     expect(historyLabel(activity.filter((row) => row.day <= "2026-10-06"))).toBe(
       "7 days of history: a direction, not a trend",
     );
+  });
+});
+
+describe("the short headings", () => {
+  const partial: ActivityRow[] = JSON.parse(
+    readFileSync(join(process.cwd(), "fixtures/dataset/partial/activity.json"), "utf8"),
+  ).data;
+  const words = (text: string) => text.split(/\s+/).length;
+  const chains = activityChains(activity);
+  const summed = (
+    rows: ActivityRow[],
+    field: "headline_value" | "clean_large" | "clean_everyday",
+  ) =>
+    rows
+      .filter((row) => row.day >= "2026-09-30")
+      .reduce((sum, row) => sum + BigInt(row[field]), 0n);
+
+  it("the waterfall's reads its amounts and share from the rows, in at most 12 words", () => {
+    const headline = summed(activity, "headline_value");
+    const clean = summed(activity, "clean_large") + summed(activity, "clean_everyday");
+    const text = waterfallHeading(waterfall(activity), chains);
+    expect(text).toBe(
+      `${formatCompact(clean)} of ${formatCompact(headline)} headline transfers is clean volume (${formatBps(Number((clean * 10_000n) / headline))}).`,
+    );
+    expect(words(text)).toBeLessThanOrEqual(12);
+  });
+
+  it("the weekly one reads the last two complete weeks, in at most 12 words", () => {
+    const weeks = weeklyEveryday(activity);
+    const sumWeek = (index: number) =>
+      formatCompact(
+        activity
+          .filter((row) => row.day >= weeks[index].from && row.day <= weeks[index].to)
+          .reduce((sum, row) => sum + BigInt(row.clean_everyday), 0n),
+      );
+    const text = weeklyHeading(weeks, chains);
+    expect(text).toBe(
+      `Everyday clean volume: ${sumWeek(weeks.length - 1)} over 7 days to ${shortDate(weeks.at(-1)!.to)}, ${sumWeek(weeks.length - 2)} before.`,
+    );
+    expect(words(text)).toBeLessThanOrEqual(12);
+  });
+
+  it("dates its block, which needn't reach the data's newest day", () => {
+    const weeks = weeklyEveryday(activity);
+    const newest = perChain(activity)
+      .map((chain) => chain.to)
+      .sort()
+      .at(-1)!;
+    expect(weeks.at(-1)!.to < newest).toBe(true);
+    const text = weeklyHeading(weeks, chains);
+    expect(text).toContain(`over 7 days to ${shortDate(weeks.at(-1)!.to)}`);
+    expect(text).not.toMatch(/\blast\b|\bweek\b/i);
+  });
+
+  it("stays within 12 words at the widest figures and dates", () => {
+    const week = { from: "2026-12-25", to: "2026-12-31", everyday: "999999000000000" };
+    expect(words(weeklyHeading([week, week], chains))).toBeLessThanOrEqual(12);
+  });
+
+  it("one complete week has nothing before it", () => {
+    const [week] = weeklyEveryday(activity);
+    expect(weeklyHeading([week], chains)).toBe(
+      `Everyday clean volume: ${formatCompact(week.everyday)} over 7 days to ${shortDate(week.to)}.`,
+    );
+  });
+
+  it("both are unknown with nothing to say, never a zero", () => {
+    expect(waterfallHeading(null, chains)).toBe(UNKNOWN_TEXT);
+    expect(weeklyHeading([], chains)).toBe(UNKNOWN_TEXT);
+  });
+
+  it("zero clean volume reads as zero, and a zero week as $0", () => {
+    const none = waterfall([zeroRow({ headline_value: "100000000", minted: "100000000" })]);
+    expect(waterfallHeading(none, chains)).toBe(
+      "$0 of $100 headline transfers is clean volume (0.00%).",
+    );
+    const week = { from: "2026-10-01", to: "2026-10-07", everyday: "0" };
+    expect(weeklyHeading([week, week], chains)).toBe(
+      "Everyday clean volume: $0 over 7 days to 7 Oct, $0 before.",
+    );
+  });
+
+  it("both name their chains at partial scope, and never say all", () => {
+    const scope = activityChains(partial);
+    const texts = [
+      waterfallHeading(waterfall(partial), scope),
+      weeklyHeading(weeklyEveryday(partial), scope),
+    ];
+    for (const text of texts) {
+      expect(text.startsWith("On Tempo and Ethereum, ")).toBe(true);
+      expect(text).not.toMatch(/\ball\b/i);
+      expect(words(text.replace("On Tempo and Ethereum, ", ""))).toBeLessThanOrEqual(12);
+    }
+    expect(texts[1]).toContain("everyday clean volume:");
+  });
+
+  it("name a single chain", () => {
+    const one = activity.filter((row) => row.chain === "tempo");
+    expect(waterfallHeading(waterfall(one), ["tempo"]).startsWith("On Tempo, ")).toBe(true);
+    expect(weeklyHeading(weeklyEveryday(one), ["tempo"]).startsWith("On Tempo, everyday")).toBe(
+      true,
+    );
+  });
+
+  it("never say what the transfers were for", () => {
+    const text = [
+      waterfallHeading(waterfall(activity), chains),
+      weeklyHeading(weeklyEveryday(activity), chains),
+    ].join(" ");
+    expect(text).not.toMatch(/trading|commerce|payment|spend|purchase/i);
+  });
+
+  it("the chains read from the rows, leaving out a chain with nothing from Day 0", () => {
+    expect(chains).toEqual(["tempo", "ethereum", "base", "solana"]);
+    expect(activityChains([zeroRow({ chain: "base", day: "2026-04-24" })])).toEqual([]);
   });
 });
 

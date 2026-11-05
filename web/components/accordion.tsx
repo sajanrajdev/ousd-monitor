@@ -6,13 +6,15 @@ export function Accordion({
   title,
   children,
   defaultOpen = false,
+  className = "",
 }: {
   title: string;
   children: ReactNode;
   defaultOpen?: boolean;
+  className?: string;
 }) {
   return (
-    <details className="accordion" open={defaultOpen}>
+    <details className={`accordion ${className}`.trim()} open={defaultOpen}>
       <summary>{title}</summary>
       <div className="pb-4">{children}</div>
     </details>

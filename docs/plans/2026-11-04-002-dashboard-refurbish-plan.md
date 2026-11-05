@@ -76,7 +76,7 @@ Main page, in order. There are still no tabs, and every card is on the page.
 | Trust status | One slim row directly under the header, with its detail disclosure | `trust-strip` |
 | Headline block | Question line, one-line headline with its "Our reading" marker, as-of line | `verdict`, `question` |
 | KPI row | Four cells: label, value, marker, info | `kpi-row` |
-| Findings row | About four short cards, each a link to its chart | `findings` |
+| Findings row | Four short cards, each a link to its chart | `findings` |
 | Marker legend | One line, on the page's first screen | `marker-legend` |
 | Chain filter | All, then each chain in the dataset. Sticky from 768 | `chain-filter` |
 | Supply | Where supply sits, placed vs circulating | `view-a` |
@@ -130,9 +130,9 @@ None covers data. All are native HTML, with a small client enhancement for hover
 | We don't ingest swaps, so this can't show trading | Pinned on the chain grid | Always |
 | Wallets, not people | Beside every wallet count, or in the caption of a table under a toggle | Wherever a wallet count shows |
 
-**Until a later unit pins them,** these stay visible through the card's `note` prop, so no state of the page hides one. U1 did this for "Everyday means under $1M" and hops on the waterfall, as `data-note="everyday-meaning"` and `data-note="hops"`, and for "Wallets, not people" as `data-note="wallets-not-people"`. U4 and U5 keep those kinds when they pin them.
+**Until a later unit pins them,** these stay visible through the card's `note` prop, so no state of the page hides one. U1 did this for "Everyday means under $1M" and hops on the waterfall, as `data-note="everyday-meaning"` and `data-note="hops"`, and for "Wallets, not people" as `data-note="wallets-not-people"`. U2 gave the rest a kind: `placed`, `issuer-unlabeled`, `series-start`, `day-0-scope`, `small-ticket`, `history`, `velocity-denominators`, `velocity-warning` and `no-swaps`. From U2, `verify-output` fails the build if the dataset calls for one of these and it isn't in view or doesn't hold its words, so U3 to U5 keep the kinds when they pin them. The words live in `web/lib/takeaways/caveats.ts`, which the views and `verify-output` both read, and a kind on two cards is two required instances.
 
-**The popover pushes and doesn't float.** The panel opens in flow under the card's or cell's head, so it moves the plot down and covers nothing. A floating panel would cover a chart, a KPI or a neighbouring card at some width, and the review ruled that out. The markup would be the same either way, so changing this is one CSS block. The maintainer sees it at the U2 review.
+**The popover pushes and doesn't float.** The panel opens in flow under the card's or cell's head, so it moves the plot down and covers nothing. A floating panel would cover a chart, a KPI or a neighbouring card at some width, and the review ruled that out. The markup would be the same either way, so changing this is one CSS block. The maintainer sees it at the whole-page review after U5.
 
 ### How each limit is met
 
@@ -224,7 +224,7 @@ Each row is current text and its new home. U6 proves this by script: see `compar
 | What each chain does | 65 |
 | **Total** | **501** |
 
-**This is above the target,** by about 11%. 136 of these words are numbers and dates, and the rest are mostly chart labels, headings and caveats the limits protect. The pass line above allows for this, and the target stays where it is. The next cuts, for the maintainer at the U2 review, each with a cost:
+**This is above the target,** by about 11%. 136 of these words are numbers and dates, and the rest are mostly chart labels, headings and caveats the limits protect. The pass line above allows for this, and the target stays where it is. The next cuts, for the maintainer at the whole-page review after U5, each with a cost:
 
 | Cut | Saves | Cost |
 |---|---|---|
@@ -250,6 +250,8 @@ A later change to wording touches `VERDICT_SENTENCES` and `web/tests/verdict.tes
 ## Exchange flexibility
 
 A separate research task may add exchange holdings. This work adds no dataset field and changes no metric, label or pipeline code. It only makes sure the page won't need rework.
+
+**Decided:** the maintainer accepted exchange option B. The main page may name exchanges where a published source ties the name to the wallets. That lands in PR #51, not in these units.
 
 **Design requirement.** Supply segments, their legend and their notes come from one config and one mapping function, with no per-segment markup. A segment has room for a coverage marker showing that a labeled total is a floor, and for optional per-entity rows.
 
@@ -281,7 +283,7 @@ function supplySegments(row: JourneyAmounts, extras?: SegmentExtras): SupplySegm
 
 **What the research task would still need to decide,** recorded so it isn't a surprise:
 
-- `verify-output` allows no labelled entity's name on the main page. Real per-exchange rows need that rule changed by the maintainer, with each name beside its source. Per-entity rows sit under the data toggle in a `data-labels-table` block, ready for that.
+- `verify-output` allows no labelled entity's name on the main page. Under the decision above, real per-exchange rows need that rule changed in PR #51, with each name beside its source. Per-entity rows sit under the data toggle in a `data-labels-table` block, ready for that.
 - A larger exchange segment lowers placed. That can change `verdict.state`, and so the headline, by design.
 - Fields would arrive through a schema change and generated types. `supplySegments` is the one function that then changes.
 
@@ -328,10 +330,10 @@ web/
 ### Order and overlap
 
 ```
-U1 shared components --> U2 first screen --> maintainer review stop --> U3 supply
-                                                                         |
-                                                                         v
-                                                U6 acceptance <-- U5 chains <-- U4 activity
+U1 shared components --> U2 first screen --> U3 supply
+                                              |
+                                              v
+         U6 acceptance <-- maintainer review <-- U5 chains <-- U4 activity
 ```
 
 Every unit runs alone, in this order. U4 and U5 both touch `views/activity.tsx` and `takeaways/activity.ts`, so they don't overlap. Between units the page mixes old and new parts, which is fine, because nothing is deployed. Evidence follows [the 001 plan's rules](2026-11-04-001-first-public-version-plan.md#evidence-for-web-prs), and number claims in any PR come from script output.
@@ -401,7 +403,7 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 
 **Goal:** a reader gets the answer, the figures and the findings on one screen, with trust and independence in view.
 
-**Dependencies:** U1. **The maintainer reviews this unit before U3 starts.**
+**Dependencies:** U1.
 
 **Suggested worker:** a frontend engineer careful with copy and generated text. Medium to high effort.
 
@@ -413,20 +415,20 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 **Approach**
 - **Trust status:** the same sentences and marker, one slim row at the top of the first screen. "What this covers" and "Reconciliation detail" become one disclosure with the same text and table. `data-section="trust-strip"` stays.
 - **Headline block:** the question line, then the headline at `--text-headline`, the "Our reading" marker, an info popover, and the as-of line. Follow [the interim text rule](#headline-wording-open). The popover holds "How we read this", `verdict.text` where allowed, and `verdictGroups`. Add `verdictTextVisible(verdict, state)` to `web/lib/verdict.ts`. `VERDICT_SENTENCES` doesn't change.
-- **KPI row:** label, value and marker in each cell, with the note and definition link in its popover. "Across {chains}." and the frame word stay visible. The as-of line above covers the KPI's date, and the build's check of it stays.
-- **Findings row:** four cards, each a whole-card link carrying `data-finding-link`, which is how `explain-enhance` knows to set the filter to All, with a heading's text and its marker. Add `journeyHeading`, `waterfallHeading`, `weeklyHeading` and `chainRolesHeading` beside the long takeaways, which stay for popovers. Worded for the real dataset:
+- **KPI row:** label, value and marker in each cell, with the note and definition link in its popover. "Across {chains}." and the frame word stay visible. The as-of line above covers the KPI's date, and the build's check of it stays. The date moves into each popover as the as-of repeat, so its words stay in reach, and comes back to the visible line if the KPI rows' days ever differ from the line above. With JavaScript off the note and link also show as a plain note.
+- **Findings row:** four cards, each a whole-card link carrying `data-finding-link`, which is how `explain-enhance` knows to set the filter to All, with a heading's text and its marker. Each card carries the frame word and hatched edge on sample and preview, so one cropped alone reads as not real. Add `journeyHeading`, `waterfallHeading`, `weeklyHeading` and `chainRolesHeading` beside the long takeaways, which stay for popovers. The four cards take these as their own headings now, with the long takeaway in the popover, so a finding and the card it lands on can't disagree. Worded for the real dataset:
 
   | Function | Text on dataset 20261104T163224Z | Words |
   |---|---|---|
   | `journeyHeading` | 77.07% of supply stayed 14+ days in $1M-plus wallets. | 9 |
   | `waterfallHeading` | $1.4B of $5.1B headline transfers is clean volume (27.97%). | 9 |
-  | `weeklyHeading` | Everyday clean volume: $32.1M last full week, $24.5M before. | 9 |
+  | `weeklyHeading` | Everyday clean volume: $32.1M over 7 days to 3 Nov, $24.5M before. | 12 |
   | `chainRolesHeading` | Tempo leads on four measures; Solana on everyday volume. | 9 |
 
-  These state only what's on the page now, and each function reads its figures from the dataset. Thresholds and days come from `definitions`. Past two named chains, `chainRolesHeading` reads "Leadership is split across {n} chains." Partial scope prefixes "On {chains},". Null gives the unknown text.
-- **Anchors:** put the new card anchors on the current cards now, so the links work before U3 to U5.
+  These state only what's on the page now, and each function reads its figures from the dataset. Thresholds and days come from `definitions`. Past two named chains, `chainRolesHeading` reads "Leadership is split across {n} chains." It reads the same for two chains that each lead on a measure of their own and also tie on another, as no shorter sentence holds all three. A tie names both chains. `weeklyHeading` dates its block, as blocks count from the data's first day and can end up to 6 days before its newest, so "last 7 days" and "week" would both misdescribe it. Partial scope prefixes "On {chains},". Null gives the unknown text.
+- **Anchors:** put the new card anchors on the current cards now, so the links work before U3 to U5. They live in `CARD_ANCHORS`, so a finding's link and its card share one name.
 - **Marker legend:** mounted at the end of the first screen.
-- **`verify-output`:** add `findings` to what must carry the frame word on sample and preview, and require every finding link's target to exist on the page.
+- **`verify-output`:** add `findings` to what must carry the frame word on sample and preview, and require every finding link's target to exist on the page. It also requires that a finding match its target card's heading and marker, that the headline be the verdict's sentence, that `verdict.text` be verbatim, in view unless `verdictTextVisible` allows the popover, that every verdict item and the trust row's "doesn't verify" caveat stay in their panels, and that the KPI cells, legend and essential caveats below are in view. The caveats' check moves here from U5, as this is the unit that first moves words off the page. It recomputes the four headings and the four KPI values from the dataset, so a finding and its card can't be wrong together, and it checks each required caveat instance's words, not only that a note of its kind exists.
 
 **Test scenarios**
 - Happy path: each of the four verdict states gives today's sentence, unchanged, compared with a copy of the four in the test, so a change to `VERDICT_SENTENCES` has to edit the test too.
@@ -440,9 +442,9 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 - Trust status, one test per state, kept from 3.2: fresh, stale by clock, `manifest.stale`, preview and sample. The fresh sentence appears only in fresh.
 - Browser, on real data: at 1440x900 everything through the legend is above the fold. At 390x844 the KPI row is, and findings start. The as-of swaps with no layout shift under a fake clock.
 
-**Verification:** `## Evidence` has the first screen at 390 and 1440 on the sample, a real-data first screen, and a popover open on a KPI.
+**Verification:** `## Evidence` has the first screen at 390 and 1440 on the sample, real-data script output, and a popover open on a KPI. The maintainer reviews real data on localhost, so no real-data image is published.
 
-**Maintainer review stop.** Before U3 starts, the maintainer reviews on real data: the first screen; the push-down popover; the letter markers and legend; the [word budget](#word-and-height-budget) and its next cuts; the per-chain filter decision in [Key decisions](#key-decisions). The headline wording can stay open past this stop. U3 doesn't start without an answer.
+**Maintainer review.** The maintainer has seen this first screen and lifted the stop that followed it, so U3 to U5 proceed without a separate stop. The maintainer reviews the whole page on real data after U5, including the push-down popover; the letter markers and legend; the [word budget](#word-and-height-budget) and its next cuts; the per-chain filter decision in [Key decisions](#key-decisions). The headline wording can stay open past that review.
 
 ---
 
@@ -450,7 +452,7 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 
 **Goal:** the filter on the page, with where supply sits and placed vs circulating as config-driven cards.
 
-**Dependencies:** U2, and the maintainer's review.
+**Dependencies:** U2.
 
 **Suggested worker:** a frontend engineer comfortable with charts and exact amounts. High effort, as the exchange test and filter both land here.
 
@@ -465,6 +467,7 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 - **Table:** the current supply table and the "Last 7 days, per chain" table, both under the data toggle. Per-entity rows, if any, in a `data-labels-table` block in the same place.
 - **Placed vs circulating:** `SupplySeries` for each filter option. Only the selected panel mounts Recharts, listening for the filter's `change`. The others keep the skeleton. Three y ticks, fewer x ticks, and a `seriesHeading` function: "Placed share: 33.84% on 14 Oct 2026, 77.07% on 3 Nov."
 - **Notes:** the placed and `issuer_labeled` notes from `SegmentConfig`, and the start-of-series pin.
+- **Findings with JavaScript off:** a finding's link resets the filter only through `explain-enhance`. With a chain selected and JavaScript off, it can land on a hidden card. U3 mounts the filter, so U3 makes this safe, for example with a rule that shows a targeted card's panel, and `acceptance.mjs` checks it with JavaScript off.
 - **Weight:** report the gzipped page against the pass line in this PR.
 
 **Test scenarios**
@@ -542,7 +545,7 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 - **Table:** the current chain roles table, with burned, placed share and "Leads on", under the toggle.
 - **Heading:** `chainRolesHeading` from U2. The no-swaps note is pinned.
 - **Cleanup:** remove `note` from `ChartCard`. `TableCard` stays for the methodology page's two cards, so remove only what the main page no longer uses.
-- **`verify-output`:** for each `circulating_supply` warning in the manifest, the main page must have a `data-note="velocity-warning"` for that chain outside any `details` and `noscript`. This makes the essential rule fail the build. The same check covers `data-note="no-swaps"`, the placed note, `data-note="hops"`, `data-note="everyday-meaning"` and `data-note="wallets-not-people"`, so a missed pin fails the build.
+- **`verify-output`:** U2 already requires, for each `circulating_supply` warning in the manifest, a `data-note="velocity-warning"` for that chain outside any `details` and `noscript`, and the same for the rest of the [essential list](#explanation-layers). So here the notes keep their kinds when they become pins, and this unit adds any that U5's own pins introduce.
 
 **Test scenarios**
 - Happy path: a warning on one chain gives one pin and one note, naming that chain. A warning on another chain moves them, with no code change.
@@ -622,29 +625,28 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 
 | When | Action |
 |---|---|
-| After U2, before U3 | The [review stop](#u2-first-screen), on real data |
+| After U5 | The [whole-page review](#u2-first-screen), on real data on localhost |
 | After the exchange research | Final headline wording, under [the open item](#headline-wording-open) |
-| If the research names exchanges | Decide the main-page name rule, under [Exchange flexibility](#exchange-flexibility) |
 | After U6 | Confirm the page is what the Phase 4 review should read |
 
 ## Risks
 
 | Risk | Response |
 |---|---|
-| A caveat slips into a popover during a later edit | `verify-output` fails the build for the listed caveats, from U5 on |
+| A caveat slips into a popover during a later edit | `verify-output` fails the build for the listed caveats, from U2 on |
 | A pin goes false as data changes | Pins come from the manifest or a config condition. No chain name is hard-coded, and U5 tests a moved warning |
 | Five panels make the page heavy | U3 measures it, against a pass line of 150,000 gzipped bytes. If it's over, U3 says so and proposes what to trim before U4 starts |
 | Filtered panels make the number check miss states | `compare-numbers.mjs` walks each filter option and has a floor per option |
-| A push-down popover feels jumpy on hover | The maintainer judges this at the U2 stop. Floating is one CSS block, though it would then cover data |
+| A push-down popover feels jumpy on hover | The maintainer judges this at the whole-page review after U5. Floating is one CSS block, though it would then cover data |
 | The word target is missed | Expected, at about 501. The cuts and their costs are [above](#word-and-height-budget), and limits win |
 | A test-only fixture drifts from a later schema | The research task's schema change replaces it with real fields, and the test stays |
-| A reader on a filtered panel clicks a finding | The link resets the filter with JavaScript. Without it, the heading names the chain, so it can't mislead |
+| A reader on a filtered panel clicks a finding | The link resets the filter with JavaScript. Without it, the link can land on a hidden card, which [U3](#u3-supply-views) must make safe when it mounts the filter |
 | `verdict.text` hidden on a state where it matters | `verdictTextVisible` is tested per state, and defaults to visible |
 
 ## Deferred
 
 - **To implementation:** the exact CSS for the segmented control; exact bar sizes; which x ticks the step line keeps; hover delays.
-- **To the maintainer:** the headline wording; further word cuts; the name rule if exchanges are named.
+- **To the maintainer:** the headline wording; further word cuts.
 - **To later work:** other manifest warnings (`total_supply`, `placed_supply`, `clean_everyday_7d`) aren't shown today, and showing them as pins would be new text. Remembering the filter in the URL. The live small-ticket line and CSV downloads stay where the 001 plan put them.
 
 ## Done when
@@ -653,5 +655,5 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 - Every check in U6 passes, or is reported as blocked or not run, with script output in `## Evidence`.
 - The page keeps every finding visible, and everything else in reach, as `compare-reach.mjs` shows.
 - Every chart has its takeaway, source, as-of time and definition link, enforced by types and `verify-output`.
-- The maintainer has reviewed U2, and final headline wording is either settled or still open by choice.
+- The maintainer has reviewed the whole page, and final headline wording is either settled or still open by choice.
 - Nothing has been deployed.

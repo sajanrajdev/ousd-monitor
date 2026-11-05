@@ -1,8 +1,8 @@
 import type { DatasetState, KpiRow, Verdict } from "@/lib/dataset";
 import { definitionHref } from "@/lib/definitions";
-import { supportingChip, verdictGroups, verdictSentence } from "@/lib/verdict";
-import { Accordion } from "./accordion";
+import { supportingChip, verdictGroups, verdictSentence, verdictTextVisible } from "@/lib/verdict";
 import { FreshnessText } from "./freshness";
+import { InfoPopover } from "./info-popover";
 import { StatusChip } from "./status-chip";
 
 export type VerdictBlockProps = {
@@ -11,30 +11,35 @@ export type VerdictBlockProps = {
   state: DatasetState;
 };
 
+function VerdictText({ verdict }: { verdict: Verdict }) {
+  return (
+    <p data-verdict-text>
+      <StatusChip kind={supportingChip(verdict)} /> {verdict.text}
+    </p>
+  );
+}
+
 export function VerdictBlock({ verdict, state }: VerdictBlockProps) {
   const groups = verdictGroups(verdict, state.frameWord);
+  const textVisible = verdictTextVisible(verdict, state);
+  const howWeRead = (
+    <a href={definitionHref("verdict")} className="target-link underline underline-offset-4">
+      How we read this
+    </a>
+  );
   return (
     <section className="verdict-block" data-section="verdict">
       <p data-section="question">
         Open USD (OUSD) pays partners to distribute it. Is that turning into money that moves?
       </p>
-      <h1 style={{ fontSize: "var(--text-display)" }}>{verdictSentence(verdict)}</h1>
-      <p className="mt-3">
-        <StatusChip kind="opinion" frameWord={state.frameWord} />{" "}
-        <a href={definitionHref("verdict")} className="target-link underline underline-offset-4">
-          How we read this
-        </a>
-      </p>
-      <p className="mt-4" data-verdict-text>
-        <StatusChip kind={supportingChip(verdict)} /> {verdict.text}
-      </p>
-      <p className="mt-3">
-        <FreshnessText fresh={state.asOfLine.fresh} stale={state.asOfLine.stale} />
-      </p>
-      {groups.length > 0 ? (
-        <Accordion title="What this rests on">
+      <div className="verdict-block__head explain-head">
+        <h1>{verdictSentence(verdict)}</h1>
+        <StatusChip kind="opinion" frameWord={state.frameWord} />
+        <InfoPopover label="About this reading">
+          <p>{howWeRead}</p>
+          {textVisible ? null : <VerdictText verdict={verdict} />}
           {groups.map((group) => (
-            <div key={group.key} className="mt-3" data-verdict-group={group.key}>
+            <div key={group.key} data-verdict-group={group.key}>
               <p className="font-semibold">{group.title}</p>
               <ul className="list-disc pl-5">
                 {group.items.map((item) => (
@@ -43,8 +48,15 @@ export function VerdictBlock({ verdict, state }: VerdictBlockProps) {
               </ul>
             </div>
           ))}
-        </Accordion>
-      ) : null}
+        </InfoPopover>
+      </div>
+      {textVisible ? <VerdictText verdict={verdict} /> : null}
+      <p className="verdict-block__as-of">
+        <FreshnessText fresh={state.asOfLine.fresh} stale={state.asOfLine.stale} />
+      </p>
+      <noscript>
+        <p className="verdict-block__as-of">{howWeRead}</p>
+      </noscript>
     </section>
   );
 }

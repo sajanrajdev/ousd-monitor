@@ -22,9 +22,10 @@ describe("the chain roles view", () => {
     const cards = container.querySelectorAll(".chart-card");
     expect(cards).toHaveLength(1);
     const card = cards[0];
-    expect(card.querySelector("h2")!.textContent).toContain("Ethereum leads on all 5 measures");
+    expect(card.querySelector("h2")!.textContent).toBe("Ethereum leads on all five measures.");
     expect(card.querySelector(".chart-card__meta")!.textContent).toContain("As of");
     const panel = card.querySelector(".info-popover__panel")!;
+    expect(panel.textContent).toContain("Ethereum leads on all 5 measures");
     expect(panel.textContent).toContain("Source:");
     expect(panel.querySelector('a[href="/methodology/#chain-roles"]')).not.toBeNull();
     expect(card.querySelector("svg, canvas")).toBeNull();
@@ -71,7 +72,9 @@ describe("the chain roles view", () => {
     }));
     expect(days.find((d) => d.chain === "Base")!.day).toContain("2 Nov 2026");
     expect(days.find((d) => d.chain === "Ethereum")!.day).toContain("3 Nov 2026");
-    expect(container.querySelector("h2")!.textContent).toContain("Chains end on different days");
+    expect(container.querySelector(".info-popover__panel")!.textContent).toContain(
+      "Chains end on different days",
+    );
   });
 
   it("shows a null share as the unknown text, not zero", () => {

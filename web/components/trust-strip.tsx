@@ -40,19 +40,26 @@ function Marker({ state }: { state: DatasetState }) {
   );
 }
 
+// One slim row: the state in view, always, and one disclosure for the rest. The disclosure isn't a
+// popover: it holds a table, and it can stay open beside one.
 export function TrustStrip({ reconciliation, latest_run, checks, state }: TrustStripProps) {
   const rows = latestRows(reconciliation, latest_run);
   const framed = state.frameWord ? `${state.frameWord} figures, not a reconciliation. ` : "";
   return (
     <section className="trust-strip" aria-label="Reconciliation" data-section="trust-strip">
-      <p>
-        <Marker state={state} />{" "}
-        <FreshnessText fresh={state.trustLine.fresh} stale={state.trustLine.stale} />{" "}
-        <a href={definitionHref("reconciliation")} className="underline underline-offset-4">
-          What this covers
-        </a>
+      <p className="trust-strip__status">
+        <Marker state={state} />
+        <FreshnessText fresh={state.trustLine.fresh} stale={state.trustLine.stale} />
       </p>
-      <Accordion title="Reconciliation detail">
+      <Accordion title="Reconciliation detail" className="trust-strip__detail">
+        <p>
+          <a
+            href={definitionHref("reconciliation")}
+            className="target-link underline underline-offset-4"
+          >
+            What this covers
+          </a>
+        </p>
         <p>
           {framed}
           Reconciliation compares mints minus burns with supply at the block shown. The KPI totals

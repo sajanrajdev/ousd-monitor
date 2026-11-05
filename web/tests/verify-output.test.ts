@@ -2,20 +2,26 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { locateDataset } from "@/lib/dataset/load";
-import { TOKEN_CONTRACTS } from "@/lib/definitions";
+import { CARD_ANCHORS, TOKEN_CONTRACTS } from "@/lib/definitions";
 import { expectedFromDataset, verifyOutput } from "@/scripts/verify-output.mjs";
 import { at, copySample, editJson, plantFile, releaseGrade, tempDir } from "./dataset-helpers";
+import {
+  PLANTED_FINDINGS,
+  PLANTED_KPI_SCOPE,
+  PLANTED_KPI_VALUES,
+  PLANTED_LEGEND,
+  PLANTED_TRUST_DETAIL,
+  PLANTED_VERDICT,
+  plantedCard,
+  plantedFindings,
+  plantedHeadline,
+  plantedKpis,
+  plantedNotes,
+} from "./planted-first-screen";
 
 const LINE = "Independent. Not affiliated with Open Standard or Bridge.";
 const BLOCKED = JSON.parse(readFileSync("scripts/blocked-names.json", "utf8")) as string[];
-const CARD = `<section class="chart-card" data-frame="Sample"><div class="chart-card__head"><h2>T</h2>
-  <span class="status-chip" data-kind="fact">F</span>
-  <details class="info-popover" name="info"><summary aria-label="About: T"></summary>
-  <div class="info-popover__panel"><p>Source: S</p><a href="/methodology/#velocity">Definition</a></div></details></div>
-  <table></table>
-  <p class="chart-card__meta">As of <time datetime="2026-11-03">3 Nov</time>
-  · <strong>Sample</strong></p>
-  <noscript><p class="chart-card__source-note">Source: S · <a href="/methodology/#velocity">Definition</a></p></noscript></section>`;
+const CARD = plantedCard("Sample");
 
 const STALE_NOTE = "Data from 4 Nov. Nothing newer has reached this page.";
 const STALE_TRUST = "Last reconciled 4 Nov. Nothing newer has reached this page.";
@@ -34,6 +40,11 @@ const sampleExpected = {
   freshness: "stale",
   asOfLine: { fresh: null, stale: STALE_NOTE },
   trustLine: { fresh: "Not reconciled", stale: "Not reconciled" },
+  verdict: PLANTED_VERDICT,
+  kpiScope: PLANTED_KPI_SCOPE,
+  kpiValues: PLANTED_KPI_VALUES,
+  findings: PLANTED_FINDINGS,
+  essentialNotes: [] as { kind: string; chain?: string; text: string }[],
 };
 
 const realExpected = {
@@ -41,6 +52,7 @@ const realExpected = {
   kind: "real",
   frameWord: null,
   trustLine: { fresh: null, stale: STALE_TRUST },
+  verdict: { ...PLANTED_VERDICT, textVisible: false },
 };
 
 const freshRealExpected = {
@@ -65,10 +77,11 @@ function page(
     <a href="https://example.com/r" rel="noopener noreferrer">Reports</a></footer></body></html>`;
 }
 
-const MAIN = `<main><section data-section="verdict">
+const MAIN = `<main><section data-section="verdict">${plantedHeadline()}
   <span class="status-chip" data-kind="opinion">Sample, not a finding</span><p>${STALE_NOTE}</p></section>
-  <section data-section="kpi-row"><strong>Sample</strong></section>
-  <section data-section="trust-strip">Not reconciled</section>${CARD}</main>`;
+  <section data-section="kpi-row"><strong>Sample</strong>${plantedKpis()}</section>
+  <section data-section="trust-strip">Not reconciled${PLANTED_TRUST_DETAIL}</section>
+  ${plantedFindings("Sample")}${PLANTED_LEGEND}${CARD}</main>`;
 
 function site(overrides: { main?: string; methodology?: string; extra?: [string, string][] } = {}) {
   const dir = tempDir();
@@ -88,10 +101,13 @@ function mainWith(body: string) {
 
 const realAttrs =
   'data-dataset-kind="real" data-dataset-version="20261104T060000Z" data-freshness="stale"';
-const REAL_MAIN = `<main><section data-section="verdict"><p>${STALE_NOTE}</p></section>
-  <section data-section="trust-strip">${STALE_TRUST}</section></main>`;
-const FRESH_MAIN = `<main><section data-section="verdict"><p>Data as of 3 Nov 2026 UTC.</p><p>${STALE_NOTE}</p></section>
-  <section data-section="trust-strip">${FRESH_TRUST} ${STALE_TRUST}</section></main>`;
+const REAL_HEADLINE = plantedHeadline(realExpected.verdict);
+const REAL_REST = `<section data-section="kpi-row">${plantedKpis()}</section>
+  ${plantedFindings(null)}${PLANTED_LEGEND}${plantedCard(null)}`;
+const REAL_MAIN = `<main><section data-section="verdict">${REAL_HEADLINE}<p>${STALE_NOTE}</p></section>
+  <section data-section="trust-strip">${STALE_TRUST}${PLANTED_TRUST_DETAIL}</section>${REAL_REST}</main>`;
+const FRESH_MAIN = `<main><section data-section="verdict">${REAL_HEADLINE}<p>Data as of 3 Nov 2026 UTC.</p><p>${STALE_NOTE}</p></section>
+  <section data-section="trust-strip">${FRESH_TRUST} ${STALE_TRUST}${PLANTED_TRUST_DETAIL}</section>${REAL_REST}</main>`;
 
 function realPage(body: string) {
   return page(body, realAttrs, "Open USD Monitor", "").replace(
@@ -758,11 +774,10 @@ describe("verifyOutput", () => {
 
 describe('"Our reading" outside the verdict chip', () => {
   it("is fine in the verdict's accordion heading, on a framed page", () => {
-    const heading = `<main><section data-section="verdict">
-      <span class="status-chip" data-kind="opinion">Sample, not a finding</span>
-      <p>${STALE_NOTE}</p><h3>Our reading</h3></section>
-      <section data-section="kpi-row"><strong>Sample</strong></section>
-      <section data-section="trust-strip">Not reconciled</section></main>`;
+    const heading = MAIN.replace(
+      `<p>${STALE_NOTE}</p></section>`,
+      `<p>${STALE_NOTE}</p><h3>Our reading</h3></section>`,
+    );
     expect(verifyOutput(site({ main: page(heading) }), sampleExpected)).toEqual([]);
   });
 
@@ -781,6 +796,329 @@ describe('"Our reading" outside the verdict chip', () => {
     expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
       'index.html: the verdict chip doesn\'t say "Sample, not a finding"',
     );
+  });
+});
+
+describe("the first screen", () => {
+  const change = (from: string, to: string) => (html: string) => {
+    expect(html).toContain(from);
+    return html.replaceAll(from, to);
+  };
+  const inDetails = (inner: string) => `<details><summary>More</summary>${inner}</details>`;
+  const finding = /<li><a href="#card"[\s\S]*?<\/a><\/li>/;
+
+  it.each([
+    [
+      "a headline that isn't the verdict's sentence",
+      change("<h1>A headline.</h1>", "<h1>Another headline.</h1>"),
+      "the headline isn't the verdict's sentence",
+    ],
+    [
+      "the headline in a details",
+      change("<h1>A headline.</h1>", inDetails("<h1>A headline.</h1>")),
+      "the headline isn't the verdict's sentence",
+    ],
+    [
+      "no question line",
+      change('<p data-section="question">A question?</p>', ""),
+      "no question line in view",
+    ],
+    [
+      "verdict.text in a details on a dataset that keeps it in view",
+      change(
+        "<p data-verdict-text>The verdict's text, 12% &amp; more.</p>",
+        inDetails("<p data-verdict-text>The verdict's text, 12% &amp; more.</p>"),
+      ),
+      "verdict.text isn't in view on this dataset",
+    ],
+    [
+      "verdict.text visually hidden",
+      change("<p data-verdict-text>", '<p class="sr-only" data-verdict-text>'),
+      "verdict.text isn't in view on this dataset",
+    ],
+    [
+      "verdict.text reworded",
+      change("The verdict's text, 12%", "The verdict's text, about 12%"),
+      "verdict.text isn't in view on this dataset",
+    ],
+    [
+      "a verdict item lost from the popover",
+      change("<li>An estimate.</li>", ""),
+      "the headline's popover has lost a verdict item",
+    ],
+    [
+      "no definition link in the headline's popover",
+      change('<a href="/methodology/#verdict">How we read this</a>', ""),
+      "the headline's popover has no definition link",
+    ],
+    [
+      "a KPI cell gone",
+      (html: string) => html.replace(/<dl><div>[\s\S]*?<\/div>/, "<dl>"),
+      "the KPI row has 3 cells",
+    ],
+    [
+      "a KPI value in its popover",
+      change("<span data-kpi-value>$1</span>", ""),
+      "a KPI has no value in view",
+    ],
+    [
+      "a KPI marker that's only a word for assistive tech",
+      change(
+        '<span aria-hidden="true">F</span><span class="sr-only">Fact</span>',
+        '<span class="sr-only">Fact</span>',
+      ),
+      "a KPI has no marker in view",
+    ],
+    [
+      "a KPI with no note",
+      change("<p data-kpi-note>A note.</p>", "<p>As of 3 Nov.</p>"),
+      "a KPI's popover has no note",
+    ],
+    [
+      "a KPI with no definition link",
+      change(
+        '<p data-kpi-note>A note.</p><a href="/methodology/#velocity">Definition</a>',
+        "<p data-kpi-note>A note.</p>",
+      ),
+      "a KPI's popover has no definition link",
+    ],
+    [
+      "a KPI with no plain note",
+      change(
+        '<noscript><p>A note. <a href="/methodology/#velocity">Definition</a></p></noscript>',
+        "",
+      ),
+      "a KPI's noscript note has no definition link",
+    ],
+    [
+      "the KPI row's chains in a details",
+      change("<p>Across Tempo.</p>", inDetails("<p>Across Tempo.</p>")),
+      "the KPI row doesn't say which chains it covers",
+    ],
+    ["a finding gone", (html: string) => html.replace(finding, ""), "there are 3 findings"],
+    [
+      "a finding's text in a details",
+      change(
+        '<span class="finding__text">T</span>',
+        inDetails('<span class="finding__text">T</span>'),
+      ),
+      "a finding has no text in view",
+    ],
+    [
+      "a finding's marker gone",
+      change(
+        '<span class="finding__marks"><span class="status-chip" data-kind="fact">F</span>',
+        '<span class="finding__marks">',
+      ),
+      "a finding has no marker in view",
+    ],
+    [
+      "a finding with a different marker",
+      change(
+        '<span class="finding__marks"><span class="status-chip" data-kind="fact">',
+        '<span class="finding__marks"><span class="status-chip" data-kind="estimate">',
+      ),
+      "a finding's marker differs from #card",
+    ],
+    [
+      "a finding with no frame word",
+      change("</span><strong>Sample</strong></span></a>", "</span></span></a>"),
+      'a finding has no "Sample"',
+    ],
+    [
+      "a finding's target gone",
+      change('id="card"', 'id="elsewhere"'),
+      "a finding links to #card, which isn't on the page",
+    ],
+    [
+      "a finding that differs from its chart's heading",
+      change(
+        '<span class="finding__text">T</span>',
+        '<span class="finding__text">Another finding</span>',
+      ),
+      "a finding differs from the heading of #card",
+    ],
+    [
+      "the legend gone",
+      change("<p>F Fact, I Inferred, E Estimate</p>", ""),
+      "the marker legend isn't in view",
+    ],
+    [
+      "the legend in a details",
+      change(
+        "<p>F Fact, I Inferred, E Estimate</p>",
+        inDetails("<p>F Fact, I Inferred, E Estimate</p>"),
+      ),
+      "the marker legend isn't in view",
+    ],
+    [
+      "no definition link in the legend's popover",
+      change('<a href="/methodology/#fact-estimate-opinion">Fact, estimate and opinion</a>', ""),
+      "the marker legend's popover has no definition link",
+    ],
+    [
+      "a second disclosure on the trust row",
+      change(
+        "Reconciliation detail</summary>",
+        "Reconciliation detail</summary><details><summary>x</summary></details>",
+      ),
+      "the trust row has 2 disclosures, not one",
+    ],
+    [
+      "the trust row's caveat lost",
+      change("<p>It doesn't verify placed share or velocity.</p>", ""),
+      "the trust row's disclosure has lost what it says it doesn't verify",
+    ],
+    [
+      "the trust row's definition link lost",
+      change('<a href="/methodology/#reconciliation">What this covers</a>', ""),
+      "the trust row's disclosure has no definition link",
+    ],
+  ])("fails on %s", (_name, mutate, problem) => {
+    const problems = verifyOutput(site({ main: mutate(page(MAIN)) }), sampleExpected);
+    expect(problems).toContain(`index.html: ${problem}`);
+  });
+
+  it("a real, four-chain page keeps verdict.text in its popover, verbatim", () => {
+    const moved = realPage(
+      REAL_MAIN.replace("The verdict's text, 12%", "The verdict's text, about 12%"),
+    );
+    const dir = site({ main: moved, methodology: realPage("<main>M</main>") });
+    expect(verifyOutput(dir, realExpected)).toContain(
+      "index.html: verdict.text is neither in view nor in its popover",
+    );
+  });
+
+  it("doesn't count text out of its popover as in view on a page that needs it there", () => {
+    const stays = { ...realExpected, verdict: { ...PLANTED_VERDICT, textVisible: true } };
+    const dir = site({ main: realPage(REAL_MAIN), methodology: realPage("<main>M</main>") });
+    expect(verifyOutput(dir, stays)).toContain(
+      "index.html: verdict.text isn't in view on this dataset",
+    );
+  });
+
+  describe("the essential caveats", () => {
+    const notes = [
+      { kind: "placed", text: "A caveat." },
+      { kind: "velocity-warning", chain: "ethereum", text: "A dated warning." },
+    ];
+    const expected = { ...sampleExpected, essentialNotes: notes };
+
+    it("passes with each in view", () => {
+      expect(verifyOutput(mainWith(plantedNotes(notes)), expected)).toEqual([]);
+    });
+
+    it.each([
+      ["gone", () => ""],
+      ["in a popover", (note: string) => inDetails(note)],
+      ["in a noscript", (note: string) => `<noscript>${note}</noscript>`],
+      ["hidden", (note: string) => note.replace("<p ", "<p hidden ")],
+      ["visually hidden", (note: string) => note.replace("<p ", '<p class="sr-only" ')],
+      ["empty", (note: string) => note.replace("A dated warning.", "")],
+    ])("fails on a note %s", (_name, hide) => {
+      const body = plantedNotes([notes[0]]) + hide(plantedNotes([notes[1]]));
+      expect(verifyOutput(mainWith(body), expected)).toEqual([
+        "index.html: the velocity-warning note for ethereum isn't in view",
+      ]);
+    });
+
+    it("a warning on another chain moves the note it asks for", () => {
+      const moved = [notes[0], { ...notes[1], chain: "base" }];
+      const problems = verifyOutput(mainWith(plantedNotes(notes)), {
+        ...sampleExpected,
+        essentialNotes: moved,
+      });
+      expect(problems).toEqual(["index.html: the velocity-warning note for base isn't in view"]);
+    });
+
+    it("fails on a note that keeps its kind and loses its words", () => {
+      const body = plantedNotes([notes[0], { ...notes[1], text: "Fine." }]);
+      expect(verifyOutput(mainWith(body), expected)).toEqual([
+        'index.html: the velocity-warning note for ethereum doesn\'t say "A dated warning."',
+      ]);
+    });
+
+    it("reads a note whole, across its date, its marker and its link", () => {
+      const text = "Flows count from 3 Nov 2026 UTC, here.";
+      const split = `<p data-note="day-0-scope"><span class="status-chip" data-kind="fact">F</span>
+        Flows count from <!-- -->3 Nov 2026 UTC<!-- -->, <em>here</em>. <a href="/methodology/#x">How</a></p>`;
+      expect(
+        verifyOutput(mainWith(split), {
+          ...sampleExpected,
+          essentialNotes: [{ kind: "day-0-scope", text }],
+        }),
+      ).toEqual([]);
+    });
+
+    describe("a kind on two cards", () => {
+      const both = [
+        { kind: "wallets-not-people", text: "Wallets, and more." },
+        { kind: "wallets-not-people", text: "Wallets." },
+      ];
+      const twice = { ...sampleExpected, essentialNotes: both };
+
+      it("passes with each instance", () => {
+        expect(verifyOutput(mainWith(plantedNotes(both)), twice)).toEqual([]);
+      });
+
+      it.each([
+        ["gone", () => ""],
+        ["in a popover", (note: string) => inDetails(note)],
+      ])("fails on one instance %s, though the other stays", (_name, hide) => {
+        const body = plantedNotes([both[0]]) + hide(plantedNotes([both[1]]));
+        expect(verifyOutput(mainWith(body), twice)).toEqual([
+          'index.html: the wallets-not-people note doesn\'t say "Wallets."',
+        ]);
+      });
+    });
+  });
+
+  describe("the figures the dataset fixes", () => {
+    it.each(["51.00%", "Tempo leads on three measures"])(
+      "fails when a finding and its card both change to %s",
+      (text) => {
+        const both = page(
+          MAIN.replaceAll(
+            '<span class="finding__text">T</span>',
+            `<span class="finding__text">${text}</span>`,
+          ).replace("<h2>T</h2>", `<h2>${text}</h2>`),
+        );
+        const problems = verifyOutput(site({ main: both }), sampleExpected);
+        expect([...new Set(problems)]).toEqual([
+          "index.html: the finding for #card isn't the dataset's heading",
+        ]);
+      },
+    );
+
+    it("fails when a finding isn't there for one of the dataset's headings", () => {
+      const expected = {
+        ...sampleExpected,
+        findings: [...PLANTED_FINDINGS, { id: "another-card", text: "T" }],
+      };
+      expect(verifyOutput(site(), expected)).toEqual([
+        "index.html: the finding for #another-card isn't the dataset's heading",
+      ]);
+    });
+
+    it("fails on a KPI value the dataset doesn't give", () => {
+      const html = page(
+        MAIN.replace("<span data-kpi-value>$1</span>", "<span data-kpi-value>$2</span>"),
+      );
+      expect(verifyOutput(site({ main: html }), sampleExpected)).toEqual([
+        "index.html: A label isn't the dataset's figure",
+      ]);
+    });
+
+    it("fails on two KPI values swapped", () => {
+      const expected = { ...sampleExpected, kpiValues: ["$1", "$1", "$1", "$2"] };
+      const swapped = page(
+        MAIN.replace("<span data-kpi-value>$1</span>", "<span data-kpi-value>$2</span>"),
+      );
+      expect(verifyOutput(site({ main: swapped }), expected)).toEqual([
+        "index.html: A label isn't the dataset's figure",
+        "index.html: A label isn't the dataset's figure",
+      ]);
+    });
   });
 });
 
@@ -857,7 +1195,10 @@ describe("freshness in the output", () => {
 
   it("reads a details' summary as in view", () => {
     const html = realPage(
-      REAL_MAIN.replace(STALE_TRUST, `<details><summary>${STALE_TRUST}</summary>More</details>`),
+      REAL_MAIN.replace(
+        `${STALE_TRUST}${PLANTED_TRUST_DETAIL}`,
+        PLANTED_TRUST_DETAIL.replace("Reconciliation detail", STALE_TRUST),
+      ),
     );
     const dir = site({ main: html, methodology: realPage("<main>M</main>") });
     expect(verifyOutput(dir, realExpected)).toEqual([]);
@@ -962,6 +1303,128 @@ describe("what to expect comes from the dataset", () => {
 
   it("the partial sample expects its sample frame, not preview", () => {
     expect(expectedFromDataset(at(copySample("partial"))).frameWord).toBe("Sample");
+  });
+
+  it("takes the headline from the dataset, and keeps verdict.text in view unless it may move", () => {
+    const sample = expectedFromDataset(at(copySample("complete")));
+    expect(sample.verdict.sentence).toBe(
+      "At least half of Open USD (OUSD) supply is sitting still.",
+    );
+    expect(sample.verdict.textVisible).toBe(true);
+    expect(expectedFromDataset(at(copySample("partial"))).verdict.textVisible).toBe(true);
+    const real = expectedFromDataset(at(releaseGrade()));
+    expect(real.verdict.textVisible).toBe(false);
+    expect(real.verdict.items.length).toBeGreaterThan(0);
+  });
+
+  it("asks for every caveat the dataset's conditions call for", () => {
+    const kinds = (dir: string) =>
+      expectedFromDataset(at(dir)).essentialNotes.map((note: { kind: string }) => note.kind);
+    expect(kinds(releaseGrade())).toEqual(
+      expect.arrayContaining([
+        "placed",
+        "series-start",
+        "small-ticket",
+        "velocity-denominators",
+        "no-swaps",
+        "wallets-not-people",
+        "hops",
+        "everyday-meaning",
+        "history",
+      ]),
+    );
+    expect(kinds(releaseGrade())).not.toContain("velocity-warning");
+    const warned = releaseGrade();
+    editJson(warned, "manifest.json", (manifest) => {
+      manifest.warnings = [
+        {
+          chain: "base",
+          metric: "circulating_supply",
+          day: "2026-11-02",
+          previous: "2",
+          current: "1",
+        },
+        { chain: "tempo", metric: "total_supply", day: "2026-11-02", previous: "1", current: "2" },
+      ];
+    });
+    const warnings = expectedFromDataset(at(warned)).essentialNotes.filter(
+      (note: { kind: string }) => note.kind === "velocity-warning",
+    );
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        chain: "base",
+        text: expect.stringContaining("Base's circulating supply"),
+      }),
+    ]);
+  });
+
+  it("asks for the unlabelled issuer's note on the chain that has one", () => {
+    const dir = releaseGrade();
+    editJson(dir, "journey.json", (payload) => {
+      for (const row of payload.data) {
+        row.issuer_labeled = row.chain !== "base";
+        if (row.chain === "base") {
+          row.free_floating = (BigInt(row.free_floating) + BigInt(row.issuer_inventory)).toString();
+          row.issuer_inventory = "0";
+        }
+      }
+    });
+    const notes = expectedFromDataset(at(dir)).essentialNotes;
+    expect(notes).toContainEqual({
+      kind: "issuer-unlabeled",
+      chain: "base",
+      text: "Base: issuer inventory reads as zero because no wallet there is labelled.",
+    });
+    expect(notes.filter((note: { kind: string }) => note.kind === "issuer-unlabeled")).toHaveLength(
+      1,
+    );
+  });
+
+  it("words each caveat from the dataset, and asks for both wallet notes", () => {
+    const dir = releaseGrade();
+    editJson(dir, "manifest.json", (manifest) => {
+      manifest.definitions.placed_days = 21;
+      manifest.definitions.large_transfer_base_units = "2000000000000";
+    });
+    const notes = expectedFromDataset(at(dir)).essentialNotes as { kind: string; text: string }[];
+    const text = (kind: string) => notes.filter((note) => note.kind === kind).map((n) => n.text);
+    expect(text("series-start")[0]).toContain("Placed supply needs 21 days of history");
+    expect(text("everyday-meaning")).toEqual(["Everyday means under $2M, nothing more."]);
+    expect(text("wallets-not-people")).toEqual([
+      "Wallets, not people, and never added across chains.",
+      "Wallets, not people.",
+    ]);
+    expect(text("history")[0]).toMatch(
+      /^Weeks end on the date shown, in UTC\. \d+ days of history/,
+    );
+  });
+
+  it("recomputes the four headings and the KPI values from the dataset", () => {
+    const dir = releaseGrade();
+    const before = expectedFromDataset(at(dir));
+    expect(before.findings.map((finding: { id: string }) => finding.id)).toEqual([
+      CARD_ANCHORS.supply,
+      CARD_ANCHORS.waterfall,
+      CARD_ANCHORS.weekly,
+      CARD_ANCHORS.chainRoles,
+    ]);
+    editJson(dir, "journey.json", (payload) => {
+      for (const row of payload.data) {
+        const moved = BigInt(row.placed_supply);
+        row.placed_supply = "0";
+        row.free_floating = (BigInt(row.free_floating) + moved).toString();
+      }
+    });
+    const after = expectedFromDataset(at(dir));
+    expect(after.findings[0].text).not.toBe(before.findings[0].text);
+    expect(after.findings[0].text).toContain("0.00% of supply");
+    expect(after.findings.slice(1)).toEqual(before.findings.slice(1));
+    editJson(dir, "summary.json", (summary) => {
+      for (const row of summary.kpis) row.clean_everyday_7d = "0";
+    });
+    const moved = expectedFromDataset(at(dir)).kpiValues;
+    expect(moved[2]).toBe("$0");
+    expect(before.kpiValues[2]).not.toBe("$0");
   });
 
   it("reads the same dataset the build does", () => {
