@@ -53,10 +53,15 @@ export default function Home() {
           activity={dataset.activity}
           kpis={kpis}
           definitions={manifest.definitions}
+          state={state}
+        />
+        <ChainRolesView
+          chain_roles={dataset.chain_roles}
+          kpis={kpis}
+          definitions={manifest.definitions}
           warnings={manifest.warnings}
           state={state}
         />
-        <ChainRolesView chain_roles={dataset.chain_roles} state={state} />
       </div>
     </main>
   );

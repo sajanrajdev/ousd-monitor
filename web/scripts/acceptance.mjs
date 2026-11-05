@@ -1581,6 +1581,57 @@ async function checkActivityOptions(page, where) {
   await page.locator(`.chain-filter input[value="${values[0]}"]`).check({ force: true });
 }
 
+// The cards that compare chains: under each option the chosen chain is marked by weight and a rule,
+// and no other is, nothing fades, and both cards fit inside themselves at every width.
+async function checkChainCards(page, where) {
+  const values = await page
+    .locator(".chain-filter input")
+    .evaluateAll((inputs) => inputs.map((input) => input.value));
+  for (const value of values) {
+    await page.locator(`.chain-filter input[value="${value}"]`).check({ force: true });
+    const seen = await page.evaluate((chosen) => {
+      const marked = (element) => {
+        const style = getComputedStyle(element);
+        const rule =
+          style.boxShadow !== "none" ||
+          (style.borderLeftStyle !== "none" &&
+            style.borderLeftColor !== "rgba(0, 0, 0, 0)" &&
+            parseFloat(style.borderLeftWidth) > 0);
+        return Number(style.fontWeight) >= 600 && rule;
+      };
+      const names = [...document.querySelectorAll("[data-velocity-chain]")].map((group) => ({
+        chain: group.dataset.velocityChain,
+        marked: marked(group.querySelector(".velocity-chart__name")),
+      }));
+      const cells = [...document.querySelectorAll(".chain-grid td[data-grid-chain]")].map(
+        (cell) => ({ chain: cell.dataset.gridChain, marked: marked(cell) }),
+      );
+      const faded = [
+        ...document.querySelectorAll("#velocity-by-chain *, #what-each-chain-does *"),
+      ].filter((element) => Number(getComputedStyle(element).opacity) < 1).length;
+      const spill = ["velocity-by-chain", "what-each-chain-does"].filter((id) => {
+        const card = document.getElementById(id).getBoundingClientRect();
+        return [
+          ...document.getElementById(id).querySelectorAll("table, td, th, .velocity-chart"),
+        ].some((element) => element.getBoundingClientRect().right > card.right + 0.5);
+      });
+      const right = (list) =>
+        list.length > 0 && list.every(({ chain, marked: on }) => on === (chain === chosen));
+      return { names: right(names), cells: right(cells), faded, spill };
+    }, value);
+    check("the velocity chart marks only the chosen chain", where, seen.names, value);
+    check("the chain grid marks only the chosen chain", where, seen.cells, value);
+    check("nothing on the chain cards fades", where, seen.faded === 0, `${value}: ${seen.faded}`);
+    check(
+      "both chain cards fit inside themselves",
+      where,
+      seen.spill.length === 0,
+      `${value}: ${seen.spill}`,
+    );
+  }
+  await page.locator(`.chain-filter input[value="${values[0]}"]`).check({ force: true });
+}
+
 async function checkFolder(browser, folder, harness, widths) {
   const partial = basename(folder) === "partial";
   const chains = partial ? ["tempo", "ethereum"] : ["tempo", "ethereum", "base", "solana"];
@@ -1612,6 +1663,7 @@ async function checkFolder(browser, folder, harness, widths) {
       await group("the supply card", () => checkSupplyOptions(page, where));
       await group("the step lines", () => checkStepLines(page, where, js));
       await group("the activity cards", () => checkActivityOptions(page, where));
+      await group("the chain cards", () => checkChainCards(page, where));
       await group("the exchange rows", () => checkExchangeRowsOpen(page, where));
       await group("the table's words", () => checkTableWords(page, where));
       await group("the findings", () => checkFindingLinks(page, where, js));

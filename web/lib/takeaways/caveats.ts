@@ -32,6 +32,13 @@ export const SMALL_TICKET_PIN =
 export const VELOCITY_NOTE =
   "Velocity divides clean volume by circulating supply. Headline velocity divides all transfers by total supply. Because circulating supply is smaller, velocity can be higher than headline velocity even though clean volume is smaller than headline volume. They aren't two cuts of one number.";
 
+// What stays in view on the velocity chart. The note above stays whole in the card's popover.
+export const VELOCITY_PIN =
+  "Velocity divides by circulating supply and headline velocity by total supply, so they aren't two cuts of one number.";
+
+export const JUMPY_NOTE =
+  "A small circulating supply makes velocity jumpy: the same volume over a smaller base gives a bigger percentage.";
+
 export const NO_SWAPS_NOTE = "We don’t ingest swaps, so this view can’t show trading.";
 
 // Two cards count wallets. The one beside the supply parts also rules out adding them up.

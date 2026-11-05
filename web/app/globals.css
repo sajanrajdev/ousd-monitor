@@ -1232,3 +1232,222 @@ html[data-freshness="fresh"] .freshness-text__stale,
 html[data-freshness="stale"] .freshness-text__fresh {
   visibility: hidden;
 }
+
+/* Velocity by chain: a group per chain, a row per measure, and each bar's figure at the row's end. */
+.velocity-chart {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  font-size: var(--text-small);
+}
+
+.velocity-chart__name {
+  margin: 0 0 0.25rem;
+  padding-left: 0.375rem;
+  border-left: 2px solid transparent;
+  font-weight: 550;
+}
+
+.velocity-chart__row {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr) 5.5rem;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.velocity-chart__label {
+  color: var(--color-meta-text);
+}
+
+/* A narrow card gives the bar the row's width: the measure's name goes above it. */
+@container (max-width: 459.98px) {
+  .velocity-chart__row {
+    grid-template-columns: minmax(0, 1fr) 4.75rem;
+    row-gap: 0.125rem;
+  }
+
+  .velocity-chart__label {
+    grid-column: 1 / -1;
+  }
+}
+
+.velocity-chart__track {
+  position: relative;
+  display: block;
+  height: 0.75rem;
+}
+
+.velocity-chart__bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  height: 100%;
+  min-width: 2px;
+}
+
+.velocity-chart__value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 550;
+}
+
+.velocity-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-small);
+}
+
+.velocity-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.velocity-legend__swatch {
+  display: inline-block;
+  width: 0.875rem;
+  height: 0.75rem;
+}
+
+/* The chain grid: measures as rows and chains as columns, with a bar in each cell scaled to its row.
+   It stacks only where a card is too narrow for five columns, not at the hairline table's 720. */
+.chain-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.chain-grid caption {
+  padding-bottom: 0.5rem;
+  text-align: left;
+  font-weight: 550;
+}
+
+.chain-grid th,
+.chain-grid td {
+  padding: 0.5rem 0.375rem;
+  border-bottom: 1px solid var(--color-border);
+  border-inline: 2px solid transparent;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.chain-grid thead th {
+  font-weight: 550;
+}
+
+/* Figures and measure names break between words, never inside one. */
+.chain-grid th[scope="row"] {
+  min-width: 5.5rem;
+  overflow-wrap: normal;
+  font-weight: 550;
+}
+
+/* An amount and its share may wrap apart, but neither breaks inside itself. */
+.chain-grid__part {
+  white-space: nowrap;
+}
+
+/* A grid card's notes go under the grid, which needs the card's whole width. */
+.chart-card__body[data-notes]:has(> .chart-card__plot [data-plot-content]) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.chain-grid__value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+.chain-grid__lead {
+  font-weight: 650;
+}
+
+.chain-grid__bar {
+  display: block;
+  height: 0.375rem;
+  margin-top: 0.25rem;
+  background: var(--meaning-circulating);
+}
+
+@container (max-width: 379.98px) {
+  .chain-grid thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .chain-grid,
+  .chain-grid caption,
+  .chain-grid tbody,
+  .chain-grid tr {
+    display: block;
+  }
+
+  .chain-grid tr {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .chain-grid th,
+  .chain-grid td {
+    display: block;
+    padding: 0.25rem 0;
+    border: 0;
+  }
+
+  .chain-grid td {
+    display: grid;
+    grid-template-columns: minmax(5rem, 35%) 1fr;
+    gap: 0.75rem;
+  }
+
+  .chain-grid td::before {
+    content: attr(data-label);
+  }
+}
+
+/* A filter option highlights its chain on the cards that compare chains, by weight and a rule,
+   never opacity, so contrast holds. Each value is listed, as CSS can't compare two attributes. */
+@supports selector(:has(*)) {
+  :root:has(.chain-filter input[value="tempo"]:checked)
+    [data-velocity-chain="tempo"]
+    .velocity-chart__name,
+  :root:has(.chain-filter input[value="ethereum"]:checked)
+    [data-velocity-chain="ethereum"]
+    .velocity-chart__name,
+  :root:has(.chain-filter input[value="base"]:checked)
+    [data-velocity-chain="base"]
+    .velocity-chart__name,
+  :root:has(.chain-filter input[value="solana"]:checked)
+    [data-velocity-chain="solana"]
+    .velocity-chart__name,
+  :root:has(.chain-filter input[value="tempo"]:checked) .chain-grid [data-grid-chain="tempo"],
+  :root:has(.chain-filter input[value="ethereum"]:checked) .chain-grid [data-grid-chain="ethereum"],
+  :root:has(.chain-filter input[value="base"]:checked) .chain-grid [data-grid-chain="base"],
+  :root:has(.chain-filter input[value="solana"]:checked) .chain-grid [data-grid-chain="solana"] {
+    border-left-color: var(--color-maroon);
+    font-weight: 650;
+  }
+
+  /* Collapsed table borders lose to a neighbour's, so a column's two rules are drawn inside it. */
+  :root:has(.chain-filter input[value="tempo"]:checked) .chain-grid [data-grid-chain="tempo"],
+  :root:has(.chain-filter input[value="ethereum"]:checked) .chain-grid [data-grid-chain="ethereum"],
+  :root:has(.chain-filter input[value="base"]:checked) .chain-grid [data-grid-chain="base"],
+  :root:has(.chain-filter input[value="solana"]:checked) .chain-grid [data-grid-chain="solana"] {
+    border-left-color: transparent;
+    box-shadow:
+      inset 2px 0 0 var(--color-maroon),
+      inset -2px 0 0 var(--color-maroon);
+  }
+}

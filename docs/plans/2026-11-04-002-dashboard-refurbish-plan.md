@@ -587,6 +587,16 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 
 **Verification:** `## Evidence` at 320, 390 and 1440 on the sample, and real data at 1440 with Ethereum's pin. The grid doesn't scroll sideways at 320.
 
+**As built, where it differs from the above:**
+
+- **Neither card is filtered, so neither has panels.** Each is one card in the static HTML, and CSS marks the chosen chain by weight and a rule, as [Cards and the filter](#cards-and-the-filter) says. Without `:has()` nothing is marked and nothing is lost.
+- **The two cards share the Chains section,** `#chain-roles-view`, with velocity first. Velocity left the activity section.
+- **Short forms in view:** `VELOCITY_PIN` for the denominators, and each warning's `pin` from `velocityWarnings`, which keeps the chain, date, both figures, the direction and "shouldn't be read as a trend". The full forms and the jumpy note are in the velocity card's popover.
+- **"Wallets, not people" for the velocity card's wallet counts** is in the caption of its table, under the toggle, as those counts no longer show in view. `verify-output` checks that caption, and the essential list keeps the in-view instance beside the supply card's wallet figure.
+- **Grid bars scale to the amount a lead is measured on** (`publish.py`'s `_LEADING_MEASURES`), so the longest bar and the lead marker can't disagree. Text is the dataset's: share of supply as a share, the others as an amount with the chain's own share where the dataset has one.
+- **The grid stacks below a card content width of 380 px,** not the hairline table's 720, as five narrow columns fit a half-width card and the stacked form is four times as long. The notes of a card whose plot is a table go under it, at full width.
+- **`ChartCard` has no `note` now.** `TableCard` keeps it for the methodology page.
+
 ---
 
 - [ ] <a id="u6-acceptance"></a>**Unit U6: Acceptance**

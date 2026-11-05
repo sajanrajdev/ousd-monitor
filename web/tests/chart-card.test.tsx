@@ -264,19 +264,12 @@ describe("chart theme", () => {
   });
 });
 
-describe("a card's note", () => {
+describe("a table card's note", () => {
   const tableProps: TableCardProps = { ...props };
 
-  it("on a chart card, is readable and outside the hidden graphic", () => {
-    render(
-      <main>
-        <ChartCard {...props} note={<p>A chain with no label reads as zero here.</p>} />
-      </main>,
-    );
-    const note = screen.getByText("A chain with no label reads as zero here.");
-    expect(note.closest("[aria-hidden]")).toBeNull();
-    expect(note.closest(".chart-card__note")).not.toBeNull();
-    expect(note.closest("details")).toBeNull();
+  it("is a table card's only: a chart card pins its caveats instead", () => {
+    // @ts-expect-error A chart card has no note: its caveats are pinned notes.
+    render(<ChartCard {...props} note="A note." />);
   });
 
   it("on a table card, is readable", () => {
@@ -302,7 +295,6 @@ describe("a card's note", () => {
   it("leaves no empty slot when there's no note", () => {
     const { container } = render(
       <main>
-        <ChartCard {...props} />
         <TableCard {...tableProps} />
       </main>,
     );
@@ -312,7 +304,7 @@ describe("a card's note", () => {
   it("has no axe violations", async () => {
     const { container } = render(
       <main>
-        <ChartCard {...props} note="A note." />
+        <TableCard {...tableProps} note="A note." />
       </main>,
     );
     const results = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
