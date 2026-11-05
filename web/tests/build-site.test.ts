@@ -275,6 +275,15 @@ describe("make web-release", () => {
         expect(() => buildRelease(options)).toThrow(/aren't acknowledged/);
       });
 
+      it("a malformed entry refuses even with the matching OUSD_ACK_WARNINGS", () => {
+        const root = releaseRootWithLastGood();
+        const options = releaseOptions(warned(), root, {
+          OUSD_ACK_WARNING_KEYS: "ethereum",
+          OUSD_ACK_WARNINGS: VERSION,
+        });
+        expect(() => buildRelease(options)).toThrow(/aren't chain:metric/);
+      });
+
       it("the per-version OUSD_ACK_WARNINGS still works alongside it", () => {
         const root = releaseRootWithLastGood();
         const options = releaseOptions(warned(), root, {

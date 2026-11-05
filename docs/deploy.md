@@ -8,11 +8,13 @@ How the hosted run is set up: one Railway cron service that runs the pipeline on
 
 1. `make run`, the whole pipeline. Its environment has the Vercel variables removed.
 2. On success, `make web-release`, with an allowlisted environment: no RPC variable reaches the site build. It refuses anything that isn't release grade, and any warning that isn't acknowledged.
-3. On success, the verified `web/.release/latest` is copied into `.vercel/output/static` with `config.json` set to `{"version": 3}`, and `vercel deploy --prebuilt` uploads it as a preview. The CLI gets the same allowlist plus the three Vercel variables. It never gets `--prod`, and the token is never on a command line. The preview URL goes to the log.
+3. On success, the verified `web/.release/latest` is copied into `.vercel/output/static` with `config.json` set to `{"version": 3}`, and `vercel deploy --prebuilt --non-interactive` uploads it as a preview. The CLI gets the same allowlist plus the three Vercel variables. It never gets `--prod`, and the token is never on a command line. The CLI prints a JSON result; `scripts/deploy-result.mjs` reads it, logs the preview URL, logs Vercel's reason on a failure, and **fails the run if the deployment landed in production** (which a new project's first deploy does).
 
-Any failure exits non-zero and stops there: a failed run releases and deploys nothing, and the live site keeps the last good data.
+Any failure exits non-zero and stops there: a failed run releases and deploys nothing, and the live site keeps the last good data. A run that passes but publishes no new dataset also stops before the release. The run refuses to start if `OUSD_PUBLISHED_DIR` or `OUSD_DATASET_DIR` is set, as the site only reads the default path.
 
-With `OUSD_DEPLOY=0`, or with no `VERCEL_TOKEN`, the run builds and verifies the release but doesn't deploy, and the log says so. Use that for local tests.
+The allowlisted steps fail closed: if the environment can't be listed, or holds a variable that can't be removed (such as one whose name isn't a shell identifier), they don't run.
+
+With `OUSD_DEPLOY=0` the run builds and verifies the release but doesn't deploy, and the log says so. Off Railway, a missing `VERCEL_TOKEN` does the same, for local tests. On Railway (where `RAILWAY_ENVIRONMENT_ID` is set) a missing token fails the run, so a deleted token can't stop deploys silently. `OUSD_DEPLOY` must be `0` or `1`.
 
 ## Railway service settings
 
@@ -46,7 +48,7 @@ Names only. Values go into the service's variables in Railway and nowhere else.
 | `VERCEL_TOKEN` | Yes, to deploy | A Vercel token, scoped as narrowly as Vercel allows |
 | `VERCEL_ORG_ID` | Yes, to deploy | The Vercel team or account ID |
 | `VERCEL_PROJECT_ID` | Yes, to deploy | The Vercel project ID |
-| `OUSD_DEPLOY` | Optional | `0` builds the release without deploying |
+| `OUSD_DEPLOY` | Optional | `0` builds the release without deploying. Only `0` or `1` |
 | `OUSD_GIT_COMMIT` | No, leave unset | The commit recorded in the dataset, for local runs. On Railway the entry point always sets it from `RAILWAY_GIT_COMMIT_SHA` |
 
 Railway sets `RAILWAY_GIT_COMMIT_SHA` itself on deploys from GitHub. The image has no `.git` and no `git`, so `pipeline/ousd/publish.py` reads the commit from `OUSD_GIT_COMMIT`, which `scripts/daily.sh` fills from `RAILWAY_GIT_COMMIT_SHA`. A deploy that isn't from GitHub (for example `railway up`) has no commit, and publish refuses every run. That is intended: a dataset that can't be traced isn't published. The fallback in `publish.py` lands in its own PR, as the file is security-sensitive; until it merges, the image refuses to publish.

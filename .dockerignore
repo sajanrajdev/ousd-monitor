@@ -3,6 +3,8 @@
 .github
 .env
 .env.*
+**/.env
+**/.env.*
 !.env.example
 data/
 .venv/
@@ -17,7 +19,7 @@ dbt/logs/
 dbt/dbt_packages/
 logs/
 .dagster/
-web/node_modules/
+**/node_modules/
 web/.next/
 web/out/
 web/.build/

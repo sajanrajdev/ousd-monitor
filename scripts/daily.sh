@@ -10,8 +10,9 @@
 #   make web-release  an allowlist, so no RPC variable reaches the site build
 #   vercel deploy     the same allowlist plus the three Vercel variables
 #
-# No deploy when OUSD_DEPLOY=0 or VERCEL_TOKEN is unset: the release is still built and verified.
-# The deploy is a preview, never production. It never prints a variable's value.
+# OUSD_DEPLOY=0, or no VERCEL_TOKEN off Railway, builds and verifies the release without deploying.
+# On Railway a missing token fails the run. The deploy is a preview: a deployment that lands in
+# production fails the run. It never prints a variable's value.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -25,26 +26,51 @@ fail() {
 }
 
 # What the site build and the Vercel CLI may see. Nothing that can hold a provider URL or key.
-SAFE_VARS=(PATH HOME LANG LC_ALL TZ TMPDIR TERM NO_COLOR CI NODE_OPTIONS
+SAFE_VARS=(PATH HOME LANG LC_ALL TZ TMPDIR TERM NO_COLOR CI
   OUSD_ACK_WARNING_KEYS OUSD_ACK_WARNINGS)
 VERCEL_VARS=(VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID)
 
 # Runs a command with only the named variables exported. It unsets the rest in a subshell, so no
-# value ever appears on a command line, where a process list could show it.
+# value ever appears on a command line, where a process list could show it. It fails closed: if the
+# names can't be listed, or anything outside the list survives, the command doesn't run.
 with_only() {
   local keep=" $1 "
   shift
   (
-    local name
-    for name in $(compgen -e); do
+    local name names
+    names="$(compgen -e)" || exit 97
+    for name in $names; do
       case "$keep" in
         *" $name "*) ;;
         *) unset "$name" 2>/dev/null || true ;;
       esac
     done
+    # Entries whose names aren't shell identifiers can't be unset, but would still reach the child.
+    if env | grep -qE '^[^=]*[^A-Za-z0-9_=][^=]*='; then
+      echo "The environment holds a variable whose name isn't an identifier; refusing to run." >&2
+      exit 97
+    fi
+    for name in $(compgen -e); do
+      case "$keep" in
+        *" $name "*) ;;
+        *)
+          echo "Couldn't remove $name from the environment; refusing to run." >&2
+          exit 97
+          ;;
+      esac
+    done
     exec "$@"
   )
 }
+
+case "${OUSD_DEPLOY:-1}" in
+  0 | 1) ;;
+  *) fail "OUSD_DEPLOY must be 0 or 1." ;;
+esac
+# The site reads data/published/latest, so the pipeline must publish there.
+for name in OUSD_PUBLISHED_DIR OUSD_DATASET_DIR; do
+  [ -z "${!name+x}" ] || fail "$name is set. The daily run publishes and releases the default path only."
+done
 
 # An image has no checkout, so the commit comes from the deploy that built it. Railway's value
 # always wins, so a commit typed into the service's variables can't outlive the deploy it named.
@@ -52,9 +78,16 @@ if [ -n "${RAILWAY_GIT_COMMIT_SHA:-}" ]; then
   export OUSD_GIT_COMMIT="$RAILWAY_GIT_COMMIT_SHA"
 fi
 
+latest_before="$(readlink data/published/latest 2>/dev/null || true)"
+
 say "Pipeline: make run (the Vercel variables are removed from its environment)."
 env -u VERCEL_TOKEN -u VERCEL_ORG_ID -u VERCEL_PROJECT_ID make run ||
   fail "make run exited non-zero, so nothing is released or deployed."
+
+latest_after="$(readlink data/published/latest 2>/dev/null || true)"
+[ -n "$latest_after" ] && [ "$latest_after" != "$latest_before" ] ||
+  fail "make run passed but published no new dataset, so nothing is released or deployed."
+say "Published dataset: $latest_after."
 
 say "Release: make web-release (allowlisted environment, no RPC variables)."
 with_only "${SAFE_VARS[*]}" make web-release ||
@@ -69,6 +102,8 @@ if [ "${OUSD_DEPLOY:-1}" = "0" ]; then
   exit 0
 fi
 if [ -z "${VERCEL_TOKEN:-}" ]; then
+  [ -z "${RAILWAY_ENVIRONMENT_ID:-}" ] ||
+    fail "VERCEL_TOKEN is not set on Railway. Set it, or OUSD_DEPLOY=0 to build without deploying."
   say "Deploy skipped: VERCEL_TOKEN is not set. The release is built and verified in web/.release/latest."
   say "Done in $((SECONDS - started))s."
   exit 0
@@ -87,10 +122,13 @@ printf '{"version": 3}\n' >"$work/.vercel/output/config.json"
 
 say "Deploy: vercel deploy --prebuilt, a preview (token from the environment only)."
 export VERCEL_TELEMETRY_DISABLED=1 NO_UPDATE_NOTIFIER=1
-url="$(with_only "${SAFE_VARS[*]} ${VERCEL_VARS[*]} VERCEL_TELEMETRY_DISABLED NO_UPDATE_NOTIFIER" \
-  vercel deploy --prebuilt --cwd "$work" --non-interactive)" ||
-  fail "vercel deploy exited non-zero."
-[ -n "$url" ] || fail "vercel deploy printed no deployment URL."
+# In non-interactive mode the CLI prints one JSON result, also on failure. Read it either way.
+status=0
+result="$(with_only "${SAFE_VARS[*]} ${VERCEL_VARS[*]} VERCEL_TELEMETRY_DISABLED NO_UPDATE_NOTIFIER" \
+  vercel deploy --prebuilt --cwd "$work" --non-interactive)" || status=$?
+url="$(printf '%s' "$result" | node "$ROOT/scripts/deploy-result.mjs")" ||
+  fail "vercel deploy did not make a preview (see above)."
+[ "$status" -eq 0 ] || fail "vercel deploy exited $status."
 
 say "Preview deployed: $url"
 say "Done in $((SECONDS - started))s."

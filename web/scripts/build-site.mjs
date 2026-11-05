@@ -91,7 +91,11 @@ export function refuseUnlessReleasable(dataset, env, log = () => {}) {
   const keys = acknowledgedKeys(env);
   // Every run says what it lets through, so an acknowledgement can't sit there unseen.
   if (keys.size > 0) log(`Acknowledged warning keys: ${[...keys].join(", ")}.`);
-  if (manifest.warnings.length === 0 || env.OUSD_ACK_WARNINGS === manifest.dataset_version) return;
+  if (manifest.warnings.length === 0) return;
+  if (env.OUSD_ACK_WARNINGS === manifest.dataset_version) {
+    log(`Every warning is acknowledged by OUSD_ACK_WARNINGS=${manifest.dataset_version}.`);
+    return;
+  }
   const unacknowledged = manifest.warnings.filter(
     ({ chain, metric }) => !keys.has(`${chain}:${metric}`),
   );

@@ -28,7 +28,13 @@ FAKES="$(pwd)/fakes"
 env | cut -d= -f1 | sort > "$FAKES/make-$1.env"
 printf '%s\\n' "$*" >> "$FAKES/calls"
 case "$1" in
-  run) [ -f "$FAKES/run-fails" ] && exit 1; exit 0 ;;
+  run)
+    [ -f "$FAKES/run-fails" ] && exit 1
+    [ -f "$FAKES/run-publishes-nothing" ] && exit 0
+    n=$(ls data/published | wc -l | tr -d ' ')
+    mkdir -p "data/published/v$n" && ln -sfn "v$n" data/published/latest
+    exit 0
+    ;;
   web-release)
     [ -f "$FAKES/release-fails" ] && exit 1
     mkdir -p web/.release/v1/sub
@@ -46,8 +52,14 @@ for arg in "$@"; do
   case "$arg" in --cwd) next=1 ;; *) [ -n "$next" ] && cwd="$arg"; next= ;; esac
 done
 cp -R "$cwd/.vercel" "$FAKES/uploaded"
-[ -f "$FAKES/deploy-fails" ] && exit 1
-echo "https://ousd-monitor-abc123.vercel.app"
+if [ -f "$FAKES/deploy-fails" ]; then
+  echo '{"status":"error","reason":"deploy_failed","message":"Upload refused"}'
+  exit 1
+fi
+target=preview
+[ -f "$FAKES/deploy-production" ] && target=production
+printf '{"status":"ok","deployment":{"url":"https://ousd-monitor-abc123.vercel.app",'
+printf '"target":"%s","readyState":"READY"},"message":"ready"}\n' "$target"
 """
 
 
@@ -56,10 +68,18 @@ def _executable(path: Path, text: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
+@pytest.fixture(params=sorted({BASH, *(["/bin/bash"] if Path("/bin/bash").exists() else [])}))
+def shell(request) -> str:
+    return request.param
+
+
 @pytest.fixture
-def root(tmp_path: Path) -> Path:
+def root(tmp_path: Path, shell: str) -> Path:
     (tmp_path / "scripts").mkdir()
-    shutil.copy(REPO / "scripts" / "daily.sh", tmp_path / "scripts" / "daily.sh")
+    for name in ("daily.sh", "deploy-result.mjs"):
+        shutil.copy(REPO / "scripts" / name, tmp_path / "scripts" / name)
+    (tmp_path / "data" / "published").mkdir(parents=True)
+    (tmp_path / "shell").write_text(shell)
     fakes = tmp_path / "fakes"
     (fakes / "bin").mkdir(parents=True)
     _executable(fakes / "bin" / "make", FAKE_MAKE)
@@ -69,8 +89,9 @@ def root(tmp_path: Path) -> Path:
 
 def daily(root: Path, **extra: str) -> subprocess.CompletedProcess:
     fakes = root / "fakes"
+    node_dir = str(Path(shutil.which("node") or "/usr/bin/node").parent)
     env = {
-        "PATH": f"{fakes / 'bin'}:/usr/bin:/bin",
+        "PATH": f"{fakes / 'bin'}:{node_dir}:/usr/bin:/bin",
         "HOME": str(root),
         "UNLISTED": "x",
         "OUSD_ACK_WARNING_KEYS": "ethereum:circulating_supply",
@@ -80,7 +101,7 @@ def daily(root: Path, **extra: str) -> subprocess.CompletedProcess:
     }
     env = {key: value for key, value in env.items() if value != "<unset>"}
     return subprocess.run(
-        [BASH, str(root / "scripts" / "daily.sh")],
+        [(root / "shell").read_text(), str(root / "scripts" / "daily.sh")],
         cwd=root,
         env=env,
         capture_output=True,
@@ -167,7 +188,61 @@ def test_a_failed_deploy_exits_non_zero(root):
     (root / "fakes" / "deploy-fails").touch()
     result = daily(root)
     assert result.returncode != 0
-    assert "vercel deploy exited non-zero" in result.stdout
+    assert "did not make a preview" in result.stdout
+    assert "deploy_failed: Upload refused" in result.stderr
+    assert_no_secret_in(result)
+
+
+def test_a_deploy_that_lands_in_production_fails_loudly(root):
+    (root / "fakes" / "deploy-production").touch()
+    result = daily(root)
+    assert result.returncode != 0
+    assert "went to PRODUCTION" in result.stderr
+    assert "Preview deployed" not in result.stdout
+
+
+def test_a_missing_token_on_railway_fails(root):
+    result = daily(root, VERCEL_TOKEN="<unset>", RAILWAY_ENVIRONMENT_ID="env-1")
+    assert result.returncode != 0
+    assert "VERCEL_TOKEN is not set on Railway" in result.stdout
+    assert calls(root) == ["run", "web-release"]
+
+
+def test_explicit_deploy_off_works_on_railway(root):
+    result = daily(root, OUSD_DEPLOY="0", RAILWAY_ENVIRONMENT_ID="env-1")
+    assert result.returncode == 0
+    assert "Deploy skipped: OUSD_DEPLOY=0" in result.stdout
+
+
+@pytest.mark.parametrize("value", ["false", "no", "off", "yes"])
+def test_an_unclear_deploy_switch_refuses_before_running(root, value):
+    result = daily(root, OUSD_DEPLOY=value)
+    assert result.returncode != 0
+    assert "OUSD_DEPLOY must be 0 or 1" in result.stdout
+    assert calls(root) == []
+
+
+@pytest.mark.parametrize("name", ["OUSD_PUBLISHED_DIR", "OUSD_DATASET_DIR"])
+def test_a_moved_dataset_path_refuses_before_running(root, name):
+    result = daily(root, **{name: "/elsewhere"})
+    assert result.returncode != 0
+    assert f"{name} is set" in result.stdout
+    assert calls(root) == []
+
+
+def test_a_run_that_publishes_nothing_new_releases_nothing(root):
+    (root / "fakes" / "run-publishes-nothing").touch()
+    result = daily(root)
+    assert result.returncode != 0
+    assert "published no new dataset" in result.stdout
+    assert calls(root) == ["run"]
+
+
+def test_a_non_identifier_variable_stops_the_allowlisted_steps(root):
+    result = daily(root, **{"BAD-NAME": "rpc-secret-sol-222"})
+    assert result.returncode != 0
+    assert "isn't an identifier" in result.stderr
+    assert calls(root) == ["run"]
     assert_no_secret_in(result)
 
 
