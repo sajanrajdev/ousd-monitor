@@ -245,7 +245,16 @@ export function velocityTakeaway(kpis: KpiRow[]): string {
   return `On ${list}, velocity is higher than headline velocity. Velocity is clean volume over circulating supply, and headline velocity is all transfers over total supply.`;
 }
 
-export type VelocityWarning = { chain: ChainName; day: string; text: string };
+// The first sentence of the takeaway, as a heading: which chains have velocity above headline
+// velocity, or that none do.
+export function velocityHeading(kpis: KpiRow[]): string {
+  const takeaway = velocityTakeaway(kpis);
+  if (takeaway === UNKNOWN_TEXT) return takeaway;
+  return `${takeaway.split(". ")[0].replace(/\.$/, "")}.`;
+}
+
+// `pin` is the short form kept in view beside the chain; `text` stays whole in the popover.
+export type VelocityWarning = { chain: ChainName; day: string; text: string; pin: string };
 
 // One dated sentence pair per manifest warning on circulating supply, the denominator of velocity.
 // Other metrics' warnings aren't about this card. A drop makes that day's velocity unusually high,
@@ -260,6 +269,7 @@ export function velocityWarnings(warnings: ManifestWarning[]): VelocityWarning[]
         chain: warning.chain,
         day: warning.day,
         text: `On ${formatUtcDate(warning.day)}, ${name}'s circulating supply, which its velocity divides by, moved sharply: from ${formatCompact(warning.previous)} to ${formatCompact(warning.current)}. Its velocity is unusually ${fell ? "high" : "low"} that day and shouldn't be read as a trend.`,
+        pin: `${name}, ${formatUtcDate(warning.day)}: circulating supply moved from ${formatCompact(warning.previous)} to ${formatCompact(warning.current)}, so velocity is unusually ${fell ? "high" : "low"} that day and shouldn't be read as a trend.`,
       },
     ];
   });

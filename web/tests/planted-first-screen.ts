@@ -414,6 +414,83 @@ export function plantedWeeklyPanels(panels: PlantedWeeklyPanel[], id: string): s
   return `<div id="${id}" class="chain-panels">${items.join("")}</div>`;
 }
 
+export type PlantedVelocity = {
+  heading: string;
+  bars: string[];
+  notes: { kind: string; chain?: string; words: string }[];
+  fullWarnings: { chain: string; text: string }[];
+};
+export type PlantedGrid = {
+  rows: {
+    measure: string;
+    cells: { chain: string; text: string; widthBps: number; leads: boolean }[];
+  }[];
+};
+
+// The velocity card and the chain grid's card, as the views write them.
+export function plantedVelocity(velocity: PlantedVelocity, id: string): string {
+  const groups = new Map<string, string[]>();
+  for (const bar of velocity.bars) {
+    const [, chain, measure, value, width] = /^(\w+):(\w+)=(.*)@(.*)$/.exec(bar)!;
+    const drawn =
+      width === "null" || width === "0"
+        ? ""
+        : `<span class="velocity-chart__bar" data-width="${width}"></span>`;
+    groups.set(chain, [
+      ...(groups.get(chain) ?? []),
+      `<div data-measure="${measure}">${drawn}<span data-velocity-value>${value}</span></div>`,
+    ]);
+  }
+  const pinOf = (chain: string) => {
+    const index = velocity.notes.findIndex((note) => note.chain === chain);
+    return index === -1 ? "" : `<span class="pin">${index + 1}</span>`;
+  };
+  const chart = [...groups]
+    .map(
+      ([chain, rows]) =>
+        `<div data-velocity-chain="${chain}"><p class="velocity-chart__name">${chain}${pinOf(chain)}</p>${rows.join("")}</div>`,
+    )
+    .join("");
+  const notes = velocity.notes
+    .map(
+      ({ kind, chain, words }, index) =>
+        `<li data-note="${kind}"${chain ? ` data-chain="${chain}"` : ""}><span class="pin" aria-hidden="true">${index + 1}</span><p>${escaped(words)}</p></li>`,
+    )
+    .join("");
+  const full = velocity.fullWarnings
+    .map(
+      ({ chain, text }) =>
+        `<p data-full-note="velocity-warning" data-chain="${chain}">${escaped(text)}</p>`,
+    )
+    .join("");
+  return `<div id="${id}">${plantedPanelCard(
+    velocity.heading,
+    `<div class="chart-area" aria-hidden="true">${chart}</div><ol data-pinned-notes>${notes}</ol>`,
+    full,
+    `<table><caption>Velocity. Wallets, not people.</caption></table>`,
+  )}</div>`;
+}
+
+export function plantedGrid(grid: PlantedGrid, heading: string, id: string): string {
+  const rows = grid.rows
+    .map(
+      ({ measure, cells }) =>
+        `<tr data-grid-measure="${measure}">${cells
+          .map(
+            ({ chain, text, widthBps, leads }) =>
+              `<td data-grid-chain="${chain}"${leads ? " data-leads" : ""}><span data-grid-value>${escaped(text)}</span><span class="chain-grid__bar" data-width="${widthBps}"></span></td>`,
+          )
+          .join("")}</tr>`,
+    )
+    .join("");
+  return `<div id="${id}">${plantedPanelCard(
+    heading,
+    `<table data-chain-grid><tbody>${rows}</tbody></table>`,
+    "",
+    "<table></table>",
+  )}</div>`;
+}
+
 export function plantedFilter(options: { value: string; label: string }[]): string {
   const inputs = options.map(
     ({ value, label }, index) =>
@@ -437,12 +514,20 @@ export function plantedRealMain(
     seriesPanels: PlantedSeriesPanel[];
     waterfallPanels: PlantedWaterfallPanel[];
     weeklyPanels: PlantedWeeklyPanel[];
+    velocity: PlantedVelocity;
+    grid: PlantedGrid;
   },
   staleNote: string,
   staleTrust: string,
 ): string {
-  const filtered: string[] = [CARD_ANCHORS.supply, CARD_ANCHORS.waterfall, CARD_ANCHORS.weekly];
-  const others = expected.findings.filter(({ id }) => !filtered.includes(id));
+  const own: string[] = [
+    CARD_ANCHORS.supply,
+    CARD_ANCHORS.waterfall,
+    CARD_ANCHORS.weekly,
+    CARD_ANCHORS.chainRoles,
+  ];
+  const others = expected.findings.filter(({ id }) => !own.includes(id));
+  const roles = expected.findings.find(({ id }) => id === CARD_ANCHORS.chainRoles)!;
   return `<main><section data-section="verdict">${plantedHeadline(expected.verdict)}<p>${staleNote}</p></section>
     <section data-section="kpi-row">${plantedKpis(expected.kpiScope, expected.kpiValues)}</section>
     <section data-section="trust-strip">${staleTrust}${PLANTED_TRUST_DETAIL}</section>
@@ -451,7 +536,9 @@ export function plantedRealMain(
     ${plantedSupplyPanels(expected.supplyPanels, CARD_ANCHORS.supply, plantedExchangeRows(expected.exchangeRows))}
     ${plantedSeriesPanels(expected.seriesPanels, CARD_ANCHORS.series)}
     ${plantedWaterfallPanels(expected.waterfallPanels, CARD_ANCHORS.waterfall)}
-    ${plantedWeeklyPanels(expected.weeklyPanels, CARD_ANCHORS.weekly)}</div>
+    ${plantedWeeklyPanels(expected.weeklyPanels, CARD_ANCHORS.weekly)}
+    ${plantedVelocity(expected.velocity, CARD_ANCHORS.velocity)}
+    ${plantedGrid(expected.grid, roles.text, CARD_ANCHORS.chainRoles)}</div>
     ${plantedFlight(expected.exchangeRows.map(plantedRowFlight))}
     ${plantedBands(expected.bands, { withLines: false })}
     ${others.map((finding) => plantedCard(null, finding)).join("")}</main>`;

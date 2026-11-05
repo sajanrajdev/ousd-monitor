@@ -63,6 +63,8 @@ const sampleExpected = {
   seriesPanels: [] as PlantedSeriesPanel[],
   waterfallPanels: [] as PlantedWaterfallPanel[],
   weeklyPanels: [] as PlantedWeeklyPanel[],
+  velocity: null,
+  grid: null,
 };
 
 const realExpected = {
@@ -1420,7 +1422,7 @@ describe("what to expect comes from the dataset", () => {
     expect(warnings).toEqual([
       expect.objectContaining({
         chain: "base",
-        text: expect.stringContaining("Base's circulating supply"),
+        text: expect.stringContaining("Base, 2 Nov 2026 UTC: circulating supply moved"),
       }),
     ]);
   });
@@ -1447,7 +1449,7 @@ describe("what to expect comes from the dataset", () => {
     );
   });
 
-  it("words each caveat from the dataset, and asks for both wallet notes", () => {
+  it("words each caveat from the dataset, and asks for the wallet note in view", () => {
     const dir = releaseGrade();
     editJson(dir, "manifest.json", (manifest) => {
       manifest.definitions.placed_days = 21;
@@ -1457,9 +1459,9 @@ describe("what to expect comes from the dataset", () => {
     const text = (kind: string) => notes.filter((note) => note.kind === kind).map((n) => n.text);
     expect(text("series-start")[0]).toContain("Placed supply needs 21 days of history");
     expect(text("everyday-meaning")).toEqual(["Everyday means under $2M, nothing more."]);
+    // The velocity table's wallet counts are under its toggle, and its caption says it there.
     expect(text("wallets-not-people")).toEqual([
       "Wallets, not people, and never added across chains.",
-      "Wallets, not people.",
     ]);
     // The weekly bars pin the history; "Weeks end on the date shown" is in their popover.
     expect(text("history")[0]).toMatch(/^\d+ days of history: a direction, not a trend\.$/);

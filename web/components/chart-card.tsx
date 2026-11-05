@@ -37,17 +37,15 @@ export type ChartCardProps = {
   // What goes beside the chart from the card's width that has room: its legend, and any figures. Read
   // by assistive tech, as it's outside the hidden graphic. The notes then go under both.
   beside?: ReactNode;
-  // Words a reader needs beside the chart or table, such as a caveat with a link. Read by everyone:
-  // the graphic is hidden from assistive tech, and the summary is a plain string.
-  note?: ReactNode;
   level?: 2 | 3;
 };
 
-// A card whose content is its table: no chart, and no second table behind a toggle.
+// A card whose content is its table: no chart, and no second table behind a toggle. Only the
+// methodology page uses it. `note` holds words a reader needs beside the table, read by everyone.
 export type TableCardProps = Omit<
   ChartCardProps,
   "children" | "moreTables" | "needsJs" | "plotIsContent" | "beside"
->;
+> & { note?: ReactNode };
 
 type CardFrameProps = Pick<
   ChartCardProps,
@@ -143,7 +141,6 @@ export function ChartCard({
   needsJs = false,
   plotIsContent = false,
   beside,
-  note,
   ...frame
 }: ChartCardProps) {
   return (
@@ -169,7 +166,6 @@ export function ChartCard({
         </div>
         <PinnedNotes notes={notes} />
       </div>
-      <CardNote note={note} />
       <DataToggle label={frame.takeaway}>
         <HairlineTable {...table} />
         {moreTables}

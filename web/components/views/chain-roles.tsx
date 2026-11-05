@@ -1,7 +1,15 @@
-import { TableCard } from "@/components/chart-card";
+import { ChartCard } from "@/components/chart-card";
+import { PinMark, type PinnedNote } from "@/components/pinned-notes";
+import { chainGrid } from "@/lib/chain-views";
 import { SERIES_COLORS } from "@/components/chart-theme";
 import { dayRange } from "@/lib/aggregate";
-import type { ChainRoleRow, DatasetState } from "@/lib/dataset";
+import type {
+  ChainRoleRow,
+  Definitions,
+  DatasetState,
+  KpiRow,
+  ManifestWarning,
+} from "@/lib/dataset";
 import {
   CARD_ANCHORS,
   CHAIN_NAMES,
@@ -9,20 +17,104 @@ import {
   definitionHref,
   REQUIRED_CHAINS,
 } from "@/lib/definitions";
-import { formatBps, formatCompact, formatUtcDate } from "@/lib/format";
+import { formatBps, formatCompact, formatUtcDate, UNKNOWN_TEXT } from "@/lib/format";
 import { NO_SWAPS_NOTE } from "@/lib/takeaways/caveats";
 import {
   chainRolesHeading,
   chainRolesSummary,
   chainRolesTakeaway,
   chainSentences,
+  differingDays,
   orderedChains,
 } from "@/lib/takeaways/chain-roles";
+import { VelocityCard } from "./velocity";
 
 export type ChainRolesViewProps = {
   chain_roles: ChainRoleRow[];
+  kpis: KpiRow[];
+  definitions: Definitions;
+  warnings: ManifestWarning[];
   state: DatasetState;
 };
+
+const LEAD_MARK = "●";
+
+// Measures as rows and chains as columns. A real table, with words for assistive tech, so it is the
+// card's content rather than a hidden graphic. Each cell's bar scales to its row's largest amount,
+// and prints nothing the dataset doesn't give.
+function ChainGrid({ rows, pin }: { rows: ChainRoleRow[]; pin: number }) {
+  const grid = chainGrid(rows);
+  const ordered = orderedChains(rows);
+  return (
+    <table className="chain-grid" data-chain-grid>
+      <caption>
+        Last 30 days, each chain on its newest day. <span aria-hidden="true">{LEAD_MARK}</span>{" "}
+        leads that measure. <PinMark number={pin} />
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">
+            <span className="sr-only">Measure</span>
+          </th>
+          {grid.chains.map((chain) => (
+            <th key={chain} scope="col" data-grid-chain={chain}>
+              <ChainCell chain={chain} />
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {grid.rows.map((row) => (
+          <tr key={row.measure} data-grid-measure={row.measure}>
+            <th scope="row">{row.label}</th>
+            {row.cells.map((cell) => (
+              <td
+                key={cell.chain}
+                data-grid-chain={cell.chain}
+                data-label={CHAIN_NAMES[cell.chain]}
+                data-leads={cell.leads || undefined}
+              >
+                <div className="chain-grid__cell">
+                  <span className="chain-grid__value">
+                    <span data-grid-value>
+                      {cell.text.split(" (").map((part, index) => (
+                        <span key={part} className="chain-grid__part">
+                          {index === 0 ? part : ` (${part}`}
+                        </span>
+                      ))}
+                    </span>
+                    {cell.leads ? (
+                      <span className="chain-grid__lead">
+                        <span aria-hidden="true">{LEAD_MARK}</span>
+                        <span className="sr-only">{`, leads: ${row.lead}`}</span>
+                      </span>
+                    ) : null}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="chain-grid__bar"
+                    data-width={cell.widthBps}
+                    style={{ width: `${cell.widthBps / 100}%` }}
+                  />
+                </div>
+              </td>
+            ))}
+          </tr>
+        ))}
+        {differingDays(rows) ? (
+          <tr data-grid-measure="as-of">
+            <th scope="row">As of</th>
+            {ordered.map((row) => (
+              <td key={row.chain} data-grid-chain={row.chain} data-label={CHAIN_NAMES[row.chain]}>
+                {formatUtcDate(row.as_of_day)}
+              </td>
+            ))}
+          </tr>
+        ) : null}
+      </tbody>
+    </table>
+  );
+}
 
 function ChainCell({ chain }: { chain: ChainRoleRow["chain"] }) {
   return (
@@ -61,11 +153,31 @@ function withShare(amount: string, bps: number | null): string {
   return `${formatCompact(amount)} (${formatBps(bps)})`;
 }
 
-export function ChainRolesView({ chain_roles, state }: ChainRolesViewProps) {
+export function ChainRolesView({
+  chain_roles,
+  kpis,
+  definitions,
+  warnings,
+  state,
+}: ChainRolesViewProps) {
   const rows = orderedChains(chain_roles);
+  const notes: PinnedNote[] = [
+    {
+      kind: "no-swaps",
+      text: (
+        <>
+          {NO_SWAPS_NOTE}{" "}
+          <a href={definitionHref("chain-roles")} className="underline underline-offset-4">
+            How these are defined
+          </a>
+        </>
+      ),
+    },
+  ];
   return (
     <section id="chain-roles-view" data-section="view-e" className="card-grid">
-      <TableCard
+      <VelocityCard kpis={kpis} definitions={definitions} warnings={warnings} state={state} />
+      <ChartCard
         id={CARD_ANCHORS.chainRoles}
         takeaway={chainRolesHeading(chain_roles)}
         detail={<p>{chainRolesTakeaway(chain_roles)}</p>}
@@ -75,6 +187,8 @@ export function ChainRolesView({ chain_roles, state }: ChainRolesViewProps) {
         definitionHref={definitionHref("chain-roles")}
         frameWord={state.frameWord}
         summary={chainRolesSummary(chain_roles)}
+        plotIsContent
+        notes={notes}
         table={{
           caption: "Chain roles: share of supply beside each share of activity",
           columns: [
@@ -102,15 +216,13 @@ export function ChainRolesView({ chain_roles, state }: ChainRolesViewProps) {
             leads: <Leads row={row} />,
           })),
         }}
-        note={
-          <p data-note="no-swaps">
-            {NO_SWAPS_NOTE}{" "}
-            <a href={definitionHref("chain-roles")} className="underline underline-offset-4">
-              How these are defined
-            </a>
-          </p>
-        }
-      />
+      >
+        {rows.length === 0 ? (
+          <p className="p-4">{UNKNOWN_TEXT}</p>
+        ) : (
+          <ChainGrid rows={chain_roles} pin={1} />
+        )}
+      </ChartCard>
     </section>
   );
 }
