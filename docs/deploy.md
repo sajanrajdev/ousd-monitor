@@ -68,7 +68,7 @@ Production never does a cold backfill. The volume starts from a copy of the main
 1. On the laptop, stop anything that writes: no `make run`, `make sync` or `make dagster-dev`.
 2. Copy `data/ousd.duckdb` to a temporary file. Upload the copy, not the live file.
 3. On Railway, set the start command to `sleep infinity` with no cron schedule, so the service is online and runs nothing.
-4. `railway volume files upload <copy> /ousd.duckdb` (the volume root is `/app/data`). Optionally upload `data/published/` too, so the first deploy has a last good dataset to show as stale if the first run fails.
+4. `railway volume files upload <copy> /ousd.duckdb` (the volume root is `/app/data`). Optionally upload `data/published/` too, so the first deploy has a last good dataset to show as stale if the first run fails. If you do, check with `railway ssh` that `/app/data/published/latest` is still a symlink, not a folder: publish replaces the symlink and fails on a folder. If in doubt, leave `published/` out.
 5. Check the size matches. Then set the start command back to `scripts/daily.sh` and the cron schedule to `0 6 * * *`. From then on the Railway copy is the only writer, and the laptop copy is the fallback.
 
 ## Local test

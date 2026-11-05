@@ -28,6 +28,15 @@ process.stdin.on("end", () => {
     );
     process.exit(3);
   }
+  if (
+    deployment.readyState !== undefined &&
+    deployment.readyState !== "READY"
+  ) {
+    console.error(
+      `vercel deploy finished in state ${deployment.readyState}, not READY.`,
+    );
+    process.exit(1);
+  }
   if (typeof deployment.url !== "string" || deployment.url === "") {
     console.error("vercel deploy reported no deployment URL.");
     process.exit(1);
