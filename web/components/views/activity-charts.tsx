@@ -1,16 +1,16 @@
 import {
   barPosition,
+  stepFigure,
   type Waterfall,
   type WaterfallStep,
   type Week,
 } from "@/lib/takeaways/activity";
+import { PinMark } from "@/components/pinned-notes";
 import { formatCompact, formatUtcDate, toChartNumber, UNKNOWN_TEXT } from "@/lib/format";
 
-// The card reserves a fixed chart height, and twelve rows are taller than that on a phone. A chart
-// that sets data-flow lets its area grow to fit, so the rows never spill over the note below.
-function GrowArea() {
-  return <style>{".chart-area:has([data-flow]) { height: auto; }"}</style>;
-}
+// A pin's number by the waterfall row it sits on, or for the weekly bars, in note order. The card
+// works these out from its notes, so a pin can't point at another note.
+export type StepPins = Partial<Record<WaterfallStep["key"], number>>;
 
 // Hatching as well as colour marks what was taken out of headline.
 const HATCH =
@@ -29,11 +29,18 @@ function barStyle(kind: WaterfallStep["kind"], left: number, width: number) {
 
 // One row per step at every width: label and value on the left, bar on the right, so a sliver of a
 // bar still has a readable label. The card's table carries the same numbers for assistive tech.
-export function WaterfallChart({ waterfall }: { waterfall: Waterfall | null }) {
+// The card reserves a fixed chart height, and twelve rows are taller than that on a phone, so a
+// chart that sets data-flow lets its area grow to fit (in globals.css).
+export function WaterfallChart({
+  waterfall,
+  pins = {},
+}: {
+  waterfall: Waterfall | null;
+  pins?: StepPins;
+}) {
   if (!waterfall) return <p className="p-4">{UNKNOWN_TEXT}</p>;
   return (
     <>
-      <GrowArea />
       <ol data-flow className="m-0 list-none p-4" style={{ fontSize: "var(--text-small)" }}>
         {waterfall.steps.map((step) => {
           const { left, width } = barPosition(step, waterfall.headline);
@@ -45,10 +52,16 @@ export function WaterfallChart({ waterfall }: { waterfall: Waterfall | null }) {
               style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)" }}
             >
               <span className="flex flex-wrap justify-between gap-x-2">
-                <span>{step.label}</span>
+                <span>
+                  {step.label}
+                  {pins[step.key] ? (
+                    <span className="ml-1 inline-block align-middle">
+                      <PinMark number={pins[step.key]!} />
+                    </span>
+                  ) : null}
+                </span>
                 <span className="tabular-nums" style={{ fontWeight: 550 }}>
-                  {step.kind === "removal" ? "−" : ""}
-                  {formatCompact(step.amount)}
+                  {stepFigure(step)}
                 </span>
               </span>
               <span className="relative block h-4" style={{ background: "var(--color-secondary)" }}>
@@ -66,19 +79,52 @@ export function WaterfallChart({ waterfall }: { waterfall: Waterfall | null }) {
   );
 }
 
-export function WeeklyBars({ weeks, note }: { weeks: Week[]; note: string }) {
+// A narrow panel's figure may break before its unit, "$516.1" then "K", and never inside the number.
+function WeekFigure({ amount }: { amount: string }) {
+  const [, number, unit] = /^(.*?)([KMB]?)$/.exec(formatCompact(amount))!;
+  return (
+    <>
+      <span className="whitespace-nowrap" data-week-number>
+        {number}
+      </span>
+      {unit ? (
+        <>
+          <wbr />
+          {unit}
+        </>
+      ) : null}
+    </>
+  );
+}
+
+// Bars scale to the panel's own largest week. Its pins sit in the corner, for notes about every bar.
+export function WeeklyBars({ weeks, pins = [] }: { weeks: Week[]; pins?: number[] }) {
   if (weeks.length === 0) return <p className="p-4">{UNKNOWN_TEXT}</p>;
   const values = weeks.map((week) => toChartNumber(week.everyday) ?? 0);
   const max = Math.max(...values, 1);
   return (
     <>
-      <GrowArea />
       <figure data-flow className="m-0 p-4">
-        <div className="flex items-end gap-2" style={{ height: "10rem" }}>
+        {pins.length > 0 ? (
+          <div className="mb-1 flex gap-1" data-chart-pins>
+            {pins.map((number) => (
+              <PinMark key={number} number={number} />
+            ))}
+          </div>
+        ) : null}
+        <div className="flex items-end gap-1" style={{ height: "10rem" }}>
           {weeks.map((week, index) => (
-            <div key={week.from} className="flex h-full min-w-0 flex-1 flex-col justify-end">
-              <span className="text-center tabular-nums" style={{ fontSize: "var(--text-meta)" }}>
-                {formatCompact(week.everyday)}
+            <div
+              key={week.from}
+              className="flex h-full min-w-0 flex-1 flex-col justify-end"
+              data-week={week.to}
+            >
+              <span
+                className="text-center tabular-nums"
+                style={{ fontSize: "var(--text-meta)" }}
+                data-week-value
+              >
+                <WeekFigure amount={week.everyday} />
               </span>
               <span
                 className="block w-full"
@@ -90,16 +136,13 @@ export function WeeklyBars({ weeks, note }: { weeks: Week[]; note: string }) {
             </div>
           ))}
         </div>
-        <div className="mt-1 flex gap-2" style={{ fontSize: "var(--text-meta)" }}>
+        <div className="mt-1 flex gap-1" style={{ fontSize: "var(--text-meta)" }}>
           {weeks.map((week) => (
             <span key={week.from} className="min-w-0 flex-1 text-center">
               {formatUtcDate(week.to).replace(/ UTC$/, "")}
             </span>
           ))}
         </div>
-        <figcaption className="mt-2" style={{ fontSize: "var(--text-meta)" }} data-note="history">
-          {note}
-        </figcaption>
       </figure>
     </>
   );

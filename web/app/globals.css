@@ -421,6 +421,11 @@ h2 {
   }
 }
 
+/* A hand-built chart that lists rows grows to fit them, so they never spill over the notes below. */
+.chart-area:has([data-flow]) {
+  height: auto;
+}
+
 .chart-area__needs-js {
   padding: 1rem;
   font-size: var(--text-small);

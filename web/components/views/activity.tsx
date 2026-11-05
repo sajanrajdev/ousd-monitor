@@ -1,8 +1,21 @@
+import { ChainPanels } from "@/components/chain-panels";
 import { ChartCard, TableCard } from "@/components/chart-card";
 import { HairlineTable } from "@/components/hairline-table";
-import { WaterfallChart, WeeklyBars } from "@/components/views/activity-charts";
-import { dayRange, floorBps, newestByChain } from "@/lib/aggregate";
-import { StatusChip } from "@/components/status-chip";
+import type { PinnedNote } from "@/components/pinned-notes";
+import { WaterfallChart, WeeklyBars, type StepPins } from "@/components/views/activity-charts";
+import {
+  PERIOD_COLUMNS,
+  scopeWords,
+  STEP_COLUMNS,
+  waterfallPanel,
+  WEEK_COLUMNS,
+  weeklyPanel,
+  type ActivityNote,
+  type WaterfallPanel,
+  type WeeklyPanel,
+} from "@/lib/activity-panels";
+import { dayRange, newestByChain } from "@/lib/aggregate";
+import type { ChainOption } from "@/lib/chain-scope";
 import type {
   ActivityRow,
   Definitions,
@@ -11,33 +24,12 @@ import type {
   ManifestWarning,
 } from "@/lib/dataset";
 import { CARD_ANCHORS, CHAIN_NAMES, DAY_ZERO, definitionHref } from "@/lib/definitions";
-import { formatBps, formatCompact, formatUtcDate, UNKNOWN_TEXT } from "@/lib/format";
-import {
-  activityChains,
-  day0Scope,
-  historyLabel,
-  perChain,
-  velocityTakeaway,
-  velocityWarnings,
-  waterfall,
-  waterfallHeading,
-  waterfallTakeaway,
-  weeklyEveryday,
-  weeklyHeading,
-  weeklyTakeaway,
-} from "@/lib/takeaways/activity";
-import {
-  day0Note,
-  everydayNote,
-  historyNote,
-  HOPS_NOTE,
-  SMALL_TICKET_LEAD,
-  SMALL_TICKET_NOTE,
-  VELOCITY_NOTE,
-  WALLETS_NOTE,
-} from "@/lib/takeaways/caveats";
+import { formatBps, formatCompact } from "@/lib/format";
+import { velocityTakeaway, velocityWarnings } from "@/lib/takeaways/activity";
+import { VELOCITY_NOTE, WALLETS_NOTE } from "@/lib/takeaways/caveats";
 
 export type ActivityViewProps = {
+  options: ChainOption[];
   activity: ActivityRow[];
   kpis: KpiRow[];
   definitions: Definitions;
@@ -50,145 +42,119 @@ const SOURCE = "Chain data and public labels";
 const JUMPY_NOTE =
   "A small circulating supply makes velocity jumpy: the same volume over a smaller base gives a bigger percentage.";
 
-// A dated fact from the project's own notes, not a dataset field. Issuer flows leave this out.
-function SmallTicketNote() {
-  return (
-    <p data-note="small-ticket">
-      <strong>{SMALL_TICKET_LEAD}</strong> {SMALL_TICKET_NOTE}
-    </p>
+const pinnedNote = ({ kind, text, chip }: ActivityNote): PinnedNote => ({
+  kind,
+  text,
+  ...(chip ? { chip } : {}),
+});
+
+// Each note's number on the row its pin sits on, by its place in the list, as PinnedNotes counts.
+function stepPins(notes: ActivityNote[]): StepPins {
+  return Object.fromEntries(
+    notes.flatMap((note, index) => (note.step ? [[note.step, index + 1]] : [])),
   );
 }
 
-// Said where the waterfall is scoped. A Fact because it is minted minus burned, read from the chain.
-function Day0Note({ scope }: { scope: NonNullable<ReturnType<typeof day0Scope>> }) {
+// The notes in full, for the popover. Nothing here is the only copy of a caveat.
+function FullNotes({ notes }: { notes: Record<string, string> }) {
   return (
-    <p data-note="day-0-scope">
-      <StatusChip kind="fact" /> {day0Note(scope)}
-    </p>
+    <>
+      {Object.entries(notes).map(([kind, text]) => (
+        <p key={kind} data-full-note={kind}>
+          {text}
+        </p>
+      ))}
+    </>
   );
 }
 
-function PeriodTable({ activity }: { activity: ActivityRow[] }) {
+function WaterfallCard({ panel, state }: { panel: WaterfallPanel; state: DatasetState }) {
+  const scope = scopeWords(panel.chains);
   return (
-    <HairlineTable
-      caption="Period covered per chain, Day 0 through each chain's newest day"
-      columns={[
-        { key: "chain", label: "Chain" },
-        { key: "from", label: "First day" },
-        { key: "to", label: "Newest day" },
-        { key: "days", label: "Days", numeric: true },
-        { key: "headline", label: "Headline", numeric: true },
-        { key: "large", label: "Clean large", numeric: true },
-        { key: "everyday", label: "Clean everyday", numeric: true },
-      ]}
-      rows={perChain(activity).map((chain) => {
-        const sum = waterfall(chain.rows);
-        const find = (key: string) => sum?.steps.find((step) => step.key === key)?.amount;
-        return {
-          chain: CHAIN_NAMES[chain.chain],
-          from: formatUtcDate(chain.from),
-          to: formatUtcDate(chain.to),
-          days: chain.days,
-          headline: sum ? formatCompact(sum.headline) : UNKNOWN_TEXT,
-          large: formatCompact(find("clean_large")),
-          everyday: formatCompact(find("clean_everyday")),
-        };
-      })}
-    />
+    <ChartCard
+      takeaway={panel.heading}
+      detail={
+        <>
+          <p>{panel.takeaway}</p>
+          <FullNotes notes={panel.fullNotes} />
+        </>
+      }
+      chip="inferred"
+      source={SOURCE}
+      asOf={panel.asOf}
+      definitionHref={definitionHref("clean-volume")}
+      frameWord={state.frameWord}
+      summary={panel.summary}
+      notes={panel.notes.map(pinnedNote)}
+      table={{
+        caption: `From headline volume to clean volume, ${scope}, Day 0 through each chain's newest day`,
+        columns: STEP_COLUMNS,
+        rows: panel.steps.rows,
+      }}
+      moreTables={
+        <HairlineTable
+          caption={`Period covered per chain, ${scope}, Day 0 through each chain's newest day`}
+          columns={PERIOD_COLUMNS}
+          rows={panel.periods.rows}
+        />
+      }
+    >
+      <WaterfallChart waterfall={panel.waterfall} pins={stepPins(panel.notes)} />
+    </ChartCard>
   );
 }
 
-export function ActivityView({ activity, kpis, definitions, warnings, state }: ActivityViewProps) {
+function WeeklyCard({ panel, state }: { panel: WeeklyPanel; state: DatasetState }) {
+  return (
+    <ChartCard
+      takeaway={panel.heading}
+      detail={
+        <>
+          <p>{panel.takeaway}</p>
+          <FullNotes notes={panel.fullNotes} />
+        </>
+      }
+      chip="inferred"
+      source={SOURCE}
+      asOf={panel.asOf}
+      definitionHref={definitionHref("everyday-large")}
+      frameWord={state.frameWord}
+      summary={panel.summary}
+      notes={panel.notes.map(pinnedNote)}
+      table={{
+        caption: `Clean everyday volume per complete week, ${scopeWords(panel.chains)}`,
+        columns: WEEK_COLUMNS,
+        rows: panel.table.rows,
+      }}
+    >
+      <WeeklyBars weeks={panel.weeks} pins={panel.notes.map((_, index) => index + 1)} />
+    </ChartCard>
+  );
+}
+
+export function ActivityView({
+  options,
+  activity,
+  kpis,
+  definitions,
+  warnings,
+  state,
+}: ActivityViewProps) {
   const newest = newestByChain(activity);
   const asOf = dayRange(newest.map((row) => row.day)) ?? DAY_ZERO;
-  const all = waterfall(activity);
-  const chains = activityChains(activity);
-  const scope = day0Scope(activity, kpis);
   const velocityNotes = velocityWarnings(warnings);
-  const weeks = weeklyEveryday(activity);
-  const everydayLabel = formatCompact(definitions.large_transfer_base_units);
   const dust = formatCompact(definitions.active_dust_base_units);
   const secondary = formatCompact(definitions.active_secondary_base_units);
-  const share = (step: string) =>
-    all
-      ? formatBps(
-          floorBps(BigInt(all.steps.find((s) => s.key === step)!.amount), BigInt(all.headline)),
-        )
-      : UNKNOWN_TEXT;
+  const inputs = { activity, kpis, definitions };
 
   return (
     <section id="real-activity" data-section="view-b" className="card-grid">
-      <ChartCard
-        id={CARD_ANCHORS.waterfall}
-        takeaway={waterfallHeading(all, chains)}
-        detail={<p>{waterfallTakeaway(all)}</p>}
-        chip="inferred"
-        source={SOURCE}
-        asOf={asOf}
-        definitionHref={definitionHref("clean-volume")}
-        frameWord={state.frameWord}
-        summary={
-          all
-            ? `Headline volume, then each removal in turn, down to clean large (${share("clean_large")} of headline) and clean everyday (${share("clean_everyday")}). Everyday means under ${everydayLabel}, nothing more. Large transfers are split out, not removed. Hops across transactions still count more than once.`
-            : UNKNOWN_TEXT
-        }
-        table={{
-          caption:
-            "From headline volume to clean volume, all chains, Day 0 through each chain's newest day",
-          columns: [
-            { key: "step", label: "Step" },
-            { key: "amount", label: "Amount", numeric: true },
-          ],
-          rows: (all?.steps ?? []).map((step) => ({
-            step: step.label,
-            amount: formatCompact(step.amount),
-          })),
-        }}
-        note={
-          <>
-            {all ? (
-              <>
-                <p data-note="everyday-meaning">{everydayNote(definitions)}</p>
-                <p className="mt-3" data-note="hops">
-                  {HOPS_NOTE}
-                </p>
-              </>
-            ) : null}
-            {scope ? <Day0Note scope={scope} /> : null}
-            <SmallTicketNote />
-            <div className="mt-4">
-              <PeriodTable activity={activity} />
-            </div>
-          </>
-        }
-      >
-        <WaterfallChart waterfall={all} />
-      </ChartCard>
-
-      <ChartCard
-        id={CARD_ANCHORS.weekly}
-        takeaway={weeklyHeading(weeks, chains)}
-        detail={<p>{weeklyTakeaway(weeks)}</p>}
-        chip="inferred"
-        source={SOURCE}
-        asOf={asOf}
-        definitionHref={definitionHref("everyday-large")}
-        frameWord={state.frameWord}
-        summary={`Clean everyday volume per week, all chains, for complete weeks only. ${historyLabel(activity)}.`}
-        table={{
-          caption: "Clean everyday volume per complete week, all chains",
-          columns: [
-            { key: "week", label: "Week" },
-            { key: "everyday", label: "Clean everyday", numeric: true },
-          ],
-          rows: weeks.map((week) => ({
-            week: `${formatUtcDate(week.from).replace(/ UTC$/, "")} to ${formatUtcDate(week.to)}`,
-            everyday: formatCompact(week.everyday),
-          })),
-        }}
-      >
-        <WeeklyBars weeks={weeks} note={historyNote(historyLabel(activity))} />
-      </ChartCard>
+      <ChainPanels options={options} id={CARD_ANCHORS.waterfall}>
+        {(option) => <WaterfallCard panel={waterfallPanel(option, inputs)} state={state} />}
+      </ChainPanels>
+      <ChainPanels options={options} id={CARD_ANCHORS.weekly}>
+        {(option) => <WeeklyCard panel={weeklyPanel(option, inputs)} state={state} />}
+      </ChainPanels>
 
       <TableCard
         id={CARD_ANCHORS.velocity}

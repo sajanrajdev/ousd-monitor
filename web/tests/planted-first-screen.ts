@@ -324,6 +324,96 @@ export function plantedSeriesPanels(panels: PlantedSeriesPanel[], id: string): s
   return `<div id="${id}" class="chain-panels">${items.join("")}</div>`;
 }
 
+type PlantedActivityNote = { kind: string; words: string; step?: string; chip?: string };
+export type PlantedWaterfallPanel = {
+  value: string;
+  heading: string;
+  steps: { key: string; figure: string }[];
+  notes: PlantedActivityNote[];
+  fullNotes: Record<string, string>;
+  stepRows: Record<string, string>[];
+  periodRows: Record<string, string>[];
+};
+export type PlantedWeeklyPanel = {
+  value: string;
+  heading: string;
+  bars: string[];
+  notes: PlantedActivityNote[];
+  fullNotes: Record<string, string>;
+  rows: Record<string, string>[];
+};
+const STEP_TABLE = [
+  ["step", "Step"],
+  ["amount", "Amount"],
+].map(([key, label]) => ({ key, label }));
+const PERIOD_TABLE = [
+  ["chain", "Chain"],
+  ["from", "First day"],
+  ["to", "Newest day"],
+  ["days", "Days"],
+  ["headline", "Headline"],
+  ["large", "Clean large"],
+  ["everyday", "Clean everyday"],
+].map(([key, label]) => ({ key, label }));
+const WEEK_TABLE = [
+  ["week", "Week"],
+  ["everyday", "Clean everyday"],
+].map(([key, label]) => ({ key, label }));
+
+function plantedActivityNotes(notes: PlantedActivityNote[]): string {
+  const items = notes.map(({ kind, words, chip }, index) => {
+    const marker = chip ? `<span class="status-chip" data-kind="${chip}">F</span> ` : "";
+    return `<li data-note="${kind}"><span class="pin" aria-hidden="true">${index + 1}</span><p>${marker}${escaped(words)}</p></li>`;
+  });
+  return `<ol data-pinned-notes>${items.join("")}</ol>`;
+}
+
+function plantedFullNotes(fullNotes: Record<string, string>): string {
+  return Object.entries(fullNotes)
+    .map(([kind, text]) => `<p data-full-note="${kind}">${escaped(text)}</p>`)
+    .join("");
+}
+
+// Each filter option's waterfall and weekly bars, as the views write them.
+export function plantedWaterfallPanels(panels: PlantedWaterfallPanel[], id: string): string {
+  const items = panels.map((panel) => {
+    const rows = panel.steps
+      .map(({ key, figure }) => {
+        const pins = panel.notes
+          .map((note, index) => (note.step === key ? `<span class="pin">${index + 1}</span>` : ""))
+          .join("");
+        return `<li data-step="${key}"><span>S${pins}</span><span class="tabular-nums">${figure}</span></li>`;
+      })
+      .join("");
+    return `<div data-chain-panel="${panel.value}">${plantedPanelCard(
+      panel.heading,
+      `<div class="chart-area" aria-hidden="true"><ol>${rows}</ol></div>${plantedActivityNotes(panel.notes)}`,
+      plantedFullNotes(panel.fullNotes),
+      `${plantedTable({ columns: STEP_TABLE, rows: panel.stepRows })}${plantedTable({ columns: PERIOD_TABLE, rows: panel.periodRows })}`,
+    )}</div>`;
+  });
+  return `<div id="${id}" class="chain-panels">${items.join("")}</div>`;
+}
+
+export function plantedWeeklyPanels(panels: PlantedWeeklyPanel[], id: string): string {
+  const items = panels.map((panel) => {
+    const pins = panel.notes.map((_, index) => `<span class="pin">${index + 1}</span>`).join("");
+    const bars = panel.bars
+      .map((bar) => {
+        const [to, figure] = bar.split("=");
+        return `<div data-week="${to}"><span data-week-value>${figure}</span></div>`;
+      })
+      .join("");
+    return `<div data-chain-panel="${panel.value}">${plantedPanelCard(
+      panel.heading,
+      `<div class="chart-area" aria-hidden="true"><div data-chart-pins>${pins}</div>${bars}</div>${plantedActivityNotes(panel.notes)}`,
+      plantedFullNotes(panel.fullNotes),
+      plantedTable({ columns: WEEK_TABLE, rows: panel.rows }),
+    )}</div>`;
+  });
+  return `<div id="${id}" class="chain-panels">${items.join("")}</div>`;
+}
+
 export function plantedFilter(options: { value: string; label: string }[]): string {
   const inputs = options.map(
     ({ value, label }, index) =>
@@ -345,18 +435,23 @@ export function plantedRealMain(
     filter: { value: string; label: string }[];
     supplyPanels: PlantedSupplyPanel[];
     seriesPanels: PlantedSeriesPanel[];
+    waterfallPanels: PlantedWaterfallPanel[];
+    weeklyPanels: PlantedWeeklyPanel[];
   },
   staleNote: string,
   staleTrust: string,
 ): string {
-  const others = expected.findings.filter(({ id }) => id !== CARD_ANCHORS.supply);
+  const filtered: string[] = [CARD_ANCHORS.supply, CARD_ANCHORS.waterfall, CARD_ANCHORS.weekly];
+  const others = expected.findings.filter(({ id }) => !filtered.includes(id));
   return `<main><section data-section="verdict">${plantedHeadline(expected.verdict)}<p>${staleNote}</p></section>
     <section data-section="kpi-row">${plantedKpis(expected.kpiScope, expected.kpiValues)}</section>
     <section data-section="trust-strip">${staleTrust}${PLANTED_TRUST_DETAIL}</section>
     ${plantedFindings(null, expected.findings)}${PLANTED_LEGEND}${plantedNotes(expected.essentialNotes)}
     <div class="dashboard">${plantedFilter(expected.filter)}
     ${plantedSupplyPanels(expected.supplyPanels, CARD_ANCHORS.supply, plantedExchangeRows(expected.exchangeRows))}
-    ${plantedSeriesPanels(expected.seriesPanels, CARD_ANCHORS.series)}</div>
+    ${plantedSeriesPanels(expected.seriesPanels, CARD_ANCHORS.series)}
+    ${plantedWaterfallPanels(expected.waterfallPanels, CARD_ANCHORS.waterfall)}
+    ${plantedWeeklyPanels(expected.weeklyPanels, CARD_ANCHORS.weekly)}</div>
     ${plantedFlight(expected.exchangeRows.map(plantedRowFlight))}
     ${plantedBands(expected.bands, { withLines: false })}
     ${others.map((finding) => plantedCard(null, finding)).join("")}</main>`;

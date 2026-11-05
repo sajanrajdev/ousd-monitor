@@ -92,6 +92,13 @@ export function waterfall(allRows: ActivityRow[]): Waterfall | null {
   return left === filled ? { steps, headline: headline.toString() } : null;
 }
 
+// What a row prints: a removal as minus its amount, except one that rounds to $0, which has no sign,
+// as formatCompact gives none.
+export function stepFigure(step: Pick<WaterfallStep, "kind" | "amount">): string {
+  const figure = formatCompact(step.amount);
+  return step.kind === "removal" && figure !== "$0" ? `−${figure}` : figure;
+}
+
 export function waterfallAmount(waterfall: Waterfall, key: AmountField): string {
   return waterfall.steps.find((step) => step.key === key)!.amount;
 }
@@ -148,17 +155,21 @@ export type Week = { from: string; to: string; everyday: string };
 
 // Seven-day blocks counted from the first day in the data. A block counts only once every chain
 // has reached its last day, so a chain that is a day behind never makes a week look smaller. A
-// chain that hadn't started yet adds nothing, as it did nothing.
-export function weeklyEveryday(allRows: ActivityRow[]): Week[] {
+// chain that hadn't started yet adds nothing, as it did nothing. With `chains`, only their rows are
+// summed, but the blocks are still the ones every chain's rows give, so a week means the same dates
+// under every filter option and the chains' weeks add up to the whole's.
+export function weeklyEveryday(allRows: ActivityRow[], chains?: readonly ChainName[]): Week[] {
   const rows = fromDayZero(allRows);
   if (rows.length === 0) return [];
   const first = Math.min(...rows.map((row) => dayNumber(row.day)));
   const reached = Math.min(...perChain(rows).map((chain) => dayNumber(chain.to)));
   const sums = new Map<number, bigint>();
   for (const row of rows) {
+    if (chains && !chains.includes(row.chain)) continue;
     const week = Math.floor((dayNumber(row.day) - first) / 7);
     sums.set(week, (sums.get(week) ?? 0n) + BigInt(row.clean_everyday));
   }
+  if (chains && sums.size === 0) return [];
   const weeks: Week[] = [];
   for (let week = 0; first + week * 7 + 6 <= reached; week += 1) {
     weeks.push({
