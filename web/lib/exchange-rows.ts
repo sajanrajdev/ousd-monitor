@@ -9,6 +9,8 @@ type Labels = Pick<Dataset["labels"], "data" | "exchange_holdings" | "exchange_l
 export type ExchangeRow = {
   entity: string;
   detail: string;
+  // In base units, across chains, so a segment can refuse rows that add up to more than it holds.
+  amount: string;
   sourceHref: string;
   sourceText: string;
 };
@@ -40,6 +42,7 @@ export function exchangeRows({
       return {
         entity,
         detail: `${wallets(count)}, at least ${formatFloorDollars(balance.toString())}`,
+        amount: balance.toString(),
         sourceHref: LABELS_HREF,
         sourceText: EACH_WALLET,
       };
@@ -48,6 +51,7 @@ export function exchangeRows({
       return {
         entity,
         detail: "labeled wallets hold none",
+        amount: "0",
         sourceHref: LABELS_HREF,
         sourceText: EACH_WALLET,
       };
@@ -56,6 +60,7 @@ export function exchangeRows({
     return {
       entity,
       detail: "no wallet labeled",
+      amount: "0",
       sourceHref: exchange_listings.find((row) => row.entity === entity)!.source_url,
       sourceText: "its OUSD listing",
     };

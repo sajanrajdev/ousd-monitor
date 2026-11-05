@@ -8,6 +8,7 @@ import {
   journeyTakeaway,
   scopedHeading,
   scopeText,
+  seriesHeading,
   seriesTakeaway,
   top10ShareBps,
   volumeTakeaway,
@@ -190,6 +191,32 @@ describe("other takeaways", () => {
       "Placed supply on Tempo was 25.00% of total on 14 Oct 2026 UTC and 50.00% on 3 Nov 2026 UTC.",
     );
     expect(seriesTakeaway([{ ...point, total_supply: "0" }, point], ["tempo"])).toBe(UNKNOWN_TEXT);
+  });
+
+  it("the series heading states both shares and days in at most 12 words", () => {
+    const first = { day: "2026-10-14", total_supply: "10000", placed_supply: "3384" };
+    const last = { day: "2026-11-03", total_supply: "10000", placed_supply: "7707" };
+    const all = ["tempo", "ethereum", "base", "solana"] as const;
+    const text = seriesHeading([first, last], [...all]);
+    expect(text).toBe("Placed share: 33.84% on 14 Oct 2026, 77.07% on 3 Nov.");
+    expect(text.split(/\s+/).length).toBeLessThanOrEqual(12);
+  });
+
+  it("the series heading names its chain, and is unknown below two days or at no supply", () => {
+    const first = { day: "2026-10-14", total_supply: "10000", placed_supply: "2500" };
+    const last = { day: "2026-11-03", total_supply: "10000", placed_supply: "5000" };
+    expect(seriesHeading([first, last], ["base"])).toBe(
+      "On Base, placed share: 25.00% on 14 Oct 2026, 50.00% on 3 Nov.",
+    );
+    expect(seriesHeading([first], ["base"])).toBe(UNKNOWN_TEXT);
+    expect(seriesHeading([], ["base"])).toBe(UNKNOWN_TEXT);
+    expect(seriesHeading([{ ...first, total_supply: "0" }, last], ["base"])).toBe(UNKNOWN_TEXT);
+  });
+
+  it("the series heading keeps both years when they differ", () => {
+    const first = { day: "2026-12-30", total_supply: "100", placed_supply: "50" };
+    const last = { day: "2027-01-02", total_supply: "100", placed_supply: "50" };
+    expect(seriesHeading([first, last], ["base"])).toContain("on 2 Jan 2027 UTC");
   });
 
   it("volume is unknown with no rows", () => {

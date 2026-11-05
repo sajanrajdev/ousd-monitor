@@ -38,6 +38,7 @@ describe("exchangeRows", () => {
       {
         entity: "Coinbase",
         detail: "7 wallets, at least $345,581",
+        amount: "345581999998",
         sourceHref: "/methodology/#named-labels",
         sourceText: "each wallet's label",
       },
@@ -63,6 +64,7 @@ describe("exchangeRows", () => {
       {
         entity: "Kraken",
         detail: "no wallet labeled",
+        amount: "0",
         sourceHref: "https://example.com/Kraken",
         sourceText: "its OUSD listing",
       },

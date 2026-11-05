@@ -17,6 +17,16 @@ const AXE_WIDTHS = new Set([390, 1440]);
 const HEIGHT = 900;
 const BREAKPOINT_MD = 768;
 const TWO_COLUMNS_FROM = 1056;
+const NOTES_BESIDE_FROM = 560;
+// Each card's anchor, as lib/definitions.ts has them.
+const CARDS = {
+  supply: "where-supply-sits",
+  series: "placed-vs-circulating",
+  waterfall: "headline-to-clean",
+  weekly: "everyday-by-week",
+  velocity: "velocity-by-chain",
+  chainRoles: "what-each-chain-does",
+};
 const MIN_TARGET = 24;
 const MIN_FILTER_TARGET = 36;
 const LEGEND_TRIGGER_GAP = 12;
@@ -62,9 +72,10 @@ async function guarded(name, where, run) {
   }
 }
 
-// The filter isn't on the page yet, and no page has the two-column grid. So this renders
-// the real components with made-up amounts, and puts them in the built page, where the real CSS and
-// enhancer apply. Drop each part as a later unit mounts the real thing.
+// Plain cards side by side, with a table too wide for half a card and nothing but what every card
+// has, as the views' own cards differ until every unit is in. So this renders the real component with
+// made-up amounts, and puts it in the built page, where the real CSS and enhancer apply. U3 dropped the
+// filter and panels from here, as the page now has its own. Drop the rest when nothing needs it.
 async function loadHarness() {
   const vite = await createServer({
     root: WEB_DIR,
@@ -75,15 +86,11 @@ async function loadHarness() {
     server: { middlewareMode: true, hmr: false, ws: false, watch: null },
   });
   const load = (path) => vite.ssrLoadModule(path);
-  const [{ ChainFilter }, { ChainPanels }, { ChartCard }, { Pin }, scope, verdict] =
-    await Promise.all([
-      load("/components/chain-filter.tsx"),
-      load("/components/chain-panels.tsx"),
-      load("/components/chart-card.tsx"),
-      load("/components/pinned-notes.tsx"),
-      load("/lib/chain-scope.ts"),
-      load("/lib/verdict.ts"),
-    ]);
+  const [{ ChartCard }, { Pin }, verdict] = await Promise.all([
+    load("/components/chart-card.tsx"),
+    load("/components/pinned-notes.tsx"),
+    load("/lib/verdict.ts"),
+  ]);
   const card = (name, props) => {
     const notes = [{ kind: "harness", text: `On ${name}, a made-up caveat.` }];
     return h(
@@ -124,23 +131,19 @@ async function loadHarness() {
       h(Pin, { notes, kind: "harness" }),
     );
   };
-  const markup = (chains) => {
-    const options = scope.chainOptions(chains);
-    return renderToStaticMarkup(
+  const markup = renderToStaticMarkup(
+    h(
+      "section",
+      { "data-harness": "" },
       h(
-        "section",
-        { "data-harness": "" },
-        h(ChainFilter, { options }),
-        h(
-          "div",
-          { className: "card-grid" },
-          h(ChainPanels, { options, id: "harness-panels" }, (option) => card(option.label)),
-          card("no filter", { id: "harness-plain" }),
-        ),
+        "div",
+        { className: "card-grid" },
+        card("no filter", { id: "harness-plain" }),
+        card("its neighbour", { id: "harness-neighbour" }),
       ),
-      { identifierPrefix: "harness-" },
-    );
-  };
+    ),
+    { identifierPrefix: "harness-" },
+  );
   return {
     markup,
     oneLineHeadline: verdict.VERDICT_SENTENCES.mostly_placed,
@@ -223,6 +226,13 @@ const shownPanels = (page) =>
       .map((panel) => panel.dataset.chainPanel),
   );
 
+// The cards a filter option changes, so each check covers every one of them.
+const FILTERED_CARDS = ["#where-supply-sits", "#placed-vs-circulating"];
+const SUPPLY = "#where-supply-sits";
+const SERIES = "#placed-vs-circulating";
+const shownCard = (page, box) =>
+  page.locator(`${box} > [data-chain-panel] > .chart-card:visible`).first();
+
 const openCount = (page) => page.locator(".info-popover[open]").count();
 const isOpen = (locator) => locator.evaluate((details) => details.open);
 const focusIsOn = (locator) => locator.evaluate((element) => document.activeElement === element);
@@ -248,15 +258,20 @@ async function checkFilter(page, where, js, chains) {
     where,
     (await page.locator(".chain-filter label").first().innerText()).trim() === firstLabel,
   );
-  check("the filter lists only chains in the data", where, values.length === chains.length + 1);
+  check(
+    "the filter lists only chains in the data",
+    where,
+    values.join() === ["all", ...chains].join(),
+    values.join(),
+  );
   check("the chosen option looks different", where, await chosenOptionDiffers(page));
   for (const [index, value] of values.entries()) {
     await page.locator(".chain-filter label").nth(index).click();
     const shown = await shownPanels(page);
     check(
-      "choosing a filter shows one panel",
+      "choosing a filter shows one panel in each filtered card",
       where,
-      shown.length === 1 && shown[0] === value,
+      shown.length === FILTERED_CARDS.length && shown.every((panel) => panel === value),
       `${value}: ${shown}`,
     );
     // The first option is already chosen, so clicking it changes nothing to announce.
@@ -267,13 +282,19 @@ async function checkFilter(page, where, js, chains) {
   }
   await page.locator(".chain-filter label").first().click();
   await page.keyboard.press("ArrowRight");
+  const moved = await shownPanels(page);
   check(
     "the right arrow moves to the next option",
     where,
-    (await shownPanels(page))[0] === values[1],
+    moved.length === FILTERED_CARDS.length && moved.every((panel) => panel === values[1]),
   );
   await page.keyboard.press("ArrowLeft");
-  check("the left arrow moves back", where, (await shownPanels(page))[0] === values[0]);
+  const back = await shownPanels(page);
+  check(
+    "the left arrow moves back",
+    where,
+    back.length === FILTERED_CARDS.length && back.every((panel) => panel === values[0]),
+  );
 }
 
 // What must be in view with nothing opened. A stylesheet can hide what verify-output can't read.
@@ -383,6 +404,13 @@ async function checkInView(page, where) {
       need("an exchange row's detail", row.querySelector("[data-exchange-detail]"));
       need("an exchange row's source", row.querySelector("[data-exchange-source]"));
     }
+    // A legend's rows and the figures beside a bar, wherever their panel shows.
+    for (const row of document.querySelectorAll(
+      "main .chart-legend__row, main [data-stat], main [data-exchange-linked]",
+    )) {
+      const panel = row.closest("[data-chain-panel]");
+      if (!panel || panel.checkVisibility()) need("a legend row or a figure beside its bar", row);
+    }
     const note = document.querySelector("[data-stale-note] .freshness-text > *");
     if (!verdict && root.dataset.freshness === "stale") need("the stale note", note);
     for (const card of document.querySelectorAll(".chart-card")) {
@@ -463,13 +491,32 @@ async function checkWithoutHas(browser, origin, folder, markup, chains, where, o
     ...options,
     withoutHas: true,
   });
+  await context.addInitScript(() => {
+    const supports = CSS.supports.bind(CSS);
+    CSS.supports = (...query) => (String(query[0]).includes(":has(") ? false : supports(...query));
+  });
   check(
     "without :has(), the filter is hidden",
     where,
     !(await page.locator(".chain-filter").isVisible()),
   );
   const shown = await shownPanels(page);
-  check("without :has(), every panel shows", where, shown.length === chains.length + 1, `${shown}`);
+  check(
+    "without :has(), every panel shows",
+    where,
+    shown.length === (chains.length + 1) * FILTERED_CARDS.length,
+    `${shown}`,
+  );
+  // The stylesheet can be made to act without :has(), but what scripts ask has to be told as well.
+  if (options.js) {
+    await page.reload({ waitUntil: "networkidle" });
+    await page.waitForFunction(() => document.querySelector("#placed-vs-circulating svg"));
+    const drawn = await page.locator(`${SERIES} .recharts-wrapper`).count();
+    check("without :has(), every step line draws", where, drawn === chains.length + 1, `${drawn}`);
+    await page.evaluate((html) => {
+      document.querySelector("main").insertAdjacentHTML("beforeend", html);
+    }, markup);
+  }
   const card = page.locator("#harness-plain");
   const summary = card.locator(".data-toggle > summary");
   await summary.click();
@@ -615,13 +662,13 @@ async function checkTap(browser, origin, folder, markup, where, options) {
 async function checkToggle(page, where, width) {
   for (const [name, cardSelector] of [
     ["#harness-plain", "#harness-plain"],
-    ["#harness-panels", "#harness-panels .chart-card:visible"],
+    ...FILTERED_CARDS.map((box) => [box, `${box} > [data-chain-panel] > .chart-card:visible`]),
   ]) {
     const card = page.locator(cardSelector).first();
     const toggle = card.locator(".data-toggle");
     const summary = toggle.locator("> summary");
     const plot = card.locator(".chart-card__plot");
-    const table = toggle.locator("table");
+    const table = toggle.locator("table").first();
     const closedWidth = (await page.locator(name).boundingBox()).width;
 
     await summary.focus();
@@ -778,7 +825,7 @@ async function checkAxe(page, where) {
 }
 
 async function checkWithoutJavaScript(page, where) {
-  const note = page.locator(".chart-card__source-note").first();
+  const note = page.locator(".chart-card__source-note:visible").first();
   check("source and definition show as a plain note", where, await note.isVisible());
   check("the note holds the source", where, (await note.innerText()).includes("Source:"));
   check("the note links the definition", where, (await note.locator("a").count()) === 1);
@@ -798,7 +845,8 @@ async function checkWithoutJavaScript(page, where) {
         }).length,
   );
   check("an empty chart area has the note", where, blank === 0, `${blank} without`);
-  const needsJs = page.locator(".chart-area__needs-js");
+  // Each panel has its own, and the shown one is what counts.
+  const needsJs = page.locator(".chart-area__needs-js:visible");
   check("the step line says it needs JavaScript", where, (await needsJs.count()) === 1);
   check("and the note is visible", where, await needsJs.isVisible());
   check("and points to the Table button", where, (await needsJs.innerText()).includes("The Table"));
@@ -858,11 +906,27 @@ async function checkFindingLinks(page, where, js) {
     history.replaceState(null, "", location.pathname);
     window.scrollTo(0, 0);
   });
-  if (!js) return;
   await page.locator(".chain-filter label").nth(1).click();
   check("the filter is off All", where, (await shownPanels(page))[0] !== "all");
-  await links.first().click();
-  check("a finding sets the filter to All", where, (await shownPanels(page))[0] === "all");
+  const supplyLink = links.first();
+  const finding = (await supplyLink.locator(".finding__text").innerText()).trim();
+  await supplyLink.click();
+  await page.waitForFunction((target) => location.hash === target, SUPPLY);
+  // With a script the filter goes back to All. Without one the targeted card shows All's panel.
+  const landed = shownCard(page, SUPPLY);
+  check(
+    "a finding lands on a card that says the same, whatever the filter",
+    where,
+    (await landed.count()) === 1 && (await landed.locator("h2").innerText()).trim() === finding,
+    await landed
+      .locator("h2")
+      .allInnerTexts()
+      .then((texts) => texts.join(" | ")),
+  );
+  if (js) {
+    check("a finding sets the filter to All", where, (await shownPanels(page))[0] === "all");
+  }
+  await page.locator(".chain-filter label").first().click();
   await page.evaluate(() => {
     history.replaceState(null, "", location.pathname);
     window.scrollTo(0, 0);
@@ -1073,10 +1137,355 @@ async function checkClockSwap(browser, origin, where, width) {
   await context.close();
 }
 
+// Cards side by side from 1056, stacked below it, and the filter above them both. The two-column grid
+// is what makes this a dashboard and the old stacked page wasn't, so it's measured, not assumed.
+async function checkDashboardGrid(page, where, width) {
+  const first = await boxOf(page, SUPPLY);
+  const second = await boxOf(page, SERIES);
+  const main = await boxOf(page, "main");
+  const filter = await boxOf(page, ".dashboard .chain-filter");
+  check(
+    "the filter sits above the cards",
+    where,
+    filter !== null && filter.bottom <= Math.min(first.top, second.top) + BOX_SLACK_PX,
+  );
+  if (width >= TWO_COLUMNS_FROM) {
+    check(
+      "two cards share a row from 1056",
+      where,
+      Math.abs(first.top - second.top) <= 1 && second.left >= first.right,
+      `tops ${Math.round(first.top)} and ${Math.round(second.top)}`,
+    );
+    const half = (main.right - main.left) / 2;
+    check(
+      "each takes half the page's width",
+      where,
+      first.right - first.left <= half && second.right - second.left <= half,
+      `${Math.round(first.right - first.left)} of ${Math.round(half * 2)}`,
+    );
+    // The cards, not their panels' boxes, which a grid stretches whatever a card does.
+    const firstCard = await shownCard(page, SUPPLY).boundingBox();
+    const secondCard = await shownCard(page, SERIES).boundingBox();
+    const endOf = (box) => box.y + box.height;
+    check(
+      "and they end together",
+      where,
+      Math.abs(endOf(firstCard) - endOf(secondCard)) <= 1,
+      `${Math.round(endOf(firstCard))} and ${Math.round(endOf(secondCard))}`,
+    );
+  } else {
+    check("cards stack below 1056", where, second.top >= first.bottom);
+  }
+}
+
+// A card with room has its legend beside its chart. Measured on every filtered card, as the rule is
+// what the maintainer asked for, and a narrower card keeps the legend directly under the chart.
+async function checkLegendsBeside(page, where) {
+  const found = await page.evaluate(
+    ([slack, minimum]) => {
+      const out = [];
+      for (const card of document.querySelectorAll("[data-chain-panel] > .chart-card")) {
+        if (!card.checkVisibility()) continue;
+        const chart = card.querySelector(".chart-area")?.getBoundingClientRect();
+        const legend = card.querySelector(".chart-legend")?.getBoundingClientRect();
+        if (!chart || !legend) continue;
+        const wide = card.getBoundingClientRect().width >= minimum;
+        const overlap = Math.min(chart.bottom, legend.bottom) - Math.max(chart.top, legend.top);
+        const beside = legend.left >= chart.right - slack && overlap > 0;
+        const below = legend.top >= chart.bottom - slack;
+        out.push({ wide, beside, below });
+      }
+      return out;
+    },
+    [BOX_SLACK_PX, NOTES_BESIDE_FROM],
+  );
+  check("the page has legends to check", where, found.length === FILTERED_CARDS.length);
+  for (const { wide, beside, below } of found) {
+    if (wide) check("a legend sits beside its chart from 560", where, beside);
+    else check("a narrower card has its legend under the chart", where, below);
+  }
+}
+
+// Sticky under the header from 768, in the flow below it. Either way an arriving card clears it.
+async function checkStickyFilter(page, where, width) {
+  const filter = ".dashboard .chain-filter";
+  const sticks = width >= BREAKPOINT_MD;
+  const start = await page.evaluate(() => window.scrollY);
+  await page.evaluate(() => window.scrollTo({ top: 1600, behavior: "instant" }));
+  const box = await boxOf(page, filter);
+  const header = await boxOf(page, "header");
+  if (sticks) {
+    check(
+      "the filter sticks under the header from 768",
+      where,
+      Math.abs(box.top - header.bottom) <= 1,
+      `${Math.round(box.top)}, header ${Math.round(header.bottom)}`,
+    );
+    const onTop = await page.evaluate((selector) => {
+      const option = document.querySelector(`${selector} label`).getBoundingClientRect();
+      const at = document.elementFromPoint(
+        option.left + option.width / 2,
+        option.top + option.height / 2,
+      );
+      return Boolean(at?.closest(selector));
+    }, filter);
+    check("and no card covers it", where, onTop);
+  } else {
+    const position = await page.evaluate(
+      (selector) => getComputedStyle(document.querySelector(selector)).position,
+      filter,
+    );
+    check("the filter stays in the flow below 768", where, position === "static", position);
+  }
+  for (const id of Object.values(CARDS)) {
+    await page.evaluate((target) => {
+      location.hash = target;
+    }, `#${id}`);
+    const card = await boxOf(page, `#${id}`);
+    const over = await boxOf(page, sticks ? filter : "header");
+    const bar = await boxOf(page, "header");
+    check(
+      "an arriving card clears the header and the sticky filter",
+      where,
+      card.top >= over.bottom - 1 && card.top >= bar.bottom - 1 && card.top < HEIGHT,
+      `#${id}: ${Math.round(card.top)}, ${Math.round(over.bottom)}`,
+    );
+  }
+  await page.evaluate((top) => {
+    history.replaceState(null, "", location.pathname);
+    window.scrollTo({ top, behavior: "instant" });
+  }, start);
+}
+
+// Choosing an option draws its step line at full width, and leaves the others as skeletons. Nothing
+// above the grid moves, so a reader's place holds. Without a script the panel keeps its note.
+async function checkStepLines(page, where, js) {
+  const values = await page
+    .locator(".chain-filter input")
+    .evaluateAll((inputs) => inputs.map((input) => input.value));
+  const above = async () =>
+    (await boxOf(page, '[data-section="marker-legend"]')).pageTop +
+    (await boxOf(page, ".dashboard")).pageTop;
+  const before = await above();
+  for (const value of values) {
+    await page.locator(`.chain-filter input[value="${value}"]`).check({ force: true });
+    const panel = page.locator(`${SERIES} > [data-chain-panel="${value}"]`);
+    if (js) {
+      await panel.locator(".recharts-wrapper svg").first().waitFor();
+      // The container, as a hidden panel's would draw nothing inside it even once it had mounted.
+      const drawn = await page
+        .locator(`${SERIES} .recharts-responsive-container`)
+        .evaluateAll((charts) =>
+          charts.map((chart) => chart.closest("[data-chain-panel]").dataset.chainPanel),
+        );
+      check("only the chosen panel mounts the chart", where, drawn.join() === value, `${drawn}`);
+      const fits = await panel.locator(".chart-area").evaluate((area) => {
+        const chart = area.querySelector(".recharts-wrapper").getBoundingClientRect();
+        const box = area.getBoundingClientRect();
+        return Math.abs(chart.width - box.width) <= 2 && box.width > 100 && chart.height > 100;
+      });
+      check("the step line draws at full width", where, fits, value);
+    } else {
+      check(
+        "with no script, no panel mounts a chart",
+        where,
+        (await page.locator(`${SERIES} .recharts-responsive-container svg`).count()) === 0,
+      );
+    }
+    check(
+      "and nothing above the grid moves",
+      where,
+      Math.abs((await above()) - before) <= BOX_SLACK_PX,
+      value,
+    );
+  }
+  await page.locator(".chain-filter input").first().check({ force: true });
+}
+
+// What a reader sees of the supply card, under every option: each part at its share and each label
+// whole, the band inside placed, a legend that doesn't jump, and every caveat in view.
+async function checkSupplyOptions(page, where) {
+  const values = await page
+    .locator(".chain-filter input")
+    .evaluateAll((inputs) => inputs.map((input) => input.value));
+  const legendRows = new Set();
+  for (const value of values) {
+    await page.locator(`.chain-filter input[value="${value}"]`).check({ force: true });
+    const shown = await page.evaluate(
+      ([box, chosen, slack]) => {
+        const panel = document.querySelector(`${box} > [data-chain-panel="${chosen}"]`);
+        const track = panel.querySelector(".supply-bar__track")?.getBoundingClientRect();
+        const off = [];
+        const clipped = [];
+        let band = true;
+        for (const part of panel.querySelectorAll("[data-part]")) {
+          const rect = part.getBoundingClientRect();
+          const want = (parseFloat(part.style.flexBasis) / 100) * track.width;
+          if (Math.abs(rect.width - want) > 2) off.push(part.dataset.part);
+          const label = part.querySelector('[data-testid="part-label"]');
+          if (label) {
+            const inner = label.getBoundingClientRect();
+            const outside =
+              inner.left < rect.left - slack ||
+              inner.right > rect.right + slack ||
+              inner.top < rect.top - slack ||
+              inner.bottom > rect.bottom + slack;
+            if (outside || label.scrollWidth > label.clientWidth + 1)
+              clipped.push(part.dataset.part);
+          }
+          const mark = part.querySelector('[data-testid="exchange-linked-band"]');
+          if (mark) {
+            const inner = mark.getBoundingClientRect();
+            band =
+              part.dataset.part === "placed_supply" &&
+              inner.width > 0 &&
+              inner.width <= rect.width + slack &&
+              inner.left >= rect.left - slack &&
+              inner.right <= rect.right + slack;
+          }
+        }
+        const bracket = panel.querySelector(".supply-bar__bracket > div")?.getBoundingClientRect();
+        const firstCirculating = panel.querySelector(
+          '[data-part="venue_dex"], [data-part="venue_lending"], [data-part="venue_exchange"], [data-part="free_floating"]',
+        );
+        const bracketFits =
+          !bracket ||
+          !firstCirculating ||
+          Math.abs(bracket.left - firstCirculating.getBoundingClientRect().left) <= 2;
+        // A chain with little circulating has a narrow bracket, and its word has to stay in the bar.
+        const word = panel.querySelector(".supply-bar__bracket > span")?.getBoundingClientRect();
+        const wordFits =
+          !word || (word.left >= track.left - slack && word.right <= track.right + slack);
+        const seen = (element) => element.checkVisibility();
+        return {
+          wordFits,
+          off,
+          clipped,
+          band,
+          bracketFits,
+          rows: panel.querySelectorAll("[data-supply-legend] [data-segment]").length,
+          bandRows: panel.querySelectorAll("[data-supply-legend] [data-band]").length,
+          wallets: [...panel.querySelectorAll('[data-stat="active-wallets"]')].filter(seen).length,
+          floor: panel.querySelectorAll('[data-note="exchange-floor"]').length,
+        };
+      },
+      [SUPPLY, value, BOX_SLACK_PX],
+    );
+    check(
+      "each part is drawn at its share",
+      where,
+      shown.off.length === 0,
+      `${value}: ${shown.off}`,
+    );
+    check(
+      "no direct label is clipped",
+      where,
+      shown.clipped.length === 0,
+      `${value}: ${shown.clipped}`,
+    );
+    check("the band sits inside placed", where, shown.band, value);
+    check("the bracket starts where circulating starts", where, shown.bracketFits, value);
+    check("the bracket's word stays inside the bar", where, shown.wordFits, value);
+    legendRows.add(`${shown.rows}+${shown.bandRows}`);
+    check(
+      "wallets show for one chain, and never summed",
+      where,
+      shown.wallets === (value === "all" ? 0 : 1),
+      `${value}: ${shown.wallets}`,
+    );
+    check("every panel keeps the floor note", where, shown.floor === 1, value);
+    await checkInView(page, `${where} on ${value}`);
+    await checkLegendRows(page, `${where} on ${value}`);
+  }
+  check(
+    "the legend doesn't jump between options",
+    where,
+    legendRows.size === 1,
+    [...legendRows].join(),
+  );
+  await page.locator(".chain-filter input").first().check({ force: true });
+}
+
+// A legend row's figures clear its label, however long a floor is. Run under every option, as each
+// option's amounts differ, and with a large floor wherever the data has one.
+async function checkLegendRows(page, where) {
+  const crowded = await page.evaluate((slack) => {
+    const out = [];
+    for (const row of document.querySelectorAll("[data-chain-panel] .chart-legend__row")) {
+      if (!row.checkVisibility()) continue;
+      const figures = row.querySelector(".chart-legend__values")?.getBoundingClientRect();
+      const name = row.querySelector("[data-segment-label], .chart-legend__label > :first-child");
+      if (!figures || !name) continue;
+      const range = document.createRange();
+      range.selectNodeContents(name);
+      const clash = [...range.getClientRects()].some(
+        (line) =>
+          line.right > figures.left + slack &&
+          line.left < figures.right - slack &&
+          line.bottom > figures.top + slack &&
+          line.top < figures.bottom - slack,
+      );
+      const box = row.getBoundingClientRect();
+      if (clash || figures.right > box.right + slack) out.push(row.textContent.slice(0, 40));
+    }
+    return out;
+  }, BOX_SLACK_PX);
+  check("a legend row's figures clear its label", where, crowded.length === 0, crowded.join(" | "));
+}
+
+// An open table may wrap an amount anywhere, and never a chain's name or a heading inside a word.
+async function checkTableWords(page, where) {
+  const toggle = page.locator(`${SUPPLY} > [data-chain-panel="all"] .data-toggle`);
+  await toggle.locator("> summary").click();
+  const split = await toggle
+    .locator("table")
+    .first()
+    .evaluate((table) => {
+      const broken = [];
+      for (const cell of table.querySelectorAll("thead th, tbody td:first-child")) {
+        // The first cell's name, in either layout: a stacked one prints its label by CSS, beside it.
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        const lineTops = new Set([...range.getClientRects()].map((line) => Math.round(line.top)));
+        // A hyphen is a fair place to wrap, as "Free-floating" does.
+        const words = cell.textContent.trim().split(/[\s-]+/).length;
+        if (lineTops.size > words) broken.push(cell.textContent.trim());
+      }
+      return broken;
+    });
+  check(
+    "an open table breaks no name or heading inside a word",
+    where,
+    split.length === 0,
+    split.join(),
+  );
+  await toggle.locator("> summary").click();
+}
+
+// A row may sit under the toggle, so opening it has to show every one of them, whole.
+async function checkExchangeRowsOpen(page, where) {
+  const toggle = page.locator(`${SUPPLY} > [data-chain-panel="all"] .data-toggle`);
+  await toggle.locator("> summary").click();
+  const rows = toggle.locator("[data-exchange-row]");
+  const total = await rows.count();
+  check("the toggle holds the exchange rows", where, total > 0, `${total}`);
+  for (let index = 0; index < total; index += 1) {
+    const row = rows.nth(index);
+    const parts = ["[data-exchange-name]", "[data-exchange-detail]", "a[data-exchange-source]"];
+    const seen = await Promise.all(parts.map((part) => row.locator(part).isVisible()));
+    check("an open toggle shows each exchange row whole", where, seen.every(Boolean), `${index}`);
+  }
+  const notes = await page
+    .locator(`${SUPPLY} > [data-chain-panel="all"] [data-note="exchange-floor"]`)
+    .isVisible();
+  check("and the floor note stays in view beside them", where, notes);
+  await toggle.locator("> summary").click();
+}
+
 async function checkFolder(browser, folder, harness, widths) {
   const partial = basename(folder) === "partial";
-  const chains = partial ? ["tempo", "solana"] : ["tempo", "ethereum", "base", "solana"];
-  const markup = harness.markup(chains);
+  const chains = partial ? ["tempo", "ethereum"] : ["tempo", "ethereum", "base", "solana"];
+  const { markup } = harness;
   const server = await serve(folder);
   const origin = `http://127.0.0.1:${server.address().port}`;
   const real = readFileSync(join(folder, "index.html"), "utf8").includes(
@@ -1098,6 +1507,13 @@ async function checkFolder(browser, folder, harness, widths) {
         checkHeadlineLines(page, where, width, harness.oneLineHeadline),
       );
       await group("the filter", () => checkFilter(page, where, js, chains));
+      await group("the grid", () => checkDashboardGrid(page, where, width));
+      await group("legends beside", () => checkLegendsBeside(page, where));
+      await group("the sticky filter", () => checkStickyFilter(page, where, width));
+      await group("the supply card", () => checkSupplyOptions(page, where));
+      await group("the step lines", () => checkStepLines(page, where, js));
+      await group("the exchange rows", () => checkExchangeRowsOpen(page, where));
+      await group("the table's words", () => checkTableWords(page, where));
       await group("the findings", () => checkFindingLinks(page, where, js));
       await group("a KPI's popover", () => checkKpiPopover(page, where));
       await group("the headline's popover", () => checkHeadlinePopover(page, where));

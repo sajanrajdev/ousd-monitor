@@ -34,6 +34,9 @@ export type ChartCardProps = {
   // For a plot that is itself real content, such as a table with words for assistive tech. Otherwise
   // the graphic is hidden from assistive tech, as the summary and table carry what it shows.
   plotIsContent?: boolean;
+  // What goes beside the chart from the card's width that has room: its legend, and any figures. Read
+  // by assistive tech, as it's outside the hidden graphic. The notes then go under both.
+  beside?: ReactNode;
   // Words a reader needs beside the chart or table, such as a caveat with a link. Read by everyone:
   // the graphic is hidden from assistive tech, and the summary is a plain string.
   note?: ReactNode;
@@ -43,7 +46,7 @@ export type ChartCardProps = {
 // A card whose content is its table: no chart, and no second table behind a toggle.
 export type TableCardProps = Omit<
   ChartCardProps,
-  "children" | "moreTables" | "needsJs" | "plotIsContent"
+  "children" | "moreTables" | "needsJs" | "plotIsContent" | "beside"
 >;
 
 type CardFrameProps = Pick<
@@ -139,13 +142,14 @@ export function ChartCard({
   moreTables,
   needsJs = false,
   plotIsContent = false,
+  beside,
   note,
   ...frame
 }: ChartCardProps) {
   return (
     <CardFrame {...frame}>
-      <div className="chart-card__body" data-notes={notes.length > 0 || undefined}>
-        <div className="chart-card__plot">
+      <div className="chart-card__body" data-notes={(notes.length > 0 && !beside) || undefined}>
+        <div className="chart-card__plot" data-beside={beside ? "" : undefined}>
           {/* aria-hidden and nothing focusable inside; not inert, so hover tooltips still work. */}
           <div
             className="chart-area"
@@ -161,6 +165,7 @@ export function ChartCard({
               </p>
             </noscript>
           ) : null}
+          {beside ? <div className="chart-card__beside">{beside}</div> : null}
         </div>
         <PinnedNotes notes={notes} />
       </div>

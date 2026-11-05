@@ -117,7 +117,7 @@ export function ActivityView({ activity, kpis, definitions, warnings, state }: A
       : UNKNOWN_TEXT;
 
   return (
-    <section id="real-activity" data-section="view-b" className="grid gap-6">
+    <section id="real-activity" data-section="view-b" className="card-grid">
       <ChartCard
         id={CARD_ANCHORS.waterfall}
         takeaway={waterfallHeading(all, chains)}

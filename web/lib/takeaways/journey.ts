@@ -68,6 +68,24 @@ export function seriesTakeaway(series: SeriesPoint[], chains: ChainName[]): stri
   return `Placed supply on ${scopeText(chains)} was ${formatBps(firstShare)} of total on ${formatUtcDate(first.day)} and ${formatBps(lastShare)} on ${formatUtcDate(last.day)}.`;
 }
 
+const withoutYear = (day: string) => formatUtcDate(day).replace(/ \d{4} UTC$/, "");
+
+// The same two days as the long takeaway, short enough to head a card. A heading names its chains.
+export function seriesHeading(series: SeriesPoint[], chains: ChainName[]): string {
+  if (series.length < 2) return UNKNOWN_TEXT;
+  const first = series[0];
+  const last = series[series.length - 1];
+  const firstShare = floorBps(BigInt(first.placed_supply), BigInt(first.total_supply));
+  const lastShare = floorBps(BigInt(last.placed_supply), BigInt(last.total_supply));
+  if (firstShare === null || lastShare === null) return UNKNOWN_TEXT;
+  const end = first.day.slice(0, 4) === last.day.slice(0, 4) ? withoutYear : formatUtcDate;
+  const start = formatUtcDate(first.day).replace(/ UTC$/, "");
+  return scopedHeading(
+    chains,
+    `Placed share: ${formatBps(firstShare)} on ${start}, ${formatBps(lastShare)} on ${end(last.day)}.`,
+  );
+}
+
 // Clean volume over the 7 days to each chain's newest day. Wallets aren't added up across chains.
 export function volumeTakeaway(kpis: KpiRow[]): string {
   if (kpis.length === 0) return UNKNOWN_TEXT;

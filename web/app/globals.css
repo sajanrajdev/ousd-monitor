@@ -9,6 +9,11 @@ html {
   html {
     scroll-padding-top: calc(var(--header-height) + 1rem);
   }
+
+  /* The chain filter sticks under the header from here, so an arriving anchor clears both. */
+  html:has(.dashboard .chain-filter) {
+    scroll-padding-top: calc(var(--header-height) + var(--filter-height) + 2rem);
+  }
 }
 
 body {
@@ -152,6 +157,8 @@ h2 {
 .chart-card {
   /* Its width is what its tables and notes respond to, and not the viewport's. */
   container-type: inline-size;
+  display: flex;
+  flex-direction: column;
   padding: 1.25rem;
   background: var(--surface-card);
   border: 1px solid var(--color-border);
@@ -164,11 +171,21 @@ h2 {
   font-size: var(--text-card-title);
 }
 
+/* It takes what a taller neighbour leaves, so every card's toggle and as-of line share a baseline. */
 .chart-card__body {
+  display: grid;
+  flex: 1 0 auto;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.chart-card__plot[data-beside] {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 1rem;
-  margin-top: 1rem;
+  min-width: 0;
 }
 
 /* A container query reads the content box: a card of 560 less its padding and borders. */
@@ -182,6 +199,198 @@ h2 {
 .chart-card__source-note {
   font-size: var(--text-meta);
   color: var(--color-meta-text);
+}
+
+.chart-card__beside {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  min-width: 0;
+}
+
+/* The legend goes beside the chart when the card is at least 560 wide, with any figures under the
+   chart, and the notes go under both, in two columns, as they're too long for a narrow one. */
+@container (min-width: 518px) {
+  .chart-card__plot[data-beside] {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-rows: auto 1fr;
+    column-gap: 1.25rem;
+  }
+
+  .chart-card__beside {
+    display: contents;
+  }
+
+  .chart-card__plot[data-beside] .chart-legend {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+  }
+
+  .chart-card__plot[data-beside] > :not(.chart-card__beside),
+  .chart-card__plot[data-beside] .chart-stats {
+    grid-column: 1;
+  }
+
+  .chart-card__body:not([data-notes]) > .pinned-notes:has(> li + li) {
+    display: block;
+    columns: 2;
+    column-gap: 1.25rem;
+  }
+
+  .chart-card__body:not([data-notes]) > .pinned-notes > li {
+    break-inside: avoid;
+    margin-bottom: 0.5rem;
+  }
+}
+
+/* A compact card: its chart keeps one fixed height, reserved before it draws, at every width. */
+.chart-card__plot[data-beside] .chart-area {
+  height: var(--chart-height-phone);
+}
+
+.chart-card__plot[data-beside] .chart-area:has([data-chart="supply-bar"]) {
+  height: auto;
+  background: none;
+}
+
+.chart-legend {
+  display: grid;
+  align-content: start;
+  gap: 0.375rem;
+  margin: 0;
+  padding: 0;
+  font-size: var(--text-meta);
+  list-style: none;
+}
+
+/* A row's figures take the line's end, and drop to their own line when a long floor needs it. */
+.chart-legend__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.375rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.chart-legend__swatch {
+  flex: none;
+  align-self: center;
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 1px solid var(--color-border);
+}
+
+.chart-legend__swatch[data-outlined] {
+  border-color: var(--color-maroon);
+}
+
+.chart-legend__line {
+  flex: none;
+  align-self: center;
+  width: 1.25rem;
+}
+
+.chart-legend__label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  flex: 1 1 6rem;
+  gap: 0.25rem;
+  min-width: 0;
+  font-weight: 550;
+}
+
+.chart-legend__values {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.chart-legend__band {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--color-meta-text);
+}
+
+.chart-legend .status-chip {
+  padding: 0 0.25rem;
+}
+
+.chart-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-self: start;
+  gap: 0.75rem 1.5rem;
+  margin: 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.chart-stats dt {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: var(--text-meta);
+  color: var(--color-meta-text);
+}
+
+.chart-stats dd {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-card-title);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.supply-bar__track {
+  display: flex;
+  min-height: 3.5rem;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+}
+
+.supply-bar__part {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 1px;
+  font-size: var(--text-meta);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.supply-bar__label {
+  position: relative;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: calc(100% - 0.5rem);
+  margin: 0.25rem;
+  padding: 0 0.125rem;
+}
+
+.supply-bar__band {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.supply-bar__bracket {
+  margin-top: 0.25rem;
+  font-size: var(--text-meta);
+  color: var(--color-meta-text);
+  text-align: right;
+}
+
+.supply-bar__bracket > div {
+  height: 0.25rem;
+  border-top: 2px solid var(--meaning-circulating);
+  border-right: 2px solid var(--meaning-circulating);
+  border-left: 2px solid var(--meaning-circulating);
 }
 
 /* A fixed height per breakpoint, so nothing shifts. The skeleton shows until Recharts draws. */
@@ -395,6 +604,15 @@ h2 {
   flex: 0 0 100%;
 }
 
+.info-popover__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .info-popover__panel {
   display: grid;
   gap: 0.5rem;
@@ -442,6 +660,13 @@ h2 {
   margin-top: 0.75rem;
 }
 
+/* The dashboard under the first screen: the filter, then a two-column grid per view from 1056. */
+.dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--grid-gap);
+}
+
 .data-toggle > summary {
   display: inline-flex;
   align-items: center;
@@ -477,8 +702,28 @@ h2 {
   overflow-x: auto;
 }
 
+/* A table opened in a card: its amounts may wrap anywhere, its names and headings only between words. */
+.data-toggle__panel .hairline-table th,
+.data-toggle__panel .hairline-table td:first-child {
+  overflow-wrap: normal;
+}
+
+/* Tighter, so the widest table's unbroken headings fit a card that spans both columns from 1056. */
+.data-toggle__panel .hairline-table th,
+.data-toggle__panel .hairline-table td {
+  padding-inline: 0.375rem;
+}
+
+.data-toggle__panel [data-labels-table] {
+  font-size: var(--text-small);
+}
+
 /* A segmented control over native radios. The radio covers its option, so the whole of it is the
    target, and it stays the thing that takes focus. */
+.chain-filter {
+  background: var(--color-off-white);
+}
+
 .chain-filter fieldset {
   display: flex;
   flex-wrap: wrap;
@@ -540,9 +785,35 @@ h2 {
   min-width: 0;
 }
 
+/* A grid, so the shown card takes the row's height and two cards side by side end together. */
+.chain-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+@media (min-width: 768px) {
+  .dashboard .chain-filter {
+    position: sticky;
+    top: var(--header-height);
+    z-index: 5;
+    padding: 0.5rem 0;
+  }
+
+  .chain-filter fieldset {
+    width: fit-content;
+    max-width: 100%;
+  }
+}
+
 @media (min-width: 1056px) {
   .card-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* A card left alone on its row takes the row, so the grid has no hole. */
+  .card-grid > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
   }
 }
 
@@ -558,6 +829,22 @@ h2 {
   :root:has(.chain-filter input[value="solana"]:checked)
     .chain-panel:not([data-chain-panel="solana"]) {
     display: none;
+  }
+
+  /* With no script to reset the filter, a finding's link still lands on the finding: its card shows
+     All, whatever the filter says, and its heading says what it covers. */
+  @media (scripting: none) {
+    :root:has(.chain-filter input:checked)
+      .chain-panels:target
+      > .chain-panel[data-chain-panel="all"] {
+      display: grid;
+    }
+
+    :root:has(.chain-filter input:checked)
+      .chain-panels:target
+      > .chain-panel:not([data-chain-panel="all"]) {
+      display: none;
+    }
   }
 
   .chart-card:has(> .data-toggle[open]) .chart-card__plot {

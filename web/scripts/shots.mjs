@@ -47,6 +47,25 @@ async function captureFirstScreen(browser, origin, state) {
   }
 }
 
+// The filter in use: the supply view under each option, with the header out of the crop.
+async function captureFilterOptions(browser, origin, state) {
+  const tab = await browser.newPage({ viewport: { width: 1440, height: HEIGHT } });
+  await tab.goto(`${origin}/`, { waitUntil: "networkidle" });
+  await tab.evaluate(() => document.fonts.ready);
+  await tab.addStyleTag({
+    content: ".site-header, .chain-filter { position: static !important; }",
+  });
+  const inputs = tab.locator(".chain-filter input");
+  for (const value of await inputs.evaluateAll((all) => all.map((input) => input.value))) {
+    await tab.locator(`.chain-filter input[value="${value}"]`).check({ force: true });
+    await tab.locator(`#placed-vs-circulating [data-chain-panel="${value}"] svg`).first().waitFor();
+    const name = `supply-${state}-${value}-1440.png`;
+    await tab.locator('[data-section="view-a"]').screenshot({ path: join(OUTPUT_DIR, name) });
+    console.log(`.shots/${name}`);
+  }
+  await tab.close();
+}
+
 const folders = process.argv.slice(2).map((folder) => resolve(folder));
 const browser = await launch();
 try {
@@ -62,6 +81,7 @@ try {
     const server = await serve(state.dir);
     const origin = `http://127.0.0.1:${server.address().port}`;
     await captureFirstScreen(browser, origin, state.name);
+    await captureFilterOptions(browser, origin, state.name);
     for (const page of PAGES) {
       for (const width of WIDTHS) {
         const tab = await browser.newPage({ viewport: { width, height: HEIGHT } });

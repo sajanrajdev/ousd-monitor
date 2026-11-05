@@ -8,6 +8,10 @@ import type { Day0Scope } from "./activity.ts";
 export const PLACED_NOTE =
   "Placed measures dollars that stayed, not why. It can't show who holds them or what they are for, and a venue with no published label can count as placed, exchange custody included.";
 
+// What stays in view on the placed segment. The note above stays whole in the card's popover.
+export const PLACED_PIN =
+  "Placed measures dollars that stayed, not why. A venue with no published label can count as placed, exchange custody included.";
+
 export const EXCHANGE_FLOOR_NOTE =
   "Exchange venues are a floor: they count only wallets a public source names. Exchange-linked wallets took their OUSD from such wallets, and could be an exchange's, its clients' or someone else's. No source says who holds them, and the rows below don't count them. The part counted as placed has stayed on the chain, and use inside an exchange, if any, can't be seen.";
 
@@ -37,8 +41,13 @@ export function exchangeCoverageNote(chain: ChainName): string {
   return `${CHAIN_NAMES[chain]}: no wallet a public source names as an exchange's holds OUSD here, so this reads as zero and the real amount is unknown.`;
 }
 
+export function seriesStartPin(definitions: Definitions): string {
+  return `The series starts on ${formatUtcDate(definitions.journey_first_day)}. Placed supply needs ${definitions.placed_days} days of history, so earlier days are left out.`;
+}
+
+// The filter now does what this note's last sentence used to point at, so that sentence is gone.
 export function seriesStartNote(definitions: Definitions): string {
-  return `The series starts on ${formatUtcDate(definitions.journey_first_day)}. Placed supply needs ${definitions.placed_days} days of history, so earlier days are left out. Days where a chain has no value are skipped. Per-chain values are in the first card's table.`;
+  return `${seriesStartPin(definitions)} Days where a chain has no value are skipped.`;
 }
 
 export function everydayNote(definitions: Definitions): string {

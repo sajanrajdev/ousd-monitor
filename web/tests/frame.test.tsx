@@ -18,6 +18,7 @@ const SECTIONS = [
   "kpi-row",
   "findings",
   "marker-legend",
+  "chain-filter",
   "view-a",
   "view-b",
   "view-e",
@@ -66,8 +67,33 @@ describe("the main page", () => {
     for (const id of Object.values(CARD_ANCHORS)) {
       const target = container.querySelectorAll(`[id="${id}"]`);
       expect(target).toHaveLength(1);
-      expect(target[0].matches(".chart-card")).toBe(true);
+      // Under a filter the anchor is on the box that's always shown, and each panel holds a card.
+      expect(target[0].matches(".chart-card, .chain-panels:has(.chart-card)")).toBe(true);
     }
+  });
+
+  it("holds the filter and the three views in the dashboard, each view a card grid", () => {
+    useSample("complete");
+    const { container } = render(<Home />);
+    const dashboard = container.querySelector(".dashboard")!;
+    expect(dashboard.firstElementChild!.getAttribute("data-section")).toBe("chain-filter");
+    for (const view of ["view-a", "view-b", "view-e"]) {
+      const section = container.querySelector(`[data-section="${view}"]`)!;
+      expect(section.parentElement).toBe(dashboard);
+      expect(section.classList.contains("card-grid")).toBe(true);
+    }
+  });
+
+  it("lists only the chains in the dataset, with All covered on partial data", () => {
+    useSample("partial");
+    const { container } = render(<Home />);
+    const labels = [...container.querySelectorAll(".chain-filter label")].map(
+      (label) => label.textContent,
+    );
+    expect(labels).toEqual(["All covered", "Tempo", "Ethereum"]);
+    expect(container.querySelectorAll('[data-section="view-a"] [data-chain-panel]')).toHaveLength(
+      6,
+    );
   });
 
   it.each(["complete", "partial"] as const)(

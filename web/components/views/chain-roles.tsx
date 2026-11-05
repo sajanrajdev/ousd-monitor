@@ -64,7 +64,7 @@ function withShare(amount: string, bps: number | null): string {
 export function ChainRolesView({ chain_roles, state }: ChainRolesViewProps) {
   const rows = orderedChains(chain_roles);
   return (
-    <section id="chain-roles-view" data-section="view-e">
+    <section id="chain-roles-view" data-section="view-e" className="card-grid">
       <TableCard
         id={CARD_ANCHORS.chainRoles}
         takeaway={chainRolesHeading(chain_roles)}
