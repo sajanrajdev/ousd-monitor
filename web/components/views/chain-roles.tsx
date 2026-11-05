@@ -10,6 +10,7 @@ import {
   REQUIRED_CHAINS,
 } from "@/lib/definitions";
 import { formatBps, formatCompact, formatUtcDate } from "@/lib/format";
+import { NO_SWAPS_NOTE } from "@/lib/takeaways/caveats";
 import {
   chainRolesHeading,
   chainRolesSummary,
@@ -103,7 +104,7 @@ export function ChainRolesView({ chain_roles, state }: ChainRolesViewProps) {
         }}
         note={
           <p data-note="no-swaps">
-            We don&rsquo;t ingest swaps, so this view can&rsquo;t show trading.{" "}
+            {NO_SWAPS_NOTE}{" "}
             <a href={definitionHref("chain-roles")} className="underline underline-offset-4">
               How these are defined
             </a>

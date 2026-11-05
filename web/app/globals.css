@@ -830,9 +830,19 @@ h2 {
   font-size: var(--text-meta);
 }
 
+/* As wide as its words, so the trigger sits right after the last one. The panel takes that width and
+   adds none, or opening it would move the trigger. */
 .marker-legend {
-  max-width: 26rem;
+  width: fit-content;
+  max-width: 100%;
+  column-gap: 0;
+  padding-right: 1.75rem;
   font-size: var(--text-small);
+}
+
+.marker-legend .info-popover {
+  width: 0;
+  min-width: 100%;
 }
 
 .page-main > *,

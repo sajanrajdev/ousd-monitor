@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ActivityRow, KpiRow } from "@/lib/dataset";
-import { formatBps, formatCompact, UNKNOWN_TEXT } from "@/lib/format";
+import { formatBps, formatCompact, formatUtcDate, UNKNOWN_TEXT } from "@/lib/format";
 import {
   activityChains,
   barPosition,
@@ -23,6 +23,8 @@ const sample = (name: string) =>
   JSON.parse(readFileSync(join(process.cwd(), "fixtures/dataset/complete", name), "utf8"));
 const activity: ActivityRow[] = sample("activity.json").data;
 const kpis: KpiRow[] = sample("summary.json").kpis;
+
+const shortDate = (day: string) => formatUtcDate(day).replace(/ \d{4} UTC$/, "");
 
 const zeroRow = (over: Partial<ActivityRow> = {}): ActivityRow => ({
   ...activity[0],
@@ -206,15 +208,32 @@ describe("the short headings", () => {
       );
     const text = weeklyHeading(weeks, chains);
     expect(text).toBe(
-      `Everyday clean volume: ${sumWeek(weeks.length - 1)} last full week, ${sumWeek(weeks.length - 2)} before.`,
+      `Everyday clean volume: ${sumWeek(weeks.length - 1)} over 7 days to ${shortDate(weeks.at(-1)!.to)}, ${sumWeek(weeks.length - 2)} before.`,
     );
     expect(words(text)).toBeLessThanOrEqual(12);
+  });
+
+  it("dates its block, which needn't reach the data's newest day", () => {
+    const weeks = weeklyEveryday(activity);
+    const newest = perChain(activity)
+      .map((chain) => chain.to)
+      .sort()
+      .at(-1)!;
+    expect(weeks.at(-1)!.to < newest).toBe(true);
+    const text = weeklyHeading(weeks, chains);
+    expect(text).toContain(`over 7 days to ${shortDate(weeks.at(-1)!.to)}`);
+    expect(text).not.toMatch(/\blast\b|\bweek\b/i);
+  });
+
+  it("stays within 12 words at the widest figures and dates", () => {
+    const week = { from: "2026-12-25", to: "2026-12-31", everyday: "999999000000000" };
+    expect(words(weeklyHeading([week, week], chains))).toBeLessThanOrEqual(12);
   });
 
   it("one complete week has nothing before it", () => {
     const [week] = weeklyEveryday(activity);
     expect(weeklyHeading([week], chains)).toBe(
-      `Everyday clean volume: ${formatCompact(week.everyday)} last full week.`,
+      `Everyday clean volume: ${formatCompact(week.everyday)} over 7 days to ${shortDate(week.to)}.`,
     );
   });
 
@@ -230,7 +249,7 @@ describe("the short headings", () => {
     );
     const week = { from: "2026-10-01", to: "2026-10-07", everyday: "0" };
     expect(weeklyHeading([week, week], chains)).toBe(
-      "Everyday clean volume: $0 last full week, $0 before.",
+      "Everyday clean volume: $0 over 7 days to 7 Oct, $0 before.",
     );
   });
 

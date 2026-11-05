@@ -2,11 +2,13 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { locateDataset } from "@/lib/dataset/load";
-import { TOKEN_CONTRACTS } from "@/lib/definitions";
+import { CARD_ANCHORS, TOKEN_CONTRACTS } from "@/lib/definitions";
 import { expectedFromDataset, verifyOutput } from "@/scripts/verify-output.mjs";
 import { at, copySample, editJson, plantFile, releaseGrade, tempDir } from "./dataset-helpers";
 import {
+  PLANTED_FINDINGS,
   PLANTED_KPI_SCOPE,
+  PLANTED_KPI_VALUES,
   PLANTED_LEGEND,
   PLANTED_TRUST_DETAIL,
   PLANTED_VERDICT,
@@ -40,7 +42,9 @@ const sampleExpected = {
   trustLine: { fresh: "Not reconciled", stale: "Not reconciled" },
   verdict: PLANTED_VERDICT,
   kpiScope: PLANTED_KPI_SCOPE,
-  essentialNotes: [] as { kind: string; chain?: string }[],
+  kpiValues: PLANTED_KPI_VALUES,
+  findings: PLANTED_FINDINGS,
+  essentialNotes: [] as { kind: string; chain?: string; text: string }[],
 };
 
 const realExpected = {
@@ -994,7 +998,10 @@ describe("the first screen", () => {
   });
 
   describe("the essential caveats", () => {
-    const notes = [{ kind: "placed" }, { kind: "velocity-warning", chain: "ethereum" }];
+    const notes = [
+      { kind: "placed", text: "A caveat." },
+      { kind: "velocity-warning", chain: "ethereum", text: "A dated warning." },
+    ];
     const expected = { ...sampleExpected, essentialNotes: notes };
 
     it("passes with each in view", () => {
@@ -1007,7 +1014,7 @@ describe("the first screen", () => {
       ["in a noscript", (note: string) => `<noscript>${note}</noscript>`],
       ["hidden", (note: string) => note.replace("<p ", "<p hidden ")],
       ["visually hidden", (note: string) => note.replace("<p ", '<p class="sr-only" ')],
-      ["empty", (note: string) => note.replace("A caveat.", "")],
+      ["empty", (note: string) => note.replace("A dated warning.", "")],
     ])("fails on a note %s", (_name, hide) => {
       const body = plantedNotes([notes[0]]) + hide(plantedNotes([notes[1]]));
       expect(verifyOutput(mainWith(body), expected)).toEqual([
@@ -1016,12 +1023,101 @@ describe("the first screen", () => {
     });
 
     it("a warning on another chain moves the note it asks for", () => {
-      const moved = [notes[0], { kind: "velocity-warning", chain: "base" }];
+      const moved = [notes[0], { ...notes[1], chain: "base" }];
       const problems = verifyOutput(mainWith(plantedNotes(notes)), {
         ...sampleExpected,
         essentialNotes: moved,
       });
       expect(problems).toEqual(["index.html: the velocity-warning note for base isn't in view"]);
+    });
+
+    it("fails on a note that keeps its kind and loses its words", () => {
+      const body = plantedNotes([notes[0], { ...notes[1], text: "Fine." }]);
+      expect(verifyOutput(mainWith(body), expected)).toEqual([
+        'index.html: the velocity-warning note for ethereum doesn\'t say "A dated warning."',
+      ]);
+    });
+
+    it("reads a note whole, across its date, its marker and its link", () => {
+      const text = "Flows count from 3 Nov 2026 UTC, here.";
+      const split = `<p data-note="day-0-scope"><span class="status-chip" data-kind="fact">F</span>
+        Flows count from <!-- -->3 Nov 2026 UTC<!-- -->, <em>here</em>. <a href="/methodology/#x">How</a></p>`;
+      expect(
+        verifyOutput(mainWith(split), {
+          ...sampleExpected,
+          essentialNotes: [{ kind: "day-0-scope", text }],
+        }),
+      ).toEqual([]);
+    });
+
+    describe("a kind on two cards", () => {
+      const both = [
+        { kind: "wallets-not-people", text: "Wallets, and more." },
+        { kind: "wallets-not-people", text: "Wallets." },
+      ];
+      const twice = { ...sampleExpected, essentialNotes: both };
+
+      it("passes with each instance", () => {
+        expect(verifyOutput(mainWith(plantedNotes(both)), twice)).toEqual([]);
+      });
+
+      it.each([
+        ["gone", () => ""],
+        ["in a popover", (note: string) => inDetails(note)],
+      ])("fails on one instance %s, though the other stays", (_name, hide) => {
+        const body = plantedNotes([both[0]]) + hide(plantedNotes([both[1]]));
+        expect(verifyOutput(mainWith(body), twice)).toEqual([
+          'index.html: the wallets-not-people note doesn\'t say "Wallets."',
+        ]);
+      });
+    });
+  });
+
+  describe("the figures the dataset fixes", () => {
+    it.each(["51.00%", "Tempo leads on three measures"])(
+      "fails when a finding and its card both change to %s",
+      (text) => {
+        const both = page(
+          MAIN.replaceAll(
+            '<span class="finding__text">T</span>',
+            `<span class="finding__text">${text}</span>`,
+          ).replace("<h2>T</h2>", `<h2>${text}</h2>`),
+        );
+        const problems = verifyOutput(site({ main: both }), sampleExpected);
+        expect([...new Set(problems)]).toEqual([
+          "index.html: the finding for #card isn't the dataset's heading",
+        ]);
+      },
+    );
+
+    it("fails when a finding isn't there for one of the dataset's headings", () => {
+      const expected = {
+        ...sampleExpected,
+        findings: [...PLANTED_FINDINGS, { id: "another-card", text: "T" }],
+      };
+      expect(verifyOutput(site(), expected)).toEqual([
+        "index.html: the finding for #another-card isn't the dataset's heading",
+      ]);
+    });
+
+    it("fails on a KPI value the dataset doesn't give", () => {
+      const html = page(
+        MAIN.replace("<span data-kpi-value>$1</span>", "<span data-kpi-value>$2</span>"),
+      );
+      expect(verifyOutput(site({ main: html }), sampleExpected)).toEqual([
+        "index.html: A label isn't the dataset's figure",
+      ]);
+    });
+
+    it("fails on two KPI values swapped", () => {
+      const expected = { ...sampleExpected, kpiValues: ["$1", "$1", "$1", "$2"] };
+      const swapped = page(
+        MAIN.replace("<span data-kpi-value>$1</span>", "<span data-kpi-value>$2</span>"),
+      );
+      expect(verifyOutput(site({ main: swapped }), expected)).toEqual([
+        "index.html: A label isn't the dataset's figure",
+        "index.html: A label isn't the dataset's figure",
+      ]);
     });
   });
 });
@@ -1251,14 +1347,15 @@ describe("what to expect comes from the dataset", () => {
         { chain: "tempo", metric: "total_supply", day: "2026-11-02", previous: "1", current: "2" },
       ];
     });
-    expect(expectedFromDataset(at(warned)).essentialNotes).toContainEqual({
-      kind: "velocity-warning",
-      chain: "base",
-    });
-    expect(expectedFromDataset(at(warned)).essentialNotes).not.toContainEqual({
-      kind: "velocity-warning",
-      chain: "tempo",
-    });
+    const warnings = expectedFromDataset(at(warned)).essentialNotes.filter(
+      (note: { kind: string }) => note.kind === "velocity-warning",
+    );
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        chain: "base",
+        text: expect.stringContaining("Base's circulating supply"),
+      }),
+    ]);
   });
 
   it("asks for the unlabelled issuer's note on the chain that has one", () => {
@@ -1273,10 +1370,61 @@ describe("what to expect comes from the dataset", () => {
       }
     });
     const notes = expectedFromDataset(at(dir)).essentialNotes;
-    expect(notes).toContainEqual({ kind: "issuer-unlabeled", chain: "base" });
+    expect(notes).toContainEqual({
+      kind: "issuer-unlabeled",
+      chain: "base",
+      text: "Base: issuer inventory reads as zero because no wallet there is labelled.",
+    });
     expect(notes.filter((note: { kind: string }) => note.kind === "issuer-unlabeled")).toHaveLength(
       1,
     );
+  });
+
+  it("words each caveat from the dataset, and asks for both wallet notes", () => {
+    const dir = releaseGrade();
+    editJson(dir, "manifest.json", (manifest) => {
+      manifest.definitions.placed_days = 21;
+      manifest.definitions.large_transfer_base_units = "2000000000000";
+    });
+    const notes = expectedFromDataset(at(dir)).essentialNotes as { kind: string; text: string }[];
+    const text = (kind: string) => notes.filter((note) => note.kind === kind).map((n) => n.text);
+    expect(text("series-start")[0]).toContain("Placed supply needs 21 days of history");
+    expect(text("everyday-meaning")).toEqual(["Everyday means under $2M, nothing more."]);
+    expect(text("wallets-not-people")).toEqual([
+      "Wallets, not people, and never added across chains.",
+      "Wallets, not people.",
+    ]);
+    expect(text("history")[0]).toMatch(
+      /^Weeks end on the date shown, in UTC\. \d+ days of history/,
+    );
+  });
+
+  it("recomputes the four headings and the KPI values from the dataset", () => {
+    const dir = releaseGrade();
+    const before = expectedFromDataset(at(dir));
+    expect(before.findings.map((finding: { id: string }) => finding.id)).toEqual([
+      CARD_ANCHORS.supply,
+      CARD_ANCHORS.waterfall,
+      CARD_ANCHORS.weekly,
+      CARD_ANCHORS.chainRoles,
+    ]);
+    editJson(dir, "journey.json", (payload) => {
+      for (const row of payload.data) {
+        const moved = BigInt(row.placed_supply);
+        row.placed_supply = "0";
+        row.free_floating = (BigInt(row.free_floating) + moved).toString();
+      }
+    });
+    const after = expectedFromDataset(at(dir));
+    expect(after.findings[0].text).not.toBe(before.findings[0].text);
+    expect(after.findings[0].text).toContain("0.00% of supply");
+    expect(after.findings.slice(1)).toEqual(before.findings.slice(1));
+    editJson(dir, "summary.json", (summary) => {
+      for (const row of summary.kpis) row.clean_everyday_7d = "0";
+    });
+    const moved = expectedFromDataset(at(dir)).kpiValues;
+    expect(moved[2]).toBe("$0");
+    expect(before.kpiValues[2]).not.toBe("$0");
   });
 
   it("reads the same dataset the build does", () => {

@@ -26,6 +26,16 @@ import {
   weeklyHeading,
   weeklyTakeaway,
 } from "@/lib/takeaways/activity";
+import {
+  day0Note,
+  everydayNote,
+  historyNote,
+  HOPS_NOTE,
+  SMALL_TICKET_LEAD,
+  SMALL_TICKET_NOTE,
+  VELOCITY_NOTE,
+  WALLETS_NOTE,
+} from "@/lib/takeaways/caveats";
 
 export type ActivityViewProps = {
   activity: ActivityRow[];
@@ -37,9 +47,6 @@ export type ActivityViewProps = {
 
 const SOURCE = "Chain data and public labels";
 
-const VELOCITY_EXPLANATION =
-  "Velocity divides clean volume by circulating supply. Headline velocity divides all transfers by total supply. Because circulating supply is smaller, velocity can be higher than headline velocity even though clean volume is smaller than headline volume. They aren't two cuts of one number.";
-
 const JUMPY_NOTE =
   "A small circulating supply makes velocity jumpy: the same volume over a smaller base gives a bigger percentage.";
 
@@ -47,9 +54,7 @@ const JUMPY_NOTE =
 function SmallTicketNote() {
   return (
     <p data-note="small-ticket">
-      <strong>Not in the dataset:</strong> in the week of 26 Oct 2026, Bridge&rsquo;s small-ticket
-      issuance, which issuer flows exclude, was $4.07M in 2,441 transfers to 237 recipients, against
-      $3.13M of Tempo everyday volume. Its cause is unproven.
+      <strong>{SMALL_TICKET_LEAD}</strong> {SMALL_TICKET_NOTE}
     </p>
   );
 }
@@ -58,9 +63,7 @@ function SmallTicketNote() {
 function Day0Note({ scope }: { scope: NonNullable<ReturnType<typeof day0Scope>> }) {
   return (
     <p data-note="day-0-scope">
-      <StatusChip kind="fact" /> Flows here count from Day 0, {formatUtcDate(DAY_ZERO)}. Supply also
-      includes mints from before it: {formatCompact(scope.before)} of the{" "}
-      {formatCompact(scope.total)} total.
+      <StatusChip kind="fact" /> {day0Note(scope)}
     </p>
   );
 }
@@ -145,11 +148,9 @@ export function ActivityView({ activity, kpis, definitions, warnings, state }: A
           <>
             {all ? (
               <>
-                <p data-note="everyday-meaning">
-                  Everyday means under {everydayLabel}, nothing more.
-                </p>
+                <p data-note="everyday-meaning">{everydayNote(definitions)}</p>
                 <p className="mt-3" data-note="hops">
-                  Hops across transactions still count more than once.
+                  {HOPS_NOTE}
                 </p>
               </>
             ) : null}
@@ -186,7 +187,7 @@ export function ActivityView({ activity, kpis, definitions, warnings, state }: A
           })),
         }}
       >
-        <WeeklyBars weeks={weeks} history={historyLabel(activity)} />
+        <WeeklyBars weeks={weeks} note={historyNote(historyLabel(activity))} />
       </ChartCard>
 
       <TableCard
@@ -223,9 +224,9 @@ export function ActivityView({ activity, kpis, definitions, warnings, state }: A
         }}
         note={
           <>
-            <p data-note="wallets-not-people">Wallets, not people.</p>
+            <p data-note="wallets-not-people">{WALLETS_NOTE}</p>
             <p className="mt-3" data-note="velocity-denominators">
-              {VELOCITY_EXPLANATION}{" "}
+              {VELOCITY_NOTE}{" "}
               <a href={definitionHref("velocity")} className="underline underline-offset-4">
                 How velocity is worked out
               </a>

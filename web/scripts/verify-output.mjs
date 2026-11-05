@@ -6,14 +6,36 @@ import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 import { loadDatasetFiles, locateDataset } from "../lib/dataset/load.ts";
 import { deriveState } from "../lib/dataset/state.ts";
-import { newestByChain } from "../lib/aggregate.ts";
-import { CHAIN_NAMES, TOKEN_CONTRACTS } from "../lib/definitions.ts";
+import { allChainKpis, newestByChain } from "../lib/aggregate.ts";
+import { CARD_ANCHORS, CHAIN_NAMES, TOKEN_CONTRACTS } from "../lib/definitions.ts";
+import { formatBps, formatCompact, UNKNOWN_TEXT } from "../lib/format.ts";
 import {
+  activityChains,
   day0Scope,
+  historyLabel,
   velocityWarnings,
   waterfall,
+  waterfallHeading,
   weeklyEveryday,
+  weeklyHeading,
 } from "../lib/takeaways/activity.ts";
+import {
+  day0Note,
+  everydayNote,
+  historyNote,
+  HOPS_NOTE,
+  issuerUnlabeledNote,
+  NO_SWAPS_NOTE,
+  PLACED_NOTE,
+  seriesStartNote,
+  SMALL_TICKET_LEAD,
+  SMALL_TICKET_NOTE,
+  VELOCITY_NOTE,
+  WALLETS_ACROSS_CHAINS_NOTE,
+  WALLETS_NOTE,
+} from "../lib/takeaways/caveats.ts";
+import { chainRolesHeading } from "../lib/takeaways/chain-roles.ts";
+import { journeyHeading } from "../lib/takeaways/journey.ts";
 import { verdictSentence, verdictTextVisible } from "../lib/verdict.ts";
 
 const INDEPENDENCE_LINE = "Independent. Not affiliated with Open Standard or Bridge.";
@@ -69,13 +91,13 @@ function inView(element) {
   return true;
 }
 
-function viewText(element) {
+function viewText(element, joiner = " ") {
   if (!element || !inView(element)) return "";
   const { NodeFilter } = element.ownerDocument.defaultView;
   const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT);
   let text = "";
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if (inView(node.parentElement)) text += `${node.data} `;
+    if (inView(node.parentElement)) text += `${node.data}${joiner}`;
   }
   return text;
 }
@@ -234,10 +256,14 @@ function checkKpiRow(page, document, expected, problems) {
   const row = document.querySelector('[data-section="kpi-row"]');
   const cells = [...(row?.querySelectorAll("dl > div") ?? [])];
   if (cells.length !== KPIS) problems.push(`${page}: the KPI row has ${cells.length} cells`);
-  for (const cell of cells) {
-    if (!viewText(cell.querySelector("dt")).trim()) problems.push(`${page}: a KPI has no label`);
-    if (!viewText(cell.querySelector("[data-kpi-value]")).trim()) {
+  cells.forEach((cell, index) => {
+    const label = viewText(cell.querySelector("dt")).trim();
+    if (!label) problems.push(`${page}: a KPI has no label`);
+    const value = viewText(cell.querySelector("[data-kpi-value]")).trim();
+    if (!value) {
       problems.push(`${page}: a KPI has no value in view`);
+    } else if (value !== expected.kpiValues[index]) {
+      problems.push(`${page}: ${label} isn't the dataset's figure`);
     }
     if (!viewText(cell.querySelector(".status-chip")).trim()) {
       problems.push(`${page}: a KPI has no marker in view`);
@@ -250,13 +276,14 @@ function checkKpiRow(page, document, expected, problems) {
     if (!definitionLink(cell.querySelector("noscript"))) {
       problems.push(`${page}: a KPI's noscript note has no definition link`);
     }
-  }
+  });
   if (!viewText(row).includes(expected.kpiScope)) {
     problems.push(`${page}: the KPI row doesn't say which chains it covers`);
   }
 }
 
-// A finding is its chart's heading with its marker, on a link that lands on that chart.
+// A finding is its chart's heading with its marker, on a link that lands on that chart, and it says
+// what the dataset says. A finding that only agrees with its card could be wrong in both places.
 function checkFindings(page, document, expected, problems) {
   const word = expected.frameWord;
   const links = [...document.querySelectorAll('[data-section="findings"] a[data-finding-link]')];
@@ -281,6 +308,12 @@ function checkFindings(page, document, expected, problems) {
     }
     if (head?.querySelector(".status-chip")?.dataset.kind !== chip?.dataset.kind) {
       problems.push(`${page}: a finding's marker differs from ${href}`);
+    }
+  }
+  for (const { id, text } of expected.findings) {
+    const link = links.find((candidate) => candidate.getAttribute("href") === `#${id}`);
+    if (viewText(link?.querySelector(".finding__text")).trim() !== text) {
+      problems.push(`${page}: the finding for #${id} isn't the dataset's heading`);
     }
   }
 }
@@ -309,13 +342,19 @@ function checkTrustDetail(page, document, problems) {
   }
 }
 
-// The caveats needed to read a number, wherever a unit pins them. Each is in view with nothing opened.
+// The caveats needed to read a number, wherever a unit pins them. Each required instance is in view
+// with nothing opened and keeps its words, read whole so a date or a link can't split a sentence.
 function checkEssentialNotes(page, document, expected, problems) {
-  for (const { kind, chain } of expected.essentialNotes) {
+  for (const { kind, chain, text } of expected.essentialNotes) {
     const selector = `[data-note="${kind}"]${chain ? `[data-chain="${chain}"]` : ""}`;
-    const notes = [...document.querySelectorAll(selector)];
-    if (!notes.some((note) => viewText(note).trim())) {
-      problems.push(`${page}: the ${kind} note${chain ? ` for ${chain}` : ""} isn't in view`);
+    const shown = [...document.querySelectorAll(selector)]
+      .map((note) => viewText(note, "").replace(/\s+/g, " "))
+      .filter((words) => words.trim());
+    const name = `the ${kind} note${chain ? ` for ${chain}` : ""}`;
+    if (shown.length === 0) {
+      problems.push(`${page}: ${name} isn't in view`);
+    } else if (!shown.some((words) => words.includes(text))) {
+      problems.push(`${page}: ${name} doesn't say "${text}"`);
     }
   }
 }
@@ -523,28 +562,65 @@ export function verifyOutput(outDir, expected) {
   return problems;
 }
 
-// What the page must keep in view, from the same conditions the views use to show it.
+// What the page must keep in view and what each says, from the same conditions and words the views
+// use to show it. A kind on two cards is two instances, and each is required.
 function essentialNotes({ manifest, summary, journey, activity }) {
-  const always = [
-    "placed",
-    "series-start",
-    "small-ticket",
-    "velocity-denominators",
-    "no-swaps",
-    "wallets-not-people",
-  ];
-  const volume = waterfall(activity.data) ? ["hops", "everyday-meaning"] : [];
-  const day0 = day0Scope(activity.data, summary.kpis) ? ["day-0-scope"] : [];
-  const history = weeklyEveryday(activity.data).length > 0 ? ["history"] : [];
+  const { definitions } = manifest;
+  const rows = activity.data;
+  const scope = day0Scope(rows, summary.kpis);
   return [
-    ...[...always, ...volume, ...day0, ...history].map((kind) => ({ kind })),
-    ...velocityWarnings(manifest.warnings).map(({ chain }) => ({
+    { kind: "placed", text: PLACED_NOTE },
+    { kind: "series-start", text: seriesStartNote(definitions) },
+    { kind: "small-ticket", text: `${SMALL_TICKET_LEAD} ${SMALL_TICKET_NOTE}` },
+    { kind: "velocity-denominators", text: VELOCITY_NOTE },
+    { kind: "no-swaps", text: NO_SWAPS_NOTE },
+    { kind: "wallets-not-people", text: WALLETS_ACROSS_CHAINS_NOTE },
+    { kind: "wallets-not-people", text: WALLETS_NOTE },
+    ...(waterfall(rows)
+      ? [
+          { kind: "hops", text: HOPS_NOTE },
+          { kind: "everyday-meaning", text: everydayNote(definitions) },
+        ]
+      : []),
+    ...(scope ? [{ kind: "day-0-scope", text: day0Note(scope) }] : []),
+    ...(weeklyEveryday(rows).length > 0
+      ? [{ kind: "history", text: historyNote(historyLabel(rows)) }]
+      : []),
+    ...velocityWarnings(manifest.warnings).map(({ chain, text }) => ({
       kind: "velocity-warning",
       chain,
+      text,
     })),
     ...newestByChain(journey.data)
       .filter((row) => !row.issuer_labeled && BigInt(row.issuer_inventory) === 0n)
-      .map(({ chain }) => ({ kind: "issuer-unlabeled", chain })),
+      .map(({ chain }) => ({
+        kind: "issuer-unlabeled",
+        chain,
+        text: issuerUnlabeledNote(chain),
+      })),
+  ];
+}
+
+// The four headings, recomputed here so a finding is held to the dataset as well as to its card.
+function expectedFindings({ manifest, journey, activity, chain_roles }) {
+  const chains = activityChains(activity.data);
+  return [
+    { id: CARD_ANCHORS.supply, text: journeyHeading(journey.data, manifest.definitions) },
+    { id: CARD_ANCHORS.waterfall, text: waterfallHeading(waterfall(activity.data), chains) },
+    { id: CARD_ANCHORS.weekly, text: weeklyHeading(weeklyEveryday(activity.data), chains) },
+    { id: CARD_ANCHORS.chainRoles, text: chainRolesHeading(chain_roles.data) },
+  ];
+}
+
+// In the row's order, with the same formats, so a value is held to the dataset too.
+function expectedKpiValues(kpis) {
+  const figures = allChainKpis(kpis);
+  if (!figures) return Array(KPIS).fill(UNKNOWN_TEXT);
+  return [
+    formatCompact(figures.total_supply),
+    formatBps(figures.placed_share_bps),
+    formatCompact(figures.clean_everyday_7d),
+    formatBps(figures.velocity_everyday_bps),
   ];
 }
 
@@ -578,6 +654,8 @@ export function expectedFromFiles(files, placement, webRoot = process.cwd(), now
       items: [...verdict.facts, ...verdict.estimates, ...verdict.opinions],
     },
     kpiScope: `Across ${summary.kpis.map((row) => CHAIN_NAMES[row.chain]).join(", ")}.`,
+    kpiValues: expectedKpiValues(summary.kpis),
+    findings: expectedFindings(files),
     essentialNotes: essentialNotes(files),
   };
 }

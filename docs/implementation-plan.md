@@ -81,13 +81,13 @@ The data supports this for Tempo, and not yet for all chains: Base and Solana we
 | Unit | Status |
 |---|---|
 | U1 Shared components: card, info popover, pins and notes, data toggle, chain filter, marker and legend | Not started |
-| U2 First screen, then a maintainer review stop | Not started |
+| U2 First screen | Not started |
 | U3 Supply views, with the chain filter mounted | Not started |
 | U4 Activity views | Not started |
-| U5 Velocity and chain views | Not started |
+| U5 Velocity and chain views, then the maintainer's whole-page review | Not started |
 | U6 Acceptance | Not started |
 
-**Done when:** U6's scripted checks pass on a real dataset, and the maintainer has reviewed U2. The headline's final wording is the maintainer's call, and stays open until then.
+**Done when:** U6's scripted checks pass on a real dataset, and the maintainer has reviewed the whole page. The headline's final wording is the maintainer's call, and stays open until then.
 
 Then:
 

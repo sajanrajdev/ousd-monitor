@@ -19,6 +19,7 @@ const BREAKPOINT_MD = 768;
 const TWO_COLUMNS_FROM = 1056;
 const MIN_TARGET = 24;
 const MIN_FILTER_TARGET = 36;
+const LEGEND_TRIGGER_GAP = 12;
 const CLOCK_JUMP_MS = 72 * 60 * 60 * 1000;
 // The plan's fold, on real data: a sample or preview adds its banner, and may run longer.
 const FOLDS = [
@@ -278,10 +279,52 @@ async function checkFilter(page, where, js, chains) {
 // What must be in view with nothing opened. A stylesheet can hide what verify-output can't read.
 async function checkInView(page, where) {
   const missing = await page.evaluate(() => {
+    const startX = window.scrollX;
+    const startY = window.scrollY;
+    // Whether the element is what's at a point, once scrolled to. A clip, a cover or an off-screen
+    // box leaves something else there, or nothing.
+    const hits = (element, rectOf) => {
+      const before = rectOf();
+      window.scrollBy({
+        left: before.left + before.width / 2 - window.innerWidth / 2,
+        top: before.top + before.height / 2 - window.innerHeight / 2,
+        behavior: "instant",
+      });
+      const box = rectOf();
+      const at = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return element.contains(at);
+    };
+    // The first and last lines of its text, so clipping part of a note counts as well.
+    const textLines = (element) => {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      const ranges = [];
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const parent = node.parentElement;
+        if (!node.data.trim() || parent.closest(".sr-only") || !parent.checkVisibility()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        if (range.getClientRects().length > 0) ranges.push(range);
+      }
+      if (ranges.length === 0) return [];
+      return [
+        () => ranges[0].getClientRects()[0],
+        () => [...ranges.at(-1).getClientRects()].at(-1),
+      ];
+    };
     const seen = (element) => {
       if (!element?.checkVisibility({ checkVisibilityCSS: true, checkOpacity: true })) return false;
       const box = element.getBoundingClientRect();
-      return box.width > 1 && box.height > 1;
+      if (box.width <= 1 || box.height <= 1) return false;
+      const { scrollWidth, scrollHeight } = document.documentElement;
+      const onPage =
+        box.right + window.scrollX > 0 &&
+        box.left + window.scrollX < scrollWidth &&
+        box.bottom + window.scrollY > 0 &&
+        box.top + window.scrollY < scrollHeight;
+      if (!onPage) return false;
+      // The first fragment's centre: a wrapped inline box's own centre can fall outside its text.
+      const spots = [() => element.getClientRects()[0], ...textLines(element)];
+      return spots.every((rectOf) => hits(element, rectOf));
     };
     const lacking = [];
     const need = (name, element) => {
@@ -348,6 +391,7 @@ async function checkInView(page, where) {
         need("a note's number", item.querySelector(".pin"));
       }
     }
+    window.scrollTo({ left: startX, top: startY, behavior: "instant" });
     return lacking;
   });
   check(
@@ -767,7 +811,13 @@ const boxOf = (page, selector) =>
     const box = document.querySelector(target)?.getBoundingClientRect();
     if (!box) return null;
     // pageTop, for comparing two moments: a click can scroll the page between them.
-    return { top: box.top, bottom: box.bottom, pageTop: box.top + window.scrollY };
+    return {
+      top: box.top,
+      bottom: box.bottom,
+      left: box.left,
+      right: box.right,
+      pageTop: box.top + window.scrollY,
+    };
   }, selector);
 
 // Each finding lands on its card, with the card clear of the sticky header. A click with the filter
@@ -859,6 +909,30 @@ async function checkHeadlinePopover(page, where) {
     check("and it's readable there", where, await panel.locator("[data-verdict-text]").isVisible());
   }
   await popover.locator("> summary").click();
+}
+
+// The legend's trigger sits right after its last item at every width, and stays there as it opens.
+async function checkLegendTrigger(page, where) {
+  const legend = '[data-section="marker-legend"]';
+  const trigger = `${legend} .info-popover > summary`;
+  const last = await boxOf(page, `${legend} > p > span:last-child`);
+  const closed = await boxOf(page, trigger);
+  const gap = closed.left - last.right;
+  check(
+    "the legend's trigger sits right after its last item",
+    where,
+    gap >= 0 && gap <= LEGEND_TRIGGER_GAP && closed.top < last.bottom,
+    `gap ${gap}`,
+  );
+  await page.locator(trigger).click();
+  await page.mouse.move(0, 0);
+  const open = await boxOf(page, trigger);
+  check(
+    "and it stays put as the legend opens",
+    where,
+    open.left === closed.left && open.pageTop === closed.pageTop,
+  );
+  await page.locator(trigger).click();
 }
 
 // The trust row's one disclosure opens under the row, and leaves the state in view above it.
@@ -1018,6 +1092,7 @@ async function checkFolder(browser, folder, harness, widths) {
       await group("the findings", () => checkFindingLinks(page, where, js));
       await group("a KPI's popover", () => checkKpiPopover(page, where));
       await group("the headline's popover", () => checkHeadlinePopover(page, where));
+      await group("the legend's trigger", () => checkLegendTrigger(page, where));
       await group("the trust row", () => checkTrustDisclosure(page, where, width));
       await group("one at a time", () => checkOneAtATime(page, where));
       await group("nothing covered", () => checkNothingCovered(page, where));

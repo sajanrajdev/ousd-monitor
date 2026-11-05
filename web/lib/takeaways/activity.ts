@@ -206,13 +206,16 @@ export function weeklyTakeaway(weeks: Week[]): string {
   return `Everyday clean volume was ${now} in the week to ${formatUtcDate(latest.to)}, against ${formatCompact(before.everyday)} the week before.`;
 }
 
-// Only complete weeks reach here, so "last full week" holds. The takeaway dates them.
+// A block is counted from the data's first day and can end up to 6 days before its newest, so the
+// heading dates it: it can't say "last 7 days", and isn't a calendar week.
 export function weeklyHeading(weeks: Week[], chains: ChainName[]): string {
   if (weeks.length === 0) return UNKNOWN_TEXT;
-  const now = formatCompact(weeks[weeks.length - 1].everyday);
+  const latest = weeks[weeks.length - 1];
+  const now = formatCompact(latest.everyday);
+  const to = formatUtcDate(latest.to).replace(/ \d{4} UTC$/, "");
   const before =
     weeks.length > 1 ? `, ${formatCompact(weeks[weeks.length - 2].everyday)} before` : "";
-  return scopedHeading(chains, `Everyday clean volume: ${now} last full week${before}.`);
+  return scopedHeading(chains, `Everyday clean volume: ${now} over 7 days to ${to}${before}.`);
 }
 
 export function velocityTakeaway(kpis: KpiRow[]): string {

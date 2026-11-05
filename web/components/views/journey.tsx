@@ -4,6 +4,12 @@ import type { ActivityRow, Definitions, DatasetState, JourneyRow, KpiRow } from 
 import { CARD_ANCHORS, CHAIN_NAMES, definitionHref, REQUIRED_CHAINS } from "@/lib/definitions";
 import { formatBps, formatCompact, formatExact, formatUtcDate, UNKNOWN_TEXT } from "@/lib/format";
 import {
+  issuerUnlabeledNote,
+  PLACED_NOTE,
+  seriesStartNote,
+  WALLETS_ACROSS_CHAINS_NOTE,
+} from "@/lib/takeaways/caveats";
+import {
   journeyHeading,
   journeyTakeaway,
   scopeText,
@@ -27,8 +33,7 @@ function VenueNote({ unlabeled }: { unlabeled: JourneyRow["chain"][] }) {
   return (
     <>
       <p data-note="placed">
-        Placed measures dollars that stayed, not why. It can&apos;t show who holds them or what they
-        are for, and a venue with no published label can count as placed, exchange custody included.{" "}
+        {PLACED_NOTE}{" "}
         <a href={definitionHref("venue-supply")} className="underline underline-offset-4">
           How venues are labelled
         </a>
@@ -42,7 +47,7 @@ function VenueNote({ unlabeled }: { unlabeled: JourneyRow["chain"][] }) {
           data-note="issuer-unlabeled"
           data-chain={chain}
         >
-          {CHAIN_NAMES[chain]}: issuer inventory reads as zero because no wallet there is labelled.
+          {issuerUnlabeledNote(chain)}
         </p>
       ))}
     </>
@@ -191,13 +196,7 @@ export function JourneyView({ journey, activity, kpis, definitions, state }: Jou
             ? UNKNOWN_TEXT
             : `Total, placed and circulating supply over time on ${scopeText(chains)}, from ${formatUtcDate(series[0].day)}.`
         }
-        note={
-          <p data-note="series-start">
-            The series starts on {formatUtcDate(definitions.journey_first_day)}. Placed supply needs{" "}
-            {definitions.placed_days} days of history, so earlier days are left out. Days where a
-            chain has no value are skipped. Per-chain values are in the first card&apos;s table.
-          </p>
-        }
+        note={<p data-note="series-start">{seriesStartNote(definitions)}</p>}
         table={{
           caption: "Supply over time, chains summed",
           columns: [
@@ -225,10 +224,8 @@ export function JourneyView({ journey, activity, kpis, definitions, state }: Jou
         asOf={kpiAsOf}
         definitionHref={definitionHref("active-wallets")}
         frameWord={state.frameWord}
-        summary="Clean volume and active wallets sit beside the supply parts because they are flows, not slices of a balance. Wallets, not people, and never added across chains."
-        note={
-          <p data-note="wallets-not-people">Wallets, not people, and never added across chains.</p>
-        }
+        summary={`Clean volume and active wallets sit beside the supply parts because they are flows, not slices of a balance. ${WALLETS_ACROSS_CHAINS_NOTE}`}
+        note={<p data-note="wallets-not-people">{WALLETS_ACROSS_CHAINS_NOTE}</p>}
         table={{
           caption: "Last 7 days, per chain",
           columns: [
