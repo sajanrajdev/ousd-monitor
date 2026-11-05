@@ -83,7 +83,7 @@ The data supports this for Tempo, and not yet for all chains: Base and Solana we
 | U1 Shared components: card, info popover, pins and notes, data toggle, chain filter, marker and legend | Done, #50 |
 | U2 First screen | Done, #52 |
 | U3 Supply views, with the chain filter mounted | Done, #53. Exchange-linked supply inside placed came first, in #51 |
-| U4 Activity views | Done in this change |
+| U4 Activity views | Done, #54 |
 | U5 Velocity and chain views, then the maintainer's whole-page review | Not started |
 | U6 Acceptance | Not started |
 
