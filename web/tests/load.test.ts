@@ -196,16 +196,16 @@ describe("a bad dataset fails the load, naming the file and field", () => {
     expect(message).toContain('/data/0: is missing "issuer_labeled"');
   });
 
-  it("schema_version 2 on the manifest", () => {
+  it("schema_version 1 on the manifest", () => {
     const message = editedFailure("manifest.json", (manifest) => {
-      manifest.schema_version = 2;
+      manifest.schema_version = 1;
     });
-    expect(message).toBe("manifest.json: /schema_version: must be 1");
+    expect(message).toBe("manifest.json: /schema_version: must be 2");
   });
 
-  it("schema_version 2 on another file", () => {
+  it("schema_version 1 on another file", () => {
     const message = editedFailure("labels.json", (payload) => {
-      payload.schema_version = 2;
+      payload.schema_version = 1;
     });
     expect(message).toContain("labels.json");
     expect(message).toContain("/schema_version");
@@ -276,6 +276,69 @@ describe("a bad dataset fails the load, naming the file and field", () => {
       "partial",
     );
     expect(message).toBe("labels.json: /preview: disagrees with manifest.json");
+  });
+
+  it("an exchange-linked amount larger than placed supply", () => {
+    const message = editedFailure("journey.json", (payload) => {
+      const row = payload.data[0];
+      row.placed_exchange_linked = String(BigInt(row.placed_supply) + 1n);
+    });
+    expect(message).toContain("placed_exchange_linked is more than placed_supply");
+  });
+
+  it("an exchange holding with no named label", () => {
+    const message = editedFailure("labels.json", (payload) => {
+      payload.exchange_holdings[0].entity = "Nobody";
+    });
+    expect(message).toContain("/exchange_holdings/0");
+  });
+
+  it("exchange holdings that don't add up to exchange venues", () => {
+    const message = editedFailure("labels.json", (payload) => {
+      const row = payload.exchange_holdings[0];
+      row.balance = String(BigInt(row.balance) + 1n);
+    });
+    expect(message).toContain("don't add up to exchange venues");
+  });
+
+  it("an exchange holding with more wallets than labels", () => {
+    const message = editedFailure("labels.json", (payload) => {
+      payload.exchange_holdings[0].wallets = 9;
+    });
+    expect(message).toContain("more wallets than labels");
+  });
+
+  it("an exchange holding from another day", () => {
+    const message = editedFailure("labels.json", (payload) => {
+      payload.exchange_holdings[0].day = "2026-10-01";
+    });
+    expect(message).toContain("newest day");
+  });
+
+  it("a negative exchange holding or exchange-linked amount", () => {
+    const holding = editedFailure("labels.json", (payload) => {
+      payload.exchange_holdings[0].balance = "-1";
+    });
+    expect(holding).toContain("/exchange_holdings/0/balance");
+    const linked = editedFailure("journey.json", (payload) => {
+      payload.data[0].placed_exchange_linked = "-1";
+    });
+    expect(linked).toContain("/placed_exchange_linked");
+  });
+
+  it("a named exchange-linked label", () => {
+    const message = editedFailure("labels.json", (payload) => {
+      payload.data[0].category = "exchange_linked";
+    });
+    expect(message).toMatch(/exchange-linked label|exchange holding|data\/0/);
+  });
+
+  it("an exchange listing with the name of a label that isn't an exchange", () => {
+    const message = editedFailure("labels.json", (payload) => {
+      const other = payload.data.find((row: Json) => row.category !== "exchange");
+      payload.exchange_listings[0].entity = other.entity;
+    });
+    expect(message).toContain("/exchange_listings/0");
   });
 
   it("a journey sum off by one base unit", () => {

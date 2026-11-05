@@ -1,4 +1,4 @@
-import { allChainJourney, floorBps } from "../aggregate.ts";
+import { allChainJourney, floorBps, newestByChain } from "../aggregate.ts";
 import { CHAIN_NAMES, REQUIRED_CHAINS } from "../definitions.ts";
 import { formatBps, formatCompact, formatUtcDate, UNKNOWN_TEXT } from "../format.ts";
 import type { ChainName, Definitions, JourneyRow, KpiRow } from "../dataset/rows.ts";
@@ -81,4 +81,33 @@ export function top10ShareBps(
 ): number | null {
   if (row.top10_value === null) return null;
   return floorBps(BigInt(row.top10_value), BigInt(row.total_supply));
+}
+
+export const EXCHANGE_LINKED_LABEL = "Exchange-linked, inside placed";
+
+function shareBps(part: string, total: string): number | null {
+  const whole = BigInt(total);
+  return whole > 0n ? floorBps(BigInt(part), whole) : null;
+}
+
+export type BandFigures = { total_supply: string; placed_exchange_linked: string };
+
+export function exchangeLinkedLine(row: BandFigures): string {
+  const share = formatBps(shareBps(row.placed_exchange_linked, row.total_supply));
+  return `${EXCHANGE_LINKED_LABEL}: ${formatCompact(row.placed_exchange_linked)} (${share} of supply)`;
+}
+
+// The band as the supply card shows it: across all chains, then per chain, on each one's newest day.
+export function exchangeLinkedBands(journey: JourneyRow[]) {
+  const newest = newestByChain(journey);
+  const all = allChainJourney(newest);
+  const rows: { key: string; row: BandFigures }[] = [
+    ...(all ? [{ key: "all", row: all }] : []),
+    ...newest.map((row) => ({ key: row.chain as string, row })),
+  ];
+  return rows.map(({ key, row }) => ({
+    key,
+    amount: row.placed_exchange_linked,
+    line: exchangeLinkedLine(row),
+  }));
 }

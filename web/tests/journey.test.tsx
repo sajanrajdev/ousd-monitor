@@ -3,7 +3,13 @@ import axe from "axe-core";
 import { describe, expect, it } from "vitest";
 import { JourneyView } from "@/components/views/journey";
 import { loadDataset } from "@/lib/dataset/load";
+import { exchangeRows } from "@/lib/exchange-rows";
 import { UNKNOWN_TEXT } from "@/lib/format";
+import {
+  EXCHANGE_FLOOR_LINK,
+  EXCHANGE_FLOOR_NOTE,
+  exchangeCoverageNote,
+} from "@/lib/takeaways/caveats";
 import { at, copySample, editJson } from "./dataset-helpers";
 
 function view(dir = "fixtures/dataset/complete", change?: (dir: string) => void) {
@@ -23,6 +29,7 @@ function view(dir = "fixtures/dataset/complete", change?: (dir: string) => void)
         kpis={dataset.summary.kpis}
         definitions={dataset.manifest.definitions}
         state={dataset.state}
+        exchanges={exchangeRows(dataset.labels)}
       />
     ),
   };
@@ -57,6 +64,50 @@ describe("journey view", () => {
     const free = container.querySelector<HTMLElement>('[data-part="free_floating"]')!;
     expect(free.style.border).toBe("");
     expect(free.className).not.toContain("maroon");
+  });
+
+  it("marks exchange venues as a floor and shows the exchange-linked band inside placed", () => {
+    const { container } = render(view().ui);
+    const first = container.querySelectorAll("table")[0];
+    expect(first.textContent).toContain("Exchange venues, at least");
+    expect(first.textContent).toContain("Of placed, exchange-linked");
+    const band = container.querySelector(
+      '[data-part="placed_supply"] [data-testid="exchange-linked-band"]',
+    );
+    expect(band).not.toBeNull();
+    expect((band as HTMLElement).style.background).toContain("--meaning-idle");
+    expect((band as HTMLElement).style.background).not.toContain("--meaning-circulating");
+    expect(band!.parentElement!.querySelector('[data-testid="part-label"]')!.className).toContain(
+      "z-10",
+    );
+    expect(container.querySelector('[data-testid="exchange-linked"]')!.textContent).toContain(
+      "of supply",
+    );
+    const coverage = [...container.querySelectorAll('[data-testid="exchange-coverage"]')];
+    expect(coverage.map((note) => note.getAttribute("data-chain"))).toEqual(["solana", "tempo"]);
+  });
+
+  it("shows each exchange beside its source, from the dataset", () => {
+    const { container } = render(view().ui);
+    const rows = [...container.querySelectorAll("[data-exchange-row]")];
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "Sample Exchange, 2 wallets, at least $610,000,000. Source: each wallet's label.",
+      "Sample Listing, no wallet labeled. Source: its OUSD listing.",
+    ]);
+    const links = rows.map((row) => row.querySelector("a")!);
+    expect(links[0].getAttribute("href")).toBe("/methodology/#named-labels");
+    expect(links[1].getAttribute("href")).toBe("https://example.com/sample-listing/ousd");
+    expect(links[1].getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("gives the floor and the coverage line their own note kinds", () => {
+    const { container } = render(view().ui);
+    expect(container.querySelector('[data-note="exchange-floor"]')!.textContent).toBe(
+      `${EXCHANGE_FLOOR_NOTE} ${EXCHANGE_FLOOR_LINK}.`,
+    );
+    expect(
+      container.querySelector('[data-note="exchange-coverage"][data-chain="tempo"]')!.textContent,
+    ).toBe(exchangeCoverageNote("tempo"));
   });
 
   it("shows each chain's own day when chains differ", () => {

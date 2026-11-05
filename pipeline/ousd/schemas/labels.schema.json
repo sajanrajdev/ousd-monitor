@@ -9,12 +9,14 @@
     "data",
     "unnamed_clusters",
     "source_legend",
+    "exchange_holdings",
+    "exchange_listings",
     "issuer_coverage",
     "chains_without_issuer_row"
   ],
   "properties": {
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "preview": {
       "type": "boolean"
@@ -53,7 +55,8 @@
               "system",
               "dex",
               "lending",
-              "exchange"
+              "exchange",
+              "exchange_linked"
             ]
           },
           "source_type": {
@@ -125,7 +128,8 @@
                   "system",
                   "dex",
                   "lending",
-                  "exchange"
+                  "exchange",
+                  "exchange_linked"
                 ]
               },
               "count": {
@@ -225,6 +229,77 @@
           "solana"
         ]
       }
+    },
+    "exchange_holdings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "chain",
+          "day",
+          "entity",
+          "wallets",
+          "balance"
+        ],
+        "properties": {
+          "chain": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          },
+          "day": {
+            "type": "string",
+            "format": "date"
+          },
+          "entity": {
+            "type": "string",
+            "minLength": 1
+          },
+          "wallets": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "balance": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          }
+        }
+      }
+    },
+    "exchange_listings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entity",
+          "source_type",
+          "source_url",
+          "date_checked"
+        ],
+        "properties": {
+          "entity": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_type": {
+            "const": "exchange_listing"
+          },
+          "source_url": {
+            "type": "string",
+            "pattern": "^https://[^?#\\s]+$"
+          },
+          "date_checked": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          }
+        }
+      },
+      "minItems": 1
     }
   }
 }

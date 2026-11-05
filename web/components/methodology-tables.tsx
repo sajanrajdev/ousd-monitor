@@ -34,7 +34,7 @@ export function Ticks({ text }: { text: string }) {
   );
 }
 
-function Outbound({ href, children }: { href: string; children: ReactNode }) {
+export function Outbound({ href, children }: { href: string; children: ReactNode }) {
   return (
     <a href={href} rel="noopener noreferrer" className="target-link underline underline-offset-4">
       {children}
@@ -154,7 +154,7 @@ export function UnnamedClusters({ clusters }: { clusters: LabelsFile["unnamed_cl
       )}
       <div data-unnamed-rule>
         {clusters.rule
-          .split(/(?<=\.) (?=The redemption route|Published data)/)
+          .split(/(?<=\.) (?=The redemption route|An exchange-linked|Published data)/)
           .map((part, index) => (
             <p key={index} className="mt-3">
               <Ticks text={part} />

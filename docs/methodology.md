@@ -19,7 +19,7 @@ Other sources already cover live supply, reserve coverage and pool health, and w
 - [DefiLlama](https://defillama.com/stablecoin/open-usd): supply and market cap history.
 - [Token Terminal](https://tokenterminal.com/explorer/projects/openstandard/openusd): supply and market cap history.
 - [A public Dune dashboard suite](https://dune.com/zcabrams/ousd-master): supply, holders, pools, flows and large transfers.
-- [Crystal Intelligence's first-week analysis](https://crystalintelligence.com/stablecoin/ousd-stablecoin-first-week-on-chain-analysis/): the closest earlier read on placed versus used, frozen at 5 October 2026.
+- First-week analysis by [Crystal](https://crystalintelligence.com/stablecoin/ousd-stablecoin-first-week-on-chain-analysis/): the closest earlier read on placed versus used, frozen at 5 October 2026.
 
 ## The ticker
 
@@ -45,7 +45,7 @@ The headline is one of four states. It is a judgment about the numbers, not a nu
 
 The thresholds are 50% (5,000 basis points) for placed and 5% (500 basis points) for everyday. They are judgments, not findings, and no published standard sets them. We chose round shares a reader can weigh at a glance: a majority of supply that has sat still, and a twentieth of supply changing hands in a week.
 
-Moving either threshold, or the definitions below, would change the headline. So would more labels: a wallet we can't name counts as placed, so a new label for an issuer or venue wallet lowers placed supply. The settings behind the thresholds are listed at the end of this page.
+Moving either threshold, or the definitions below, would change the headline. So would more labels: a wallet we can't name can count as placed, so a new label for an issuer or venue wallet lowers placed supply. If removing exchange-linked placed from placed supply would move it across 50%, alone or together with the placed supply of a chain with no issuer label, the headline is No clear statement. The settings behind the thresholds are listed at the end of this page.
 
 ## Definitions
 
@@ -61,11 +61,19 @@ Supply held by wallets labeled as Bridge's, or on its redemption route. A chain 
 
 ### Venue supply
 
-Supply held by wallets a public source labels as an exchange, a DEX pool or a lending market. Unlabeled custody doesn't count as a venue.
+Supply held by wallets a public source labels as an exchange, a DEX pool or a lending market. Exchange holdings are a floor: they count only named wallets. Custody no source names isn't a venue.
+
+We can see where an exchange's named wallets send money, and not what happens inside its own ledger. Trading, rewards and client balances there are invisible, so a balance that hasn't moved on the chain may or may not be in use.
+
+Two exchanges are confirmed to support OUSD: [Coinbase](https://www.coinbase.com/price/ousd) and [Kraken](https://blog.kraken.com/product/asset-listings/ousd-is-available-for-trading). We found no public source naming a wallet of the second that holds OUSD, as of 2026-11-04, so its amount is unknown, not zero. The [exchange holdings table](#named-labels) lists what named wallets hold. The main page shows each exchange with its source: one with named wallets gives their count and a floor, and links here for each wallet's source, as the main page holds no address. One with none says no wallet is labeled, and links to its own listing, which names no wallet.
 
 ### Placed supply
 
 For a wallet with no issuer, venue or system label: the lowest its balance has been over the last 14 days, counted if that is at least $1M and the wallet is at least 14 days old. It measures dollars that stayed, and says nothing about why. It lags by 14 days, so it isn't charted before its first valid day.
+
+### Exchange-linked placed
+
+Part of placed supply, not an addition to it. A wallet counts if it has no public name, held at least $1M on 2026-11-03, took at least one transfer of $1M or more from wallets a public source names as an exchange, took every inflow of $1 or more from those wallets, and sent at most 2% of its inflows anywhere else. The list is fixed as of that day and changes only through a reviewed labels change, and it isn't re-tested after that date. A wallet could belong to the exchange, to its clients or to someone else, and the chain can't tell them apart. A wallet's funding and a label site's name are leads, not sources, so none of these is named. The site gives a count and this rule, with no address.
 
 ### Free-floating supply
 
@@ -162,7 +170,7 @@ These are the limits of the figures. The first group travels with each dataset a
 - Everyday volume means clean transfers under $1M, nothing more. A payment can't be told from a bot or a treasury sweep.
 - Clean volume nets each transaction, but a chain of transfers across several transactions counts at every hop, so it can overstate.
 - Active wallets count wallets, not people.
-- Issuer inventory and venue supply count only wallets a public source labels. Unlabeled custody isn't counted as a venue, and can count as placed.
+- Issuer inventory and venue supply count only wallets a public source labels. Exchange holdings are a floor. Custody with no published label can count as placed, and some of it is marked as exchange-linked.
 - Day 0 was 2026-09-30, so this is weeks of history: a direction at most, not a trend.
 - Velocity divides clean volume by circulating supply, and headline velocity divides all volume by total supply. Circulating supply is smaller, so velocity can exceed headline velocity. Both denominators are published beside them.
 - Each chain stops at its own last complete UTC day, so chains can end on different days. A chain's KPIs end on its last day with a transfer, and each row names its day.
@@ -198,6 +206,7 @@ Every label has exactly one source type. It tells you what kind of evidence the 
 | `official_statement` | The named organization said so in an announcement or other statement | Open the link and find the name and address in the statement |
 | `published_research` | A named research publisher ties the name to the address | Open the link and find the name and address. Publishers may shorten an address, as in `0x4c2c…00b8` |
 | `onchain_metadata` | The chain itself records it, such as a verified contract name and its creator | Open the link and read the contract details |
+| `exchange_listing` | An exchange's own page says it supports OUSD. It names no wallet, so it is never the source of a wallet's label | Open the link and find OUSD on the exchange's own page |
 | `derived_rule` | No source names it. It is an unnamed cluster, found by a written rule applied to the chain's own data | Read the rule at the link. The dataset publishes no address for an unnamed cluster, so apply it to the addresses in `labels/labels.csv` in this repository |
 
 **Reading a label:** a named label always has a web source you can open. A `derived_rule` label never has a name, because it describes what a wallet does, not who holds it. `confidence` is `medium` when the source leaves a gap, such as a vault page that shows no curator, or research that prints only a shortened address. Vault names come from the vault's creator, not from any company the name may suggest, so a name alone doesn't say who runs a vault. The 0x Settler labels rest on the verified contract name and on the creator the chain records for it, `deployer.zeroexprotocol.eth`. Tell us if a source no longer supports a label.
@@ -220,7 +229,9 @@ An unnamed cluster is a set of wallets found from the chain's own transfers by a
 
 The redemption route (`issuer_route`) has three kinds of wallet. The hub is the wallet a chain's mints go to. Path wallets are on the fixed path from the hub into burns. Collection wallets take money from many senders, send every outgoing transfer to the hub, and hold almost no balance. A wallet that passes money through from a single sender stays unlabeled, as does any other wallet with flows into the route, however large the flows. A contract on the path may have a verified name on the chain, but that name doesn't say who runs it, so the label stays unnamed.
 
-Published data gives a count of these wallets by chain and category, with this rule. Their addresses are only in `labels/labels.csv` in this repository.
+An exchange-linked wallet (`exchange_linked`) has no public name, held at least $1M on 2026-11-03, took at least one transfer of $1M or more from wallets a public source names as an exchange, took every inflow of $1 or more from those wallets, and sent at most 2% of its inflows anywhere else. The list is fixed as of that day and changes only through a reviewed labels change, and it isn't re-tested after that date. A wallet could belong to the exchange, to its clients or to someone else, and the chain can't tell them apart. A label site's name for such a wallet is a lead, not a source, and a wallet's funding is not a source either. Its balance stays in placed supply, marked as exchange-linked.
+
+Published data gives a count of these wallets by chain and category, with this rule. Their addresses aren't in published data or on the site. They are in `labels/labels.csv` in this repository.
 
 ## Settings in this dataset
 

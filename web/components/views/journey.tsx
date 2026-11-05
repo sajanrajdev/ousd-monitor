@@ -1,9 +1,14 @@
 import { ChartCard, TableCard } from "@/components/chart-card";
+import { ExchangeRows } from "@/components/exchange-rows";
 import { allChainJourney, allChainSeries, dayRange, newestByChain } from "@/lib/aggregate";
 import type { ActivityRow, Definitions, DatasetState, JourneyRow, KpiRow } from "@/lib/dataset";
 import { CARD_ANCHORS, CHAIN_NAMES, definitionHref, REQUIRED_CHAINS } from "@/lib/definitions";
+import type { ExchangeRow } from "@/lib/exchange-rows";
 import { formatBps, formatCompact, formatExact, formatUtcDate, UNKNOWN_TEXT } from "@/lib/format";
 import {
+  EXCHANGE_FLOOR_LINK,
+  EXCHANGE_FLOOR_NOTE,
+  exchangeCoverageNote,
   issuerUnlabeledNote,
   PLACED_NOTE,
   seriesStartNote,
@@ -25,11 +30,20 @@ export type JourneyViewProps = {
   kpis: KpiRow[];
   definitions: Definitions;
   state: DatasetState;
+  exchanges: ExchangeRow[];
 };
 
 const SOURCE = "Chain data and public labels";
 
-function VenueNote({ unlabeled }: { unlabeled: JourneyRow["chain"][] }) {
+function VenueNote({
+  unlabeled,
+  noExchange,
+  exchanges,
+}: {
+  unlabeled: JourneyRow["chain"][];
+  noExchange: JourneyRow["chain"][];
+  exchanges: ExchangeRow[];
+}) {
   return (
     <>
       <p data-note="placed">
@@ -39,6 +53,25 @@ function VenueNote({ unlabeled }: { unlabeled: JourneyRow["chain"][] }) {
         </a>
         .
       </p>
+      <p className="mt-2" data-note="exchange-floor">
+        {EXCHANGE_FLOOR_NOTE}{" "}
+        <a href={definitionHref("exchange-linked-placed")} className="underline underline-offset-4">
+          {EXCHANGE_FLOOR_LINK}
+        </a>
+        .
+      </p>
+      <ExchangeRows rows={exchanges} />
+      {noExchange.map((chain) => (
+        <p
+          key={chain}
+          className="mt-2"
+          data-testid="exchange-coverage"
+          data-note="exchange-coverage"
+          data-chain={chain}
+        >
+          {exchangeCoverageNote(chain)}
+        </p>
+      ))}
       {unlabeled.map((chain) => (
         <p
           key={chain}
@@ -112,7 +145,14 @@ function seriesFor(
     .map((point) => ({ ...point, circulating_supply: circulating.get(point.day)! }));
 }
 
-export function JourneyView({ journey, activity, kpis, definitions, state }: JourneyViewProps) {
+export function JourneyView({
+  journey,
+  activity,
+  kpis,
+  definitions,
+  state,
+  exchanges,
+}: JourneyViewProps) {
   const newest = newestByChain(journey);
   const asOf = dayRange(newest.map((row) => row.day)) ?? definitions.journey_first_day;
   const chains = newest.map((row) => row.chain);
@@ -123,6 +163,9 @@ export function JourneyView({ journey, activity, kpis, definitions, state }: Jou
   const seriesAsOf = series.length > 0 ? dayRange(series.map((p) => p.day))! : asOf;
   const unlabeled = newest
     .filter((row) => !row.issuer_labeled && BigInt(row.issuer_inventory) === 0n)
+    .map((row) => row.chain);
+  const noExchange = newest
+    .filter((row) => BigInt(row.venue_exchange) === 0n)
     .map((row) => row.chain);
 
   const circulatingOf = circulatingByChain(newest, activity);
@@ -143,7 +186,7 @@ export function JourneyView({ journey, activity, kpis, definitions, state }: Jou
             ? UNKNOWN_TEXT
             : `Where supply sits on ${scopeText(chains)}: issuer inventory, placed, DEX, lending and exchange venues, and free-floating. Circulating is everything except issuer inventory and placed.`
         }
-        note={<VenueNote unlabeled={unlabeled} />}
+        note={<VenueNote unlabeled={unlabeled} noExchange={noExchange} exchanges={exchanges} />}
         table={{
           caption: "Supply by part, newest day per chain. Holders are wallets, not people.",
           columns: [
@@ -152,9 +195,10 @@ export function JourneyView({ journey, activity, kpis, definitions, state }: Jou
             { key: "total", label: "Total", numeric: true },
             { key: "issuer", label: "Issuer inventory", numeric: true },
             { key: "placed", label: "Placed", numeric: true },
+            { key: "linked", label: "Of placed, exchange-linked", numeric: true },
             { key: "dex", label: "DEX venues", numeric: true },
             { key: "lending", label: "Lending venues", numeric: true },
-            { key: "exchange", label: "Exchange venues", numeric: true },
+            { key: "exchange", label: "Exchange venues, at least", numeric: true },
             { key: "free", label: "Free-floating", numeric: true },
             { key: "circulating", label: "Circulating", numeric: true },
             { key: "holders", label: "Holders", numeric: true },
@@ -167,6 +211,7 @@ export function JourneyView({ journey, activity, kpis, definitions, state }: Jou
             total: formatExact(row.total_supply),
             issuer: formatExact(row.issuer_inventory),
             placed: formatExact(row.placed_supply),
+            linked: formatExact(row.placed_exchange_linked),
             dex: formatExact(row.venue_dex),
             lending: formatExact(row.venue_lending),
             exchange: formatExact(row.venue_exchange),

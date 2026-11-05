@@ -333,6 +333,6 @@ describe("shared parts", () => {
   });
 
   it("every fixed anchor is listed once", () => {
-    expect(new Set(DEFINITION_ANCHORS).size).toBe(23);
+    expect(new Set(DEFINITION_ANCHORS).size).toBe(24);
   });
 });

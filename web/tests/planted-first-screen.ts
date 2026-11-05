@@ -69,11 +69,95 @@ export const PLANTED_TRUST_DETAIL = `<details class="accordion"><summary>Reconci
   <a href="/methodology/#reconciliation">What this covers</a>
   <p>It doesn't verify placed share or velocity.</p></details>`;
 
+// The page's serialized copy, as Next writes it into the page, with an id no other chunk has.
+let nextFlightId = 0x1000;
+export function plantedFlight(tree: unknown): string {
+  nextFlightId += 1;
+  const line = `${nextFlightId.toString(16)}:${JSON.stringify(tree)}\n`;
+  return `<script>self.__next_f.push([1,${JSON.stringify(line).replaceAll("<", "\\u003c")}])</script>`;
+}
+
+const flightElement = (type: string, props: object) => ["$", type, null, props];
+
 export function plantedNotes(notes: Note[]): string {
-  return notes
+  const html = notes
     .map(
       ({ kind, chain, text }) =>
         `<p data-note="${kind}"${chain ? ` data-chain="${chain}"` : ""}>${text}</p>`,
+    )
+    .join("");
+  return notes.length > 0 ? `${html}${plantedNotesFlight(notes)}` : html;
+}
+
+// The notes in the payload alone, for a test whose fault is in the HTML.
+export function plantedNotesFlight(notes: Note[]): string {
+  return plantedFlight(
+    notes.map(({ kind, chain, text }) =>
+      flightElement("p", { "data-note": kind, "data-chain": chain, children: text }),
+    ),
+  );
+}
+
+export type PlantedRow = { entity: string; detail: string; sourceHref: string; sourceText: string };
+
+export function plantedRowFlight({ entity, detail, sourceHref, sourceText }: PlantedRow) {
+  return flightElement("li", {
+    "data-exchange-row": true,
+    children: [
+      flightElement("span", { "data-exchange-name": true, children: entity }),
+      ", ",
+      flightElement("span", { "data-exchange-detail": true, children: detail }),
+      ". Source: ",
+      flightElement("a", { href: sourceHref, "data-exchange-source": true, children: sourceText }),
+      ".",
+    ],
+  });
+}
+
+export type PlantedBand = {
+  key: string;
+  name: string;
+  amount: string;
+  line: string;
+  exact: string;
+};
+
+// The band as the card draws it, and its figures as the client component's props and the table's row.
+export function plantedBands(bands: PlantedBand[]): string {
+  const lines = bands
+    .filter(({ amount }) => BigInt(amount) > 0n)
+    .map(({ key, line }) => `<p data-exchange-linked="${key}">${line}</p>`)
+    .join("");
+  const rows = bands
+    .filter(({ key }) => key !== "all")
+    .map(({ name, exact }) => `<tr><td>${name}</td><td>${exact}</td></tr>`)
+    .join("");
+  const payload = [
+    {
+      rows: bands.map(({ key, amount }) => ({ key, journey: { placed_exchange_linked: amount } })),
+    },
+    ...bands
+      .filter(({ key }) => key !== "all")
+      .map(({ name, exact }) =>
+        flightElement("tr", {
+          children: [
+            flightElement("td", { children: name }),
+            // Flight writes a string that starts with $ as $$, or it would read as a reference.
+            flightElement("td", { children: exact.replace(/^\$/, "$$$$") }),
+          ],
+        }),
+      ),
+  ];
+  return `${lines}<table>${rows}</table>${plantedFlight(payload)}`;
+}
+
+export function plantedExchangeRows(
+  rows: { entity: string; detail: string; sourceHref: string; sourceText: string }[],
+): string {
+  return rows
+    .map(
+      ({ entity, detail, sourceHref, sourceText }) =>
+        `<li data-exchange-row><span data-exchange-name>${entity}</span>, <span data-exchange-detail>${detail}</span>. Source: <a href="${sourceHref}" rel="noopener noreferrer" data-exchange-source>${sourceText}</a>.</li>`,
     )
     .join("");
 }
@@ -101,6 +185,8 @@ export function plantedRealMain(
     kpiValues: string[];
     findings: Finding[];
     essentialNotes: Note[];
+    exchangeRows: Parameters<typeof plantedExchangeRows>[0];
+    bands: PlantedBand[];
   },
   staleNote: string,
   staleTrust: string,
@@ -109,5 +195,7 @@ export function plantedRealMain(
     <section data-section="kpi-row">${plantedKpis(expected.kpiScope, expected.kpiValues)}</section>
     <section data-section="trust-strip">${staleTrust}${PLANTED_TRUST_DETAIL}</section>
     ${plantedFindings(null, expected.findings)}${PLANTED_LEGEND}${plantedNotes(expected.essentialNotes)}
+    <ul>${plantedExchangeRows(expected.exchangeRows)}</ul>${plantedFlight(expected.exchangeRows.map(plantedRowFlight))}
+    ${plantedBands(expected.bands)}
     ${expected.findings.map((finding) => plantedCard(null, finding)).join("")}</main>`;
 }

@@ -30,6 +30,7 @@ export const ANCHOR_HEADINGS: Record<DefinitionAnchor, string> = {
   "issuer-inventory": "Issuer inventory",
   "venue-supply": "Venue supply",
   "placed-supply": "Placed supply",
+  "exchange-linked-placed": "Exchange-linked placed",
   "free-floating": "Free-floating supply",
   "circulating-supply": "Circulating supply",
   "headline-volume": "Headline volume",
@@ -312,6 +313,7 @@ export const CATEGORY_NAMES: Record<LabelRow["category"], string> = {
   dex: "DEX",
   lending: "Lending",
   exchange: "Exchange",
+  exchange_linked: "Exchange-linked",
 };
 
 export type NamedLabel = {

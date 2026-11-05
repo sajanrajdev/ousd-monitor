@@ -40,6 +40,7 @@ MARTS = (
     "mart_activity_kpis",
     "mart_chain_roles",
     "mart_reconciliation",
+    "mart_exchange_holdings",
 )
 # Any of these in dbt's arguments means the build covered less than the whole project.
 _NARROWING_ARGS = ("select", "exclude", "selector", "resource_types", "exclude_resource_types")

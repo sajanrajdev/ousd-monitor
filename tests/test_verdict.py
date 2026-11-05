@@ -38,6 +38,7 @@ def figures(chain="tempo", total=1000 * OUSD, placed=0, everyday=0, **changes):
         day=date(2026, 11, 3),
         total_supply=total,
         placed_supply=placed,
+        placed_exchange_linked=changes.get("linked", 0),
         clean_everyday_7d=everyday,
         full_window=changes.get("full_window", True),
         has_issuer_label=changes.get("has_issuer_label", True),
@@ -88,7 +89,8 @@ def test_the_placed_template_follows_the_plan():
     )
     assert verdict.text == (
         "On Tempo, which holds about 67% of OUSD, 76% of supply has sat still for at least 14 "
-        "days in unlabeled wallets of $1M or more, and transfers under $1M moved $4.6K in the "
+        "days in wallets of $1M or more with no issuer, venue or system label, and transfers under "
+        "$1M moved $4.6K in the "
         "last week, 0.76% of supply."
     )
 
@@ -102,7 +104,7 @@ def test_thresholds_in_the_sentence_come_from_the_definitions():
     )
     text = build_verdict(rows).text
     assert "at least 30 days" in text
-    assert "unlabeled wallets of $5M or more" in text
+    assert "wallets of $5M or more with no issuer" in text
     assert "under $100K" in text
 
 
@@ -176,8 +178,9 @@ def test_facts_are_what_reconciliation_proves():
     assert any("to the base unit" in fact for fact in verdict.facts)
 
 
-def test_the_sentence_says_placed_wallets_are_unlabeled():
-    assert "in unlabeled wallets of" in build_verdict(inputs(figures(placed=900 * OUSD))).text
+def test_the_sentence_says_which_labels_placed_wallets_lack():
+    text = build_verdict(inputs(figures(placed=900 * OUSD))).text
+    assert "with no issuer, venue or system label" in text
 
 
 @pytest.mark.parametrize(
@@ -346,3 +349,55 @@ def test_known_limits_leave_out_what_does_not_apply():
         )
     }
     assert not ids & {"no_issuer_row", "no_issuer_label", "chains_missing", "local_preview"}
+
+
+def test_exchange_linked_wallets_can_leave_the_answer_unsettled():
+    verdict = build_verdict(inputs(figures(placed=600 * OUSD, linked=200 * OUSD)))
+
+    assert verdict.state == "no_clear_statement"
+    assert "linked to exchanges" in verdict.text
+
+
+def test_exchange_linked_wallets_that_change_nothing_only_add_an_estimate():
+    verdict = build_verdict(inputs(figures(placed=770 * OUSD, linked=200 * OUSD)))
+
+    assert verdict.state == "mostly_placed"
+    assert "77%" in verdict.text
+    assert any("$200 is in wallets linked to exchanges" in line for line in verdict.estimates)
+
+
+def test_no_exchange_linked_wallets_means_no_extra_estimate():
+    verdict = build_verdict(inputs(figures(placed=770 * OUSD)))
+
+    assert not any("linked to exchanges" in line for line in verdict.estimates)
+
+
+def test_the_exchange_guard_at_exactly_half_keeps_the_answer():
+    verdict = build_verdict(inputs(figures(placed=700 * OUSD, linked=200 * OUSD)))
+    assert verdict.state == "mostly_placed"
+
+
+def test_the_exchange_guard_just_under_half_changes_the_answer():
+    verdict = build_verdict(inputs(figures(placed=700 * OUSD, linked=200 * OUSD + 1)))
+    assert verdict.state == "no_clear_statement"
+
+
+def test_two_doubts_that_pass_alone_can_change_the_answer_together():
+    verdict = build_verdict(
+        inputs(
+            figures(total=1500 * OUSD, placed=1040 * OUSD, linked=70 * OUSD),
+            figures("base", total=500 * OUSD, placed=100 * OUSD, has_issuer_label=False),
+        )
+    )
+    assert verdict.state == "no_clear_statement"
+    assert "which together could change the answer" in verdict.text
+
+
+def test_two_doubts_that_leave_the_answer_standing_change_nothing():
+    verdict = build_verdict(
+        inputs(
+            figures(total=1500 * OUSD, placed=1300 * OUSD, linked=100 * OUSD),
+            figures("base", total=500 * OUSD, placed=100 * OUSD, has_issuer_label=False),
+        )
+    )
+    assert verdict.state == "mostly_placed"

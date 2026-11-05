@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "preview": true,
   "notice": "Independent. Not affiliated with Open Standard or Bridge.",
   "verdict": {
@@ -12,14 +12,15 @@
       "tempo": "2026-11-03",
       "ethereum": "2026-11-03"
     },
-    "text": "Local preview, not a finding. On Tempo and Ethereum, which hold about 98% of OUSD, 73% of supply has sat still for at least 14 days in unlabeled wallets of $1M or more, and transfers under $1M moved $45.5M in the last week, 0.35% of supply.",
+    "text": "Local preview, not a finding. On Tempo and Ethereum, which hold about 98% of OUSD, 73% of supply has sat still for at least 14 days in wallets of $1M or more with no issuer, venue or system label, and transfers under $1M moved $45.5M in the last week, 0.35% of supply.",
     "facts": [],
     "estimates": [
       "The figures cover Tempo and Ethereum and end on 2026-11-03, UTC.",
       "Total supply on these chains is $12.8B, and each chain's mints minus burns equal its reported supply to the base unit.",
       "About 98% of OUSD is on Tempo and Ethereum: end-of-day balances against the issuer's newest reported total, so this is approximate.",
       "Placed supply is 73.43% of supply on these chains. It counts wallets with no public label, so an unlabeled issuer or venue wallet can count as placed.",
-      "Seven-day everyday volume is 0.35% of supply on these chains. It leaves out flows to and from labeled wallets, so a missing label adds to it."
+      "Seven-day everyday volume is 0.35% of supply on these chains. It leaves out flows to and from labeled wallets, so a missing label adds to it.",
+      "Of placed supply, $900M is in wallets linked to exchanges by a written rule, where use inside an exchange can't be seen."
     ],
     "opinions": [
       "So far this reads mostly like balance-sheet supply. The chain can't show why balances stay put."
@@ -48,7 +49,7 @@
     },
     {
       "id": "labels_are_partial",
-      "text": "Issuer inventory and venue supply count only wallets a public source labels. Unlabeled custody isn't counted as a venue, and can count as placed."
+      "text": "Issuer inventory and venue supply count only wallets a public source labels. Exchange holdings are a floor. Custody with no published label can count as placed, and some of it is marked as exchange-linked."
     },
     {
       "id": "short_history",

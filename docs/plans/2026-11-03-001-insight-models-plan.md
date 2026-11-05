@@ -249,7 +249,7 @@ from read_csv('{{ var("labels_path") }}', header = true, all_varchar = true)
 
 **Further rows:** any public contract, entity or address may be added when a public source ties the name to the address. Neutral wording only, never a private individual, and an ambiguous source means leave it out.
 
-**Do not add** Wintermute, Coinbase Prime, the Coinbase custody addresses or any other wallet that lacks a source tying the name to the address. See the brainstorm. A wallet the explorer itself tags is different: the tag is the source.
+**Do not add** a market maker, an exchange's custody addresses or any other wallet that lacks a source tying the name to the address. See the brainstorm. A wallet the explorer itself tags is different: the tag is the source.
 
 **Base and Solana rows:**
 - The Base and Solana redemption route has rows found by rule: the hub, which is the wallet a chain's mints go to, and the wallets on the fixed path from it into burns. Solana's `Hmc2dLxZZ4xfHqn2wFCTBu11oCpYiuwsj23JBjJmD4ni` is the hub, not on the path from it. Ethereum's `0x597758c063efa82c86c3e22d6ac40b8f432fd810` is on that path too. `0x8458377a025da58e9cb547c979d5002c822a05cb` is a collection wallet, so it is an unnamed `issuer_route` row on every chain, under the collection-wallet rule in `labels/README.md#how-unnamed-clusters-are-found`: it takes money from many senders, sends every outgoing transfer to the hub, and holds almost no balance. A wallet that passes money through from a single sender stays unlabeled.

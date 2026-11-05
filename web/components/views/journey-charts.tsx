@@ -21,6 +21,7 @@ import {
 import { floorBps, JOURNEY_PARTS } from "@/lib/aggregate";
 import type { JourneyRow } from "@/lib/dataset/rows";
 import { formatBps, formatCompact, toChartNumber, UNKNOWN_TEXT } from "@/lib/format";
+import { EXCHANGE_LINKED_LABEL, exchangeLinkedLine } from "@/lib/takeaways/journey";
 
 // A segment under this share of its bar has no room for a label, so the list below the bar names it.
 const LABEL_MIN_BPS = 2500;
@@ -64,7 +65,7 @@ export const PART_STYLES: Record<
     color: "var(--color-off-white)",
   },
   venue_exchange: {
-    label: "Exchange venues",
+    label: "Exchange venues, at least",
     background: "var(--meaning-circulating)",
     image: DOTS,
     color: "var(--color-off-white)",
@@ -76,12 +77,16 @@ export const PART_STYLES: Record<
   },
 };
 
+// Inside the placed segment, because what it marks is still counted as placed. So it keeps placed's
+// colour, with a pattern no other part uses.
+const EXCHANGE_LINKED_BACKGROUND = `repeating-linear-gradient(0deg, transparent 0 3px, color-mix(in srgb, var(--color-maroon-dark) 45%, transparent) 3px 5px), ${PART_STYLES.placed_supply.background}`;
+
 export type BarRow = {
   key: string;
   name: string;
   // The day this row is from, or a range label when it spans several.
   day: string;
-  journey: Pick<JourneyRow, Part | "total_supply">;
+  journey: Pick<JourneyRow, Part | "total_supply" | "placed_exchange_linked">;
   // From activity, because journey has no circulating figure.
   circulating: string | null;
 };
@@ -115,6 +120,9 @@ function Bar({ row }: { row: BarRow }) {
   // The bracket starts where the drawn issuer and placed segments end.
   const circulatingStart = parts[0].bps + parts[1].bps;
   const small = parts.filter((p) => p.bps < LABEL_MIN_BPS && BigInt(p.amount) > 0n);
+  const linked = BigInt(row.journey.placed_exchange_linked);
+  const placed = BigInt(row.journey.placed_supply);
+  const linkedOfPlaced = placed > 0n ? (floorBps(linked, placed) ?? 0) / 100 : 0;
   return (
     <div>
       <p className="font-semibold">
@@ -143,9 +151,29 @@ function Bar({ row }: { row: BarRow }) {
                     : style.background,
                   color: style.color,
                   ...(style.outlined ? { border: "1px solid var(--color-maroon)" } : {}),
+                  position: "relative",
                 }}
               >
-                {bps >= LABEL_MIN_BPS ? `${style.label} ${formatBps(bps)}` : null}
+                {bps >= LABEL_MIN_BPS ? (
+                  <span
+                    data-testid="part-label"
+                    className="relative z-10"
+                    style={{ background: style.image ? undefined : style.background }}
+                  >
+                    {`${style.label} ${formatBps(bps)}`}
+                  </span>
+                ) : null}
+                {part === "placed_supply" && linked > 0n ? (
+                  <span
+                    aria-hidden="true"
+                    data-testid="exchange-linked-band"
+                    className="absolute top-0 right-0 bottom-0"
+                    style={{
+                      width: `${linkedOfPlaced}%`,
+                      background: EXCHANGE_LINKED_BACKGROUND,
+                    }}
+                  />
+                ) : null}
               </div>
             );
           })}
@@ -159,6 +187,15 @@ function Bar({ row }: { row: BarRow }) {
       <p className="text-[length:var(--text-meta)] text-[color:var(--color-meta-text)] text-right">
         Circulating, from activity data: {formatCompact(row.circulating)}
       </p>
+      {linked > 0n ? (
+        <p
+          className="text-[length:var(--text-meta)] text-[color:var(--color-meta-text)] mt-1"
+          data-testid="exchange-linked"
+          data-exchange-linked={row.key}
+        >
+          {exchangeLinkedLine(row.journey)}
+        </p>
+      ) : null}
       {small.length > 0 ? (
         <ul
           className="text-[length:var(--text-meta)] text-[color:var(--color-meta-text)] mt-1"
@@ -211,6 +248,14 @@ export function BarLegend() {
           {PART_STYLES[part].label}
         </li>
       ))}
+      <li className="flex items-center gap-1">
+        <span
+          aria-hidden="true"
+          className="inline-block h-3 w-3 border border-[var(--color-border)]"
+          style={{ background: EXCHANGE_LINKED_BACKGROUND }}
+        />
+        {EXCHANGE_LINKED_LABEL}
+      </li>
     </ul>
   );
 }

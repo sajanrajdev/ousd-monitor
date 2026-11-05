@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 import { buildRelease, buildSite, Refused } from "@/scripts/build-site.mjs";
 import { expectedFromDataset } from "@/scripts/verify-output.mjs";
 import { at, copySample, editJson, plantFile, releaseGrade, tempDir } from "./dataset-helpers";
-import { plantedRealMain } from "./planted-first-screen";
+import { plantedFlight, plantedRealMain } from "./planted-first-screen";
 
 const LINE = "Independent. Not affiliated with Open Standard or Bridge.";
 const VERSION = "20261104T060000Z";
@@ -27,7 +27,7 @@ const STALE_TRUST =
 // What a build of the release-grade copy writes, long past its 36 hours.
 function realPage(body: string) {
   return `<!doctype html><html data-dataset-kind="real" data-dataset-version="${VERSION}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
-    <header><p>${LINE}</p></header><p data-stale-note>${STALE_NOTE}</p>${body}
+    <header><p>${LINE}</p></header><p data-stale-note>${STALE_NOTE}</p>${plantedFlight([])}${body}
     <footer><p>${LINE}</p><p>Not financial advice.</p></footer></body></html>`;
 }
 

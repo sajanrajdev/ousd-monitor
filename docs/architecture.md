@@ -109,6 +109,7 @@ Marts map to PRD questions. Definitions are in PRD section 7, and these are the 
 | Mart | Answers | PRD view |
 |---|---|---|
 | `mart_supply_journey` | How much is placed, in venues, circulating or active? | A |
+| `mart_exchange_holdings` | What do wallets named as each exchange's hold? | Methodology |
 | `mart_activity_waterfall` | How much of the headline volume is real? | B |
 | `mart_activity_kpis` | What are velocity and active wallets? | B |
 | `mart_chain_roles` | What is each chain used for? | E |
@@ -131,7 +132,7 @@ Marts map to PRD questions. Definitions are in PRD section 7, and these are the 
 
 - JSON per view, plus CSV for download.
 - A manifest with data-as-of time, git commit and check results.
-- Numbers as strings where precision matters, with a schema the site validates at build. Schema v1 is in `docs/plans/2026-11-03-001-insight-models-plan.md`.
+- Numbers as strings where precision matters, with a schema the site validates at build. The schemas are in `pipeline/ousd/schemas/`, now at version 2. `docs/plans/2026-11-03-001-insight-models-plan.md` is the record of version 1.
 
 ## Site
 

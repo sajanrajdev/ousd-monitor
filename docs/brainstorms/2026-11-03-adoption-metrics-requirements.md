@@ -148,7 +148,7 @@ Wallets with large flows to the redemption route, such as `0xe5c7…1e5a` (39.7M
 
 Balances of wallets labeled `dex`, `lending` or `exchange`. 52.57M on Tempo: Sentora 44.38M, Tempo's Stablecoin DEX 5.97M, Uniswap v4 2.02M, Tempo Earn 0.20M. On Ethereum, 0.27M.
 
-**Exchange custody is not a venue unless labeled.** Crystal says 40 custody addresses of $2M each belong to Coinbase, and the matching 20 we can see still hold $40M between them. It doesn't publish the addresses, so they stay unlabeled and count as placed, which is also what they behave like.
+**Exchange custody is not a venue unless labeled.** Crystal describes exchange custody, but it doesn't publish the addresses, so any such wallets stay unlabeled and count as placed.
 
 ### Circulating supply
 
@@ -241,7 +241,7 @@ The PRD question's framing, "or is it still balance-sheet supply waiting for dem
 
 | Conclusion | Risk | Why |
 |---|---|---|
-| Placed share across all chains | **Medium** | Crystal saw Coinbase's $50M legs staged on both, which suggests they look similar. But they could be more active |
+| Placed share across all chains | **Medium** | Crystal saw exchange funds staged on both, which suggests they look similar. But they could be more active |
 | Everyday volume | **High** | First-week DEX trading was almost entirely Solana (3.4M) and Base (0.7M). Everyday totals could multiply, though Base's copycat token pools need care |
 | Venue supply | **High** | Pools and any lending markets there are unlabeled and unmeasured |
 | Active wallets | **High** | Crystal counted 676 traders on Base's Uniswap pool in six days, far above Tempo's 136 senders a week. Trader wallets may change the picture most |

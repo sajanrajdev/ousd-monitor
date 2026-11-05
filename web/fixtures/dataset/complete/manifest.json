@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "dataset_version": "20261104T060000Z",
   "generated_at": "2026-11-04T06:00:00Z",
   "time_zone": "UTC",
@@ -135,7 +135,7 @@
       "rows": 129
     },
     "activity.json": {
-      "sha256": "1878c0c15dd131dd42ee6072a070d77748d8dcb444aa398fc1e6defd7c4b5686",
+      "sha256": "66f11a25bdd5b22c3976da081c72bd96fcb3066b6819406de5b3861a41ed4344",
       "rows": 129
     },
     "chain_roles.csv": {
@@ -143,27 +143,27 @@
       "rows": 4
     },
     "chain_roles.json": {
-      "sha256": "e8443950d8e22ac0e2f717398d5badd8947a70b6b6cc88ec4cd8cd8215dad607",
+      "sha256": "1ef083f6fb7126f6e59094811f87f65b56ebec215292c2416ec386cc4d024e0a",
       "rows": 4
     },
     "journey.csv": {
-      "sha256": "9aca36adb8312f63fbd97309bcc630065a391d49ccf87eff1f1a2a892baf8f44",
+      "sha256": "f390799ce3c1dcd18ed626e299b774e9ac49ae464407a469663e58b7be493dfa",
       "rows": 83
     },
     "journey.json": {
-      "sha256": "18679d1aede50d5952ede5a75fd56d34513a394680ca5ca520c9514b580db7a9",
+      "sha256": "d60f81af4321bb8785971c68a816b213f8543f7757badad1ab61431d3083a572",
       "rows": 83
     },
     "labels.json": {
-      "sha256": "b74e345a00b93e30458a11e7c15b8900ae1a585021681176c0239102f2b86b25",
+      "sha256": "41e23cfa1b3562a9ee94c2868dcb62eeaa7c339e5598e817bf8d8e86a0fc99e9",
       "rows": 12
     },
     "reconciliation.json": {
-      "sha256": "24fe406332245024cf46d30a2a5beb8be11e09bf96076eaac840e7ef38e424ee",
+      "sha256": "caae73308c5e0d006be26d0ed66bd04901e75fadd9d6c78f06ce5d6d822ad6fc",
       "rows": 5
     },
     "summary.json": {
-      "sha256": "4f38c73b31fed4d833cac66fcd41fbe4693e78b4048523416f5175bea89690b3",
+      "sha256": "851df5dffda964dadedc107d49c7c0da32bbd832e2179517f4abe53679804d95",
       "rows": 4
     }
   }

@@ -30,7 +30,7 @@ senders as (
     where
         n.net_value < 0
         and d.clean_value > 0
-        and (n.category is null or n.category = 'exchange')
+        and (n.category is null or n.category in ('exchange', 'exchange_linked'))
 ),
 
 active as (

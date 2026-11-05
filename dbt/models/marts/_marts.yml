@@ -16,6 +16,9 @@ models:
         data_tests: [not_null]
       - name: placed_supply
         data_tests: [not_null]
+      - name: placed_exchange_linked
+        description: The part of placed_supply in wallets labeled `exchange_linked`.
+        data_tests: [not_null]
       - name: venue_dex
         data_tests: [not_null]
       - name: venue_lending
@@ -32,4 +35,19 @@ models:
         data_tests: [not_null]
       - name: top10_value
       - name: issuer_labeled
+        data_tests: [not_null]
+  - name: mart_exchange_holdings
+    description: >
+      Per chain, day and named exchange: what wallets a public source names as that exchange's
+      hold. A floor, as custody no source names isn't here. Adds up to venue_exchange.
+    columns:
+      - name: chain
+        data_tests: [not_null]
+      - name: day_utc
+        data_tests: [not_null]
+      - name: entity
+        data_tests: [not_null]
+      - name: wallets
+        data_tests: [not_null]
+      - name: balance
         data_tests: [not_null]

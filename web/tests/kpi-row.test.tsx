@@ -50,7 +50,7 @@ describe("the KPI row", () => {
     const placed = [...container.querySelectorAll("dl > div")][1];
     expect(placed.querySelector("summary")!.getAttribute("aria-label")).toBe("About: Placed share");
     expect(placed.querySelector(".info-popover__panel")!.textContent).toContain(
-      "Share of supply that has stayed in large unlabeled wallets for the placed window.",
+      "Share of supply that has stayed in large wallets with no issuer, venue or system label, for the placed window.",
     );
     expect(placed.querySelector("details")!.getAttribute("name")).toBe("info");
     // Parsed as verify-output parses a built page, so the noscript's children are elements.

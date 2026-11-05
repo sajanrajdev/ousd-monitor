@@ -8,7 +8,7 @@ import os
 import re
 import shutil
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import partial as bind
 from pathlib import Path
 
@@ -802,7 +802,7 @@ def test_unnamed_clusters_publish_a_count_and_their_rule_and_no_address(publishe
     with REAL_LABELS.open(newline="") as handle:
         rows = list(csv.DictReader(handle))
     unnamed = [row for row in rows if not row["entity"]]
-    assert unnamed and {row["category"] for row in unnamed} == {"issuer_route"}
+    assert unnamed and {row["category"] for row in unnamed} == {"issuer_route", "exchange_linked"}
     clusters = read_json(folder, "labels.json")["unnamed_clusters"]
     assert clusters["rule_reference"] == "labels/README.md#how-unnamed-clusters-are-found"
     assert "The hub is the wallet a chain's mints go to" in clusters["rule"]
@@ -857,6 +857,7 @@ def test_the_source_legend_is_published_as_data(published):
         "official_statement",
         "published_research",
         "onchain_metadata",
+        "exchange_listing",
         "derived_rule",
     ]
     tag = legend["source_types"][0]
@@ -1571,7 +1572,7 @@ def test_every_real_label_passes_the_guard(row):
 
 def test_the_real_labels_payload_passes_the_whole_guard():
     readme = (ROOT / "labels" / "README.md").read_text()
-    payload = publisher._labels_payload(real_labels(), readme, [], False)
+    payload = publisher._labels_payload(real_labels(), readme, [], False, [])
     assert len(payload["data"]) == len(REAL_NAMED)
     publisher._refuse_unsafe_dataset({"labels.json": payload}, {})
 
@@ -1629,7 +1630,7 @@ def test_a_real_vars_build_publishes_the_values_it_used(world):
     assert definitions["placed_min_base_units"] == "5000000000000"
     assert definitions["journey_first_day"] == "2026-10-20"
     text = read_json(folder, "summary.json")["verdict"]["text"]
-    assert "at least 20 days in unlabeled wallets of $5M" in text
+    assert "at least 20 days in wallets of $5M" in text
     assert min(row["day"] for row in read_json(folder, "journey.json")["data"]) == "2026-10-20"
 
 
@@ -1876,3 +1877,174 @@ def test_the_csv_writer_flattens_values():
         ["a", "b", "c", "d"],
         ["x;y", "true", "", "1"],
     ]
+
+
+def _holdings_tables(balance: int) -> dict[str, list[dict[str, object]]]:
+    return {
+        "mart_exchange_holdings": [
+            {
+                "chain": "base",
+                "day_utc": date(2026, 11, 3),
+                "entity": "Sample Exchange",
+                "wallets": 2,
+                "balance": balance,
+            },
+            {
+                "chain": "base",
+                "day_utc": date(2026, 11, 2),
+                "entity": "Sample Exchange",
+                "wallets": 1,
+                "balance": 1,
+            },
+        ]
+    }
+
+
+_LISTINGS = (
+    "## Exchanges that say they support OUSD\n\n"
+    "| Exchange | Source | Date checked |\n|---|---|---|\n"
+)
+_LISTING_HOSTS = (
+    "\n## Where each source lives\n\n"
+    "| Exchange listing | Host |\n|---|---|\n"
+    "| Coinbase | `www.coinbase.com` |\n| Kraken | `blog.kraken.com` |\n"
+)
+_KRAKEN = "| Kraken | https://blog.kraken.com/ousd | 2026-11-04 |\n"
+
+
+def test_the_real_exchange_listings_are_published() -> None:
+    readme = (ROOT / "labels" / "README.md").read_text()
+    payload = publisher._labels_payload(real_labels(), readme, [], False, [])
+    assert [row["entity"] for row in payload["exchange_listings"]] == ["Coinbase", "Kraken"]
+    assert {row["source_type"] for row in payload["exchange_listings"]} == {"exchange_listing"}
+    assert "exchange_listing" in {
+        row["source_type"] for row in payload["source_legend"]["source_types"]
+    }
+    publisher._refuse_unsafe_dataset({"labels.json": payload}, {})
+
+
+def test_an_exchange_listing_reads_its_row() -> None:
+    assert publisher._read_exchange_listings(_LISTINGS + _KRAKEN + _LISTING_HOSTS) == [
+        {
+            "entity": "Kraken",
+            "source_type": "exchange_listing",
+            "source_url": "https://blog.kraken.com/ousd",
+            "date_checked": "2026-11-04",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("row", "match"),
+    [
+        ("| Kraken | blog.kraken.com/ousd | 2026-11-04 |", "can't read"),
+        ("  | Kraken | https://blog.kraken.com/ousd | 2026-11-04 |", "can't read"),
+        ("Kraken https://blog.kraken.com/ousd 2026-11-04", "can't read"),
+        ("| Kraken | https://blog.kraken.com/ousd | soon |", "can't read"),
+        ("| Kraken | https://blog.kraken.com/ousd | 2026-13-99 |", "can't read"),
+        (
+            "| Kraken holds the band | https://blog.kraken.com/ousd | 2026-11-04 |",
+            "look like a name",
+        ),
+        ("| Kraken Holds Band | https://blog.kraken.com/ousd | 2026-11-04 |", "look like a name"),
+        ("| John Smith | https://blog.kraken.com/ousd | 2026-11-04 |", "look like a name"),
+        (
+            "| https://blog.kraken.com | https://blog.kraken.com/ousd | 2026-11-04 |",
+            "look like a name",
+        ),
+        ("| Binance | https://blog.kraken.com/ousd | 2026-11-04 |", "isn't on the list"),
+        ("| Kraken | https://blog.kraken.com/ousd | 2999-01-01 |", "can't read"),
+        ("| Kraken | https://www.coinbase.com/price/ousd | 2026-11-04 |", "host"),
+        ("| Kraken | https://example.com/ousd | 2026-11-04 |", "host"),
+        ("| Kraken | https://blog.kraken.com/ousd?a=1 | 2026-11-04 |", "plain https"),
+        (f"| Kraken | https://blog.kraken.com/{LIFI} | 2026-11-04 |", "another address"),
+    ],
+)
+def test_a_bad_exchange_listing_refuses(row: str, match: str) -> None:
+    with pytest.raises(PublishRefused, match=match):
+        publisher._read_exchange_listings(f"{_LISTINGS}{row}\n{_LISTING_HOSTS}")
+
+
+def test_a_person_in_both_listing_tables_still_refuses() -> None:
+    row = "| John Smith | https://blog.kraken.com/ousd | 2026-11-04 |\n"
+    hosts = f"{_LISTING_HOSTS}| John Smith | `blog.kraken.com` |\n"
+    with pytest.raises(PublishRefused, match="look like a name"):
+        publisher._read_exchange_listings(f"{_LISTINGS}{row}{hosts}")
+
+
+def test_a_readme_without_exchange_listings_refuses() -> None:
+    with pytest.raises(PublishRefused, match="no section"):
+        publisher._read_exchange_listings("## Something else\n")
+
+
+def test_an_exchange_listing_with_no_table_or_no_rows_refuses() -> None:
+    heading = "## Exchanges that say they support OUSD\n\n"
+    with pytest.raises(PublishRefused, match="no exchange listings table"):
+        publisher._read_exchange_listings(heading + _KRAKEN + _LISTING_HOSTS)
+    with pytest.raises(PublishRefused, match="no exchange listings"):
+        publisher._read_exchange_listings(_LISTINGS + _LISTING_HOSTS)
+
+
+def test_an_exchange_listing_outside_the_table_or_listed_twice_refuses() -> None:
+    heading, table = _LISTINGS.split("| Exchange")
+    above = f"{heading}{_KRAKEN}\n| Exchange{table}{_KRAKEN}{_LISTING_HOSTS}"
+    with pytest.raises(PublishRefused, match="can't read"):
+        publisher._read_exchange_listings(above)
+    with pytest.raises(PublishRefused, match="twice"):
+        publisher._read_exchange_listings(f"{_LISTINGS}{_KRAKEN}{_KRAKEN}{_LISTING_HOSTS}")
+
+
+def test_an_exchange_listing_with_another_labels_name_refuses() -> None:
+    readme = (ROOT / "labels" / "README.md").read_text()
+    labels = [
+        {**row, "entity": "Kraken"} if row["category"] == "lending" and row["entity"] else row
+        for row in real_labels()
+    ]
+    with pytest.raises(PublishRefused, match="isn't an exchange"):
+        publisher._labels_payload(labels, readme, [], False, [])
+
+
+def test_an_exchange_linked_label_with_a_name_refuses() -> None:
+    readme = (ROOT / "labels" / "README.md").read_text()
+    named = next(row for row in real_labels() if row["category"] == "exchange_linked")
+    labels = [{**named, "entity": "Acme Custody"}, *real_labels()]
+    with pytest.raises(PublishRefused, match=r"exchange-linked label on .* has a name"):
+        publisher._labels_payload(labels, readme, [], False, [])
+
+
+def test_no_real_exchange_linked_label_has_a_name() -> None:
+    linked = [row for row in real_labels() if row["category"] == "exchange_linked"]
+    assert linked and not any(row["entity"] for row in linked)
+
+
+def test_a_wallet_label_cannot_use_a_listing_as_its_source() -> None:
+    hosts = publisher._read_source_hosts((ROOT / "labels" / "README.md").read_text())
+    row = {
+        "chain": "base",
+        "address": LIFI,
+        "source_type": "exchange_listing",
+        "source_url": "https://www.coinbase.com/price/ousd",
+    }
+    with pytest.raises(PublishRefused, match="host"):
+        publisher._refuse_bad_source(row, hosts)
+
+
+def test_exchange_holdings_use_the_newest_day_and_write_amounts_as_text() -> None:
+    journey = [{"chain": "base", "day": "2026-11-03", "venue_exchange": "5"}]
+
+    assert publisher._exchange_holdings(_holdings_tables(5), journey) == [
+        {
+            "chain": "base",
+            "day": "2026-11-03",
+            "entity": "Sample Exchange",
+            "wallets": 2,
+            "balance": "5",
+        }
+    ]
+
+
+def test_exchange_holdings_that_miss_exchange_venues_are_refused() -> None:
+    journey = [{"chain": "base", "day": "2026-11-03", "venue_exchange": "6"}]
+
+    with pytest.raises(publisher.PublishRefused, match="exchange holdings"):
+        publisher._exchange_holdings(_holdings_tables(5), journey)

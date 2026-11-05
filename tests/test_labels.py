@@ -22,7 +22,7 @@ HEADER = [
     "confidence",
     "date_checked",
 ]
-CATEGORIES = {"issuer", "issuer_route", "system", "dex", "lending", "exchange"}
+CATEGORIES = {"issuer", "issuer_route", "system", "dex", "lending", "exchange", "exchange_linked"}
 CONFIDENCES = {"high", "medium"}
 SOURCE_TYPES = {
     "explorer_tag",
@@ -305,3 +305,16 @@ def test_dbt_rejects_a_bad_label(tmp_path, labels, failing):
     result = invoke_dbt(tmp_path, labels, select=["stg_labels"])
     assert not result.success
     assert any(name.startswith(failing) for name in failed_tests(result))
+
+
+def test_an_exchange_linked_wallet_is_never_named():
+    """Funding and label sites can't name a wallet, so this category stays an unnamed cluster."""
+    linked = [row for row in ROWS if row["category"] == "exchange_linked"]
+    assert linked
+    assert all(not row["entity"] and row["source_type"] == "derived_rule" for row in linked)
+
+
+def test_every_named_exchange_label_is_an_explorer_tag():
+    exchanges = [row for row in ROWS if row["category"] == "exchange"]
+    assert {row["chain"] for row in exchanges} >= {"ethereum", "base", "solana"}
+    assert all(row["source_type"] == "explorer_tag" and row["entity"] for row in exchanges)

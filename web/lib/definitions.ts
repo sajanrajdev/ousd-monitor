@@ -5,6 +5,7 @@ export const DEFINITION_ANCHORS = [
   "issuer-inventory",
   "venue-supply",
   "placed-supply",
+  "exchange-linked-placed",
   "free-floating",
   "circulating-supply",
   "headline-volume",
