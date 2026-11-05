@@ -15,6 +15,8 @@ import {
   type PlantedBand,
   type PlantedRow,
   type PlantedSeriesPanel,
+  PlantedWaterfallPanel,
+  PlantedWeeklyPanel,
   type PlantedSupplyPanel,
   plantedBands,
   plantedCard,
@@ -59,6 +61,8 @@ const sampleExpected = {
   filter: [] as { value: string; label: string }[],
   supplyPanels: [] as PlantedSupplyPanel[],
   seriesPanels: [] as PlantedSeriesPanel[],
+  waterfallPanels: [] as PlantedWaterfallPanel[],
+  weeklyPanels: [] as PlantedWeeklyPanel[],
 };
 
 const realExpected = {
@@ -1457,9 +1461,8 @@ describe("what to expect comes from the dataset", () => {
       "Wallets, not people, and never added across chains.",
       "Wallets, not people.",
     ]);
-    expect(text("history")[0]).toMatch(
-      /^Weeks end on the date shown, in UTC\. \d+ days of history/,
-    );
+    // The weekly bars pin the history; "Weeks end on the date shown" is in their popover.
+    expect(text("history")[0]).toMatch(/^\d+ days of history: a direction, not a trend\.$/);
   });
 
   it("recomputes the four headings and the KPI values from the dataset", () => {

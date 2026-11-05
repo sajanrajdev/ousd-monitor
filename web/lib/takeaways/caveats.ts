@@ -24,6 +24,11 @@ export const SMALL_TICKET_LEAD = "Not in the dataset:";
 export const SMALL_TICKET_NOTE =
   "in the week of 26 Oct 2026, Bridge’s small-ticket issuance, which issuer flows exclude, was $4.07M in 2,441 transfers to 237 recipients, against $3.13M of Tempo everyday volume. Its cause is unproven.";
 
+// What stays in view on the waterfall. The note above stays whole in the card's popover, with its
+// counts and what issuer flows leave out.
+export const SMALL_TICKET_PIN =
+  "Not in the dataset: Bridge’s small-ticket issuance, week of 26 Oct 2026: $4.07M, against $3.13M of Tempo everyday volume. Its cause is unproven.";
+
 export const VELOCITY_NOTE =
   "Velocity divides clean volume by circulating supply. Headline velocity divides all transfers by total supply. Because circulating supply is smaller, velocity can be higher than headline velocity even though clean volume is smaller than headline volume. They aren't two cuts of one number.";
 
@@ -56,6 +61,16 @@ export function everydayNote(definitions: Definitions): string {
 
 export function day0Note(scope: Day0Scope): string {
   return `Flows here count from Day 0, ${formatUtcDate(DAY_ZERO)}. Supply also includes mints from before it: ${formatCompact(scope.before)} of the ${formatCompact(scope.total)} total.`;
+}
+
+// What stays in view on the waterfall. day0Note stays whole in the card's popover.
+export function day0Pin(scope: Day0Scope): string {
+  return `Flows count from Day 0, ${formatUtcDate(DAY_ZERO)}. ${formatCompact(scope.before)} of the ${formatCompact(scope.total)} total supply predates it.`;
+}
+
+// What stays in view on the weekly bars. historyNote stays whole in the card's popover.
+export function historyPin(history: string): string {
+  return `${history}.`;
 }
 
 export function historyNote(history: string): string {

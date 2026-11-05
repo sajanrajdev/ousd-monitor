@@ -22,12 +22,19 @@ import {
   weeklyHeading,
 } from "../lib/takeaways/activity.ts";
 import {
-  day0Note,
+  PERIOD_COLUMNS,
+  STEP_COLUMNS,
+  waterfallPanel,
+  WEEK_COLUMNS,
+  weeklyPanel,
+} from "../lib/activity-panels.ts";
+import {
+  day0Pin,
   everydayNote,
   EXCHANGE_FLOOR_LINK,
   EXCHANGE_FLOOR_NOTE,
   exchangeCoverageNote,
-  historyNote,
+  historyPin,
   HOPS_NOTE,
   issuerUnlabeledNote,
   NO_SWAPS_NOTE,
@@ -35,8 +42,7 @@ import {
   PLACED_PIN,
   seriesStartNote,
   seriesStartPin,
-  SMALL_TICKET_LEAD,
-  SMALL_TICKET_NOTE,
+  SMALL_TICKET_PIN,
   VELOCITY_NOTE,
   WALLETS_ACROSS_CHAINS_NOTE,
   WALLETS_NOTE,
@@ -393,6 +399,8 @@ function noteWords(note) {
   for (const pin of copy.querySelectorAll(".pin")) {
     if (PIN_NUMBER.test(pin.textContent.trim())) pin.remove();
   }
+  // A marker says what kind of claim a note is, and isn't one of its words. Panels check it apart.
+  for (const chip of copy.querySelectorAll(".status-chip")) chip.remove();
   return viewText(copy, "");
 }
 
@@ -643,6 +651,8 @@ function flightText(node, values, seen = new Set()) {
   if (node[0] === "$" && typeof node[1] === "string") {
     // A note's pin is a number outside its words, as in noteWords.
     if (node[3]?.className === "pin" && typeof node[3].children === "number") return "";
+    // And a marker isn't one of its words either, as in noteWords.
+    if (/(^|\s)status-chip(\s|$)/.test(node[3]?.className ?? "")) return "";
     return flightText(node[3]?.children, values, seen);
   }
   return node.map((child) => flightText(child, values, seen)).join("");
@@ -756,9 +766,13 @@ function checkPanelNotes(where, panel, notes, problems) {
     problems.push(`${where}: its notes are ${said.join()}, not ${want.join()}`);
     return;
   }
-  notes.forEach(({ kind, words }, index) => {
+  notes.forEach(({ kind, words, chip }, index) => {
     if (noteWords(shown[index]).replace(/\s+/g, " ").trim() !== words) {
       problems.push(`${where}: its ${kind} note doesn't keep its words in view`);
+    }
+    const marker = shown[index].querySelector(".status-chip");
+    if ((chip ?? null) !== (marker?.dataset.kind ?? null) || (chip && !viewText(marker).trim())) {
+      problems.push(`${where}: its ${kind} note's marker isn't ${chip ?? "absent"}`);
     }
     if (plainText(shown[index].querySelector(".pin")) !== String(index + 1)) {
       problems.push(`${where}: its ${kind} note has the wrong number`);
@@ -961,6 +975,88 @@ function checkSeriesPanels(page, document, expected, problems) {
   }
 }
 
+// The full notes a card's popover must hold, by kind.
+function checkFullNotes(where, panel, fullNotes, problems) {
+  for (const [kind, text] of Object.entries(fullNotes)) {
+    const full = panel.querySelector(`.info-popover__panel [data-full-note="${kind}"]`);
+    if (plainText(full) !== text)
+      problems.push(`${where}: its popover has lost the ${kind} note in full`);
+  }
+}
+
+function checkHeadingOf(where, panel, heading, problems) {
+  const shown = panel.querySelector(".chart-card__head h2, .chart-card__head h3");
+  if (viewText(shown).trim() !== heading)
+    problems.push(`${where}: its heading isn't the dataset's`);
+}
+
+// Each filter option's waterfall: its rows in order with their figures, each pin on its row with its
+// note's number, its notes, the notes in full and both tables.
+function checkWaterfallPanels(page, document, expected, problems) {
+  if (expected.waterfallPanels.length === 0) return;
+  const id = CARD_ANCHORS.waterfall;
+  const box = panelsOf(page, document, id, expected, problems);
+  for (const want of expected.waterfallPanels) {
+    const panel = panelOf(box, want.value);
+    const where = `${page}: the ${want.value} panel of #${id}`;
+    if (!panel) continue;
+    if (!inView(panel)) problems.push(`${where}: it's hidden by its markup`);
+    checkHeadingOf(where, panel, want.heading, problems);
+    const rows = [...panel.querySelectorAll(".chart-area [data-step]")];
+    const said = rows.map(
+      (row) => `${row.dataset.step}=${viewText(row.querySelector(".tabular-nums"), "").trim()}`,
+    );
+    const wanted = want.steps.map(({ key, figure }) => `${key}=${figure}`);
+    if (said.join() !== wanted.join()) {
+      problems.push(`${where}: its rows aren't the dataset's`);
+    }
+    const pinned = rows.flatMap((row) =>
+      [...row.querySelectorAll(".pin")].map((pin) => `${row.dataset.step}=${plainText(pin)}`),
+    );
+    const pins = want.notes.flatMap(({ step }, index) => (step ? [`${step}=${index + 1}`] : []));
+    if (pinned.join() !== pins.join()) {
+      problems.push(`${where}: its pins are ${pinned.join()}, not ${pins.join()}`);
+    }
+    checkPanelNotes(where, panel, want.notes, problems);
+    checkFullNotes(where, panel, want.fullNotes, problems);
+    const tables = panel.querySelectorAll(".data-toggle table");
+    checkTableRows(where, tables[0], STEP_COLUMNS, want.stepRows, problems);
+    checkTableRows(where, tables[1], PERIOD_COLUMNS, want.periodRows, problems);
+  }
+}
+
+// Each filter option's weekly bars: a bar per week with its figure and end date, the same weeks
+// under every option, its notes and its table.
+function checkWeeklyPanels(page, document, expected, problems) {
+  if (expected.weeklyPanels.length === 0) return;
+  const id = CARD_ANCHORS.weekly;
+  const box = panelsOf(page, document, id, expected, problems);
+  for (const want of expected.weeklyPanels) {
+    const panel = panelOf(box, want.value);
+    const where = `${page}: the ${want.value} panel of #${id}`;
+    if (!panel) continue;
+    if (!inView(panel)) problems.push(`${where}: it's hidden by its markup`);
+    checkHeadingOf(where, panel, want.heading, problems);
+    const bars = [...panel.querySelectorAll(".chart-area [data-week]")].map(
+      (bar) => `${bar.dataset.week}=${viewText(bar.querySelector("[data-week-value]")).trim()}`,
+    );
+    if (bars.join() !== want.bars.join()) problems.push(`${where}: its bars aren't the dataset's`);
+    const pins = [...panel.querySelectorAll(".chart-area [data-chart-pins] .pin")].map(plainText);
+    if (pins.join() !== want.notes.map((_, index) => String(index + 1)).join()) {
+      problems.push(`${where}: its pins don't match its notes`);
+    }
+    checkPanelNotes(where, panel, want.notes, problems);
+    checkFullNotes(where, panel, want.fullNotes, problems);
+    checkTableRows(
+      where,
+      panel.querySelector(".data-toggle table"),
+      WEEK_COLUMNS,
+      want.rows,
+      problems,
+    );
+  }
+}
+
 // The same rows, caveats and band as the HTML, or the page changes under a reader once it loads. No
 // elements to read is a failure, or a payload this check can't follow would turn the check off.
 function checkPayload(place, flight, expected, problems) {
@@ -1138,6 +1234,8 @@ export function verifyOutput(outDir, expected) {
       checkFilter(page, document, expected, problems);
       checkSupplyPanels(page, document, expected, problems);
       checkSeriesPanels(page, document, expected, problems);
+      checkWaterfallPanels(page, document, expected, problems);
+      checkWeeklyPanels(page, document, expected, problems);
       checkPayload(page, inlineFlight(page, document, problems), expected, problems);
     }
   }
@@ -1172,20 +1270,16 @@ function essentialNotes({ manifest, summary, journey, activity }) {
       exact: true,
     },
     { kind: "series-start", text: seriesStartPin(definitions), exact: true },
-    { kind: "small-ticket", text: `${SMALL_TICKET_LEAD} ${SMALL_TICKET_NOTE}` },
+    { kind: "small-ticket", text: SMALL_TICKET_PIN, exact: true },
+    { kind: "everyday-meaning", text: everydayNote(definitions), exact: true },
     { kind: "velocity-denominators", text: VELOCITY_NOTE },
     { kind: "no-swaps", text: NO_SWAPS_NOTE },
     { kind: "wallets-not-people", text: WALLETS_ACROSS_CHAINS_NOTE },
     { kind: "wallets-not-people", text: WALLETS_NOTE },
-    ...(waterfall(rows)
-      ? [
-          { kind: "hops", text: HOPS_NOTE },
-          { kind: "everyday-meaning", text: everydayNote(definitions) },
-        ]
-      : []),
-    ...(scope ? [{ kind: "day-0-scope", text: day0Note(scope) }] : []),
+    ...(waterfall(rows) ? [{ kind: "hops", text: HOPS_NOTE, exact: true }] : []),
+    ...(scope ? [{ kind: "day-0-scope", text: day0Pin(scope), exact: true }] : []),
     ...(weeklyEveryday(rows).length > 0
-      ? [{ kind: "history", text: historyNote(historyLabel(rows)) }]
+      ? [{ kind: "history", text: historyPin(historyLabel(rows)), exact: true }]
       : []),
     ...velocityWarnings(manifest.warnings).map(({ chain, text }) => ({
       kind: "velocity-warning",
@@ -1255,6 +1349,11 @@ function expectedPanels(files) {
     definitions: manifest.definitions,
     exchanges: exchangeRows(labels),
   };
+  const activityInputs = {
+    activity: activity.data,
+    kpis: summary.kpis,
+    definitions: manifest.definitions,
+  };
   const noteWordsOf = ({ kind, chain, text, link, segment }) => ({
     kind,
     chain,
@@ -1293,6 +1392,32 @@ function expectedPanels(files) {
         ...kpiFigures(option, summary.kpis, journey.data),
         placedNote: PLACED_NOTE,
         entities: panel.segments.flatMap((segment) => segment.entities ?? []).length,
+      };
+    }),
+    waterfallPanels: options.map((option) => {
+      const panel = waterfallPanel(option, activityInputs);
+      return {
+        value: option.value,
+        heading: panel.heading,
+        steps: (panel.waterfall?.steps ?? []).map((step) => ({
+          key: step.key,
+          figure: `${step.kind === "removal" ? "\u2212" : ""}${formatCompact(step.amount)}`,
+        })),
+        notes: panel.notes.map(({ kind, text, step, chip }) => ({ kind, words: text, step, chip })),
+        fullNotes: panel.fullNotes,
+        stepRows: panel.steps.rows,
+        periodRows: panel.periods.rows,
+      };
+    }),
+    weeklyPanels: options.map((option) => {
+      const panel = weeklyPanel(option, activityInputs);
+      return {
+        value: option.value,
+        heading: panel.heading,
+        bars: panel.weeks.map((week) => `${week.to}=${formatCompact(week.everyday)}`),
+        notes: panel.notes.map(({ kind, text }) => ({ kind, words: text })),
+        fullNotes: panel.fullNotes,
+        rows: panel.table.rows,
       };
     }),
     seriesPanels: options.map((option) => {

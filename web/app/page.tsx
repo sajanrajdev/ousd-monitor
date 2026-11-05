@@ -49,6 +49,7 @@ export default function Home() {
           exchanges={exchangeRows(dataset.labels)}
         />
         <ActivityView
+          options={options}
           activity={dataset.activity}
           kpis={kpis}
           definitions={manifest.definitions}

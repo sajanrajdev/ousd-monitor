@@ -537,6 +537,15 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 
 **Verification:** `## Evidence` at 390 and 1440, with one chain selected. The waterfall reads top to bottom at phone width, and hatching shows.
 
+**As built, where it differs from the above:**
+
+- **"Everyday means under $1M" is pinned on the weekly bars only,** as the [essential list](#explanation-layers) places it, and stays in the waterfall's popover through its summary. It is pinned on every weekly panel, always, so `verify-output` no longer ties it to the waterfall.
+- **The short forms in view** are `SMALL_TICKET_PIN`, `day0Pin` and `historyPin` in `lib/takeaways/caveats.ts`. Each keeps its date or figures, and "unproven" for small-ticket. The full forms sit in that card's popover under `data-full-note`, held there by `verify-output`. Hops is one sentence already, so its pin is its whole text.
+- **Pins on the waterfall sit on the row the note is about:** Day 0 on headline volume, small-ticket on issuer flows, hops on clean large. The weekly bars carry their two pins in the chart's corner, as both notes are about every bar.
+- **Per-chain figures come from `lib/activity-panels.ts`,** which the view and `verify-output` both read, as U3 did with `supply-segments.ts`. `verify-output` checks each panel's rows, pins, notes, full notes and tables.
+- **Day 0's scope under one chain** is `day0Scope` run on that chain's rows and KPI row, so it says that chain's own figure, and shows only when that chain's mints and burns add up to its supply.
+- **A note's marker isn't one of its words.** `verify-output` reads notes without their markers, and checks a pinned note's marker on its own.
+
 ---
 
 - [ ] <a id="u5-velocity-and-chain-views"></a>**Unit U5: Velocity and chain views**

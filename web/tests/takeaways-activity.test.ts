@@ -313,4 +313,50 @@ describe("weekly everyday volume", () => {
     expect(historyDays(withPre)).toBe(historyDays(activity));
     expect(weeklyEveryday(withPre)).toEqual(weeklyEveryday(activity));
   });
+
+  it("gives each chain the whole's week boundaries, and the chains' weeks add up to the whole's", () => {
+    const all = weeklyEveryday(activity);
+    const chainsWeeks = (["tempo", "ethereum", "base", "solana"] as const).map((chain) =>
+      weeklyEveryday(activity, [chain]),
+    );
+    for (const weeks of chainsWeeks) {
+      expect(weeks.map(({ from, to }) => [from, to])).toEqual(
+        all.map(({ from, to }) => [from, to]),
+      );
+    }
+    all.forEach((week, index) => {
+      const sum = chainsWeeks.reduce((total, weeks) => total + BigInt(weeks[index].everyday), 0n);
+      expect(sum).toBe(BigInt(week.everyday));
+    });
+  });
+
+  it("starts a late chain on the whole's first day, with nothing before it started", () => {
+    // Solana's first row in the sample is 10 Oct, ten days after the others.
+    const solana = weeklyEveryday(activity, ["solana"]);
+    expect(solana[0].from).toBe("2026-09-30");
+    expect(solana[0].everyday).toBe("0");
+    expect(weeklyEveryday(activity.filter((row) => row.chain === "solana"))[0].from).toBe(
+      "2026-10-10",
+    );
+  });
+
+  it("doesn't let a chain a day behind make another chain's week look smaller", () => {
+    // Base ends 2 Nov in the sample, a day before the others, so the block to 3 Nov isn't counted.
+    const tempo = weeklyEveryday(activity, ["tempo"]);
+    expect(tempo.at(-1)!.to).toBe(weeklyEveryday(activity).at(-1)!.to);
+    const sum = activity
+      .filter((row) => row.chain === "tempo")
+      .filter((row) => row.day >= tempo.at(-1)!.from && row.day <= tempo.at(-1)!.to)
+      .reduce((total, row) => total + BigInt(row.clean_everyday), 0n);
+    expect(BigInt(tempo.at(-1)!.everyday)).toBe(sum);
+  });
+
+  it("has no weeks for a chain with no rows", () => {
+    expect(
+      weeklyEveryday(
+        activity.filter((row) => row.chain !== "base"),
+        ["base"],
+      ),
+    ).toEqual([]);
+  });
 });

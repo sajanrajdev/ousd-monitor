@@ -163,3 +163,15 @@ Acceptance ran on a local build from real dataset 20261104T163224Z and from the 
 - A physical touch device.
 - A live refused publish on real data. That a failed check stops publishing is proved by tests and by a marked copy.
 - Credits actually charged by the Solana provider are unknown.
+
+## Phase 4, 2026-11-05: dashboard refurbish
+
+Units U1 to U5 of `docs/plans/2026-11-04-002-dashboard-refurbish-plan.md`. U6 writes the measured results.
+
+### What went wrong
+
+- **A floor rounded up in one place.** U3 printed the exchange floor rounded down in its legend, as "at least" needs, but the bar's tooltip still used the compact figure: "$346.6K" for $346,579. Review caught it, and the tooltip now uses the legend's figure.
+- **A caveat pointed at rows that weren't there.** The exchange-floor note said "the rows below", but the named rows sit under All's table toggle and on no single-chain panel. It now says "the named exchange rows".
+- **Checks that read the same code as the page.** U3's panel checks in `verify-output` took what to expect from the functions the view renders, so a fault in those functions would have passed. The supply card's figures and wallet table are now also held to the KPI rows.
+- **A link left with its card.** The active wallets definition link was on the card U3 folded into the supply card, and wasn't carried over until review.
+- **Narrow weekly figures ran into each other.** On one chain at 320 px, figures such as "$516.1K" were wider than their bar's column. They now wrap inside their own column, and a browser check holds each figure over its own bar.

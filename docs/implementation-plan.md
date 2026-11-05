@@ -10,7 +10,7 @@ Requirements (R1 to R16) are in `docs/PRD.md`. Structure is in `docs/architectur
 | 1. Trustworthy core | Done |
 | 2. Insight models | Done |
 | 3. First public version | Done. Not deployed |
-| 4. Review and release | Next |
+| 4. Review and release | In progress: the dashboard refurbish, below |
 | 5. After the first release | Not started |
 
 ## Phase 1: trustworthy core (done)
@@ -80,10 +80,10 @@ The data supports this for Tempo, and not yet for all chains: Base and Solana we
 
 | Unit | Status |
 |---|---|
-| U1 Shared components: card, info popover, pins and notes, data toggle, chain filter, marker and legend | Not started |
-| U2 First screen | Not started |
-| U3 Supply views, with the chain filter mounted | Not started |
-| U4 Activity views | Not started |
+| U1 Shared components: card, info popover, pins and notes, data toggle, chain filter, marker and legend | Done, #50 |
+| U2 First screen | Done, #52 |
+| U3 Supply views, with the chain filter mounted | Done, #53. Exchange-linked supply inside placed came first, in #51 |
+| U4 Activity views | Done in this change |
 | U5 Velocity and chain views, then the maintainer's whole-page review | Not started |
 | U6 Acceptance | Not started |
 

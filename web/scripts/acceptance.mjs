@@ -227,7 +227,12 @@ const shownPanels = (page) =>
   );
 
 // The cards a filter option changes, so each check covers every one of them.
-const FILTERED_CARDS = ["#where-supply-sits", "#placed-vs-circulating"];
+const FILTERED_CARDS = [
+  "#where-supply-sits",
+  "#placed-vs-circulating",
+  "#headline-to-clean",
+  "#everyday-by-week",
+];
 const SUPPLY = "#where-supply-sits";
 const SERIES = "#placed-vs-circulating";
 const shownCard = (page, box) =>
@@ -1482,6 +1487,73 @@ async function checkExchangeRowsOpen(page, where) {
   await toggle.locator("> summary").click();
 }
 
+// The activity cards under each option: the waterfall reads top to bottom with its hatching and
+// every label and figure inside its card, a pin sits on its row, and a week's figure stays over its
+// own bar, so a narrow panel can't run one into the next.
+async function checkActivityOptions(page, where) {
+  const values = await page
+    .locator(".chain-filter input")
+    .evaluateAll((inputs) => inputs.map((input) => input.value));
+  for (const value of values) {
+    await page.locator(`.chain-filter input[value="${value}"]`).check({ force: true });
+    const seen = await page.evaluate((chosen) => {
+      const waterfall = document.querySelector(
+        `#headline-to-clean > [data-chain-panel="${chosen}"] .chart-card`,
+      );
+      const weekly = document.querySelector(
+        `#everyday-by-week > [data-chain-panel="${chosen}"] .chart-card`,
+      );
+      const card = waterfall.getBoundingClientRect();
+      const rows = [...waterfall.querySelectorAll(".chart-area [data-step]")];
+      const tops = rows.map((row) => row.getBoundingClientRect().top);
+      const outside = rows.filter((row) => {
+        const rect = row.getBoundingClientRect();
+        return rect.left < card.left || rect.right > card.right + 0.5;
+      });
+      const hatched = rows
+        .filter(
+          (row) => !["headline_value", "clean_large", "clean_everyday"].includes(row.dataset.step),
+        )
+        .every((row) =>
+          getComputedStyle(row.querySelector("[data-bar]")).backgroundImage.includes("gradient"),
+        );
+      const pinsOnRows = [...waterfall.querySelectorAll(".chart-area .pin")].every(
+        (pin) => pin.closest("[data-step]") && pin.closest("[aria-hidden='true']"),
+      );
+      const figures = [...weekly.querySelectorAll("[data-week]")].map((week) => {
+        const own = week.getBoundingClientRect();
+        const text = week.querySelector("[data-week-value]").getBoundingClientRect();
+        return text.left >= own.left - 0.5 && text.right <= own.right + 0.5;
+      });
+      return {
+        rows: rows.length,
+        ordered: tops.every((top, index) => index === 0 || top > tops[index - 1]),
+        outside: outside.map((row) => row.dataset.step),
+        hatched,
+        pinsOnRows,
+        figuresInside: figures.every(Boolean),
+        weeks: figures.length,
+      };
+    }, value);
+    check("the waterfall reads top to bottom", where, seen.rows === 0 || seen.ordered, value);
+    check(
+      "every waterfall row fits its card",
+      where,
+      seen.outside.length === 0,
+      `${value}: ${seen.outside}`,
+    );
+    check("the removals are hatched", where, seen.hatched, value);
+    check(
+      "the waterfall's pins sit on their rows, hidden from assistive tech",
+      where,
+      seen.pinsOnRows,
+      value,
+    );
+    check("each week's figure stays over its own bar", where, seen.figuresInside, value);
+  }
+  await page.locator(`.chain-filter input[value="${values[0]}"]`).check({ force: true });
+}
+
 async function checkFolder(browser, folder, harness, widths) {
   const partial = basename(folder) === "partial";
   const chains = partial ? ["tempo", "ethereum"] : ["tempo", "ethereum", "base", "solana"];
@@ -1512,6 +1584,7 @@ async function checkFolder(browser, folder, harness, widths) {
       await group("the sticky filter", () => checkStickyFilter(page, where, width));
       await group("the supply card", () => checkSupplyOptions(page, where));
       await group("the step lines", () => checkStepLines(page, where, js));
+      await group("the activity cards", () => checkActivityOptions(page, where));
       await group("the exchange rows", () => checkExchangeRowsOpen(page, where));
       await group("the table's words", () => checkTableWords(page, where));
       await group("the findings", () => checkFindingLinks(page, where, js));
