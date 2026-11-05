@@ -1,6 +1,6 @@
 // Local only, and never run by `make check`. The one way the word and height budget is measured, the
 // same for the baseline and the result: real dataset, JavaScript on, fonts loaded, filter on All,
-// every toggle and popover closed. Words are main's innerText split on whitespace, leaving out
+// every toggle and tooltip closed. Words are main's innerText split on whitespace, leaving out
 // .sr-only. Height is documentElement.scrollHeight. Usage: measure-page.mjs <built folder>
 import { readFileSync } from "node:fs";
 import { resolve, join } from "node:path";
@@ -39,7 +39,7 @@ try {
       return {
         kind: root.dataset.datasetKind,
         version: root.dataset.datasetVersion,
-        open: document.querySelectorAll("main details[open]").length,
+        open: document.querySelectorAll("main details[open], [data-tip][data-open]").length,
         words,
         height: root.scrollHeight,
       };

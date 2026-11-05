@@ -16,7 +16,7 @@ const ALL_WIDTHS = [320, 390, 768, 1056, 1440];
 const AXE_WIDTHS = new Set([390, 1440]);
 const HEIGHT = 900;
 const BREAKPOINT_MD = 768;
-const TWO_COLUMNS_FROM = 1056;
+const ONE_LINE_FROM = 1056;
 const NOTES_BESIDE_FROM = 560;
 // Each card's anchor, as lib/definitions.ts has them.
 const CARDS = {
@@ -29,18 +29,20 @@ const CARDS = {
 };
 const MIN_TARGET = 24;
 const MIN_FILTER_TARGET = 36;
-const LEGEND_TRIGGER_GAP = 12;
 const CLOCK_JUMP_MS = 72 * 60 * 60 * 1000;
 // The plan's fold, on real data: a sample or preview adds its banner, and may run longer.
+// The trust row is gone from a build that passed, and so are the findings, as each card's heading is
+// its finding.
 const FOLDS = [
   {
     viewport: { width: 1440, height: 900 },
-    above: ["trust-strip", "verdict", "kpi-row", "findings", "marker-legend"],
+    above: ["verdict", "kpi-row", "chain-filter"],
+    starts: "view-a",
   },
   {
     viewport: { width: 390, height: 844 },
-    above: ["trust-strip", "verdict", "kpi-row"],
-    starts: "findings",
+    above: ["verdict", "kpi-row"],
+    starts: "chain-filter",
   },
 ];
 // Longer than the enhancer's hover delays, so a panel has had the chance to change.
@@ -49,7 +51,7 @@ const STEP_TIMEOUT_MS = 5000;
 const BOX_SLACK_PX = 0.5;
 // The frame's hatched edges are pseudo-elements, which leave axe unable to judge the text near them.
 const WITHOUT_FRAME_EDGES = `html[data-frame] body::before, html[data-frame] body::after,
-  .chart-card[data-frame]::before, .finding[data-frame]::before { content: none !important; }`;
+  .chart-card[data-frame]::before { content: none !important; }`;
 
 const counts = new Map();
 const undeterminedContrast = [];
@@ -97,7 +99,6 @@ async function loadHarness() {
       ChartCard,
       {
         takeaway: `A made-up finding about ${name}`,
-        chip: "inferred",
         source: "Made-up data",
         asOf: "2026-11-03",
         definitionHref: "/methodology/#velocity",
@@ -151,17 +152,9 @@ async function loadHarness() {
   };
 }
 
-// The enhancer has mounted once Escape closes an open popover. Nothing on the page says so otherwise.
+// The enhancer marks the page root once it has taken the tooltips over from the CSS fallback.
 async function enhancerReady(page) {
-  await page.waitForFunction(() => {
-    const popover = document.querySelector(".info-popover");
-    if (!popover) return true;
-    popover.open = true;
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-    const closed = !popover.open;
-    popover.open = false;
-    return closed;
-  });
+  await page.waitForFunction(() => document.documentElement.dataset.tips === "on");
   await page.evaluate(() => document.activeElement?.blur());
 }
 
@@ -226,20 +219,24 @@ const shownPanels = (page) =>
       .map((panel) => panel.dataset.chainPanel),
   );
 
-// The cards a filter option changes, so each check covers every one of them.
-const FILTERED_CARDS = [
-  "#where-supply-sits",
-  "#placed-vs-circulating",
-  "#headline-to-clean",
-  "#everyday-by-week",
-];
+// The cards a filter option changes, so each check covers every one of them. The supply card shows
+// every chain at once, so a filter option highlights its row there instead.
+const FILTERED_CARDS = ["#placed-vs-circulating", "#headline-to-clean", "#everyday-by-week"];
 const SUPPLY = "#where-supply-sits";
 const SERIES = "#placed-vs-circulating";
-const shownCard = (page, box) =>
-  page.locator(`${box} > [data-chain-panel] > .chart-card:visible`).first();
 
-const openCount = (page) => page.locator(".info-popover[open]").count();
-const isOpen = (locator) => locator.evaluate((details) => details.open);
+// Open is drawn: with a script that's data-open, and without one it's :hover or :focus-within.
+const openCount = (page) =>
+  page.evaluate(
+    () =>
+      [...document.querySelectorAll("[data-tip] > .tip__panel")].filter((panel) =>
+        panel.checkVisibility(),
+      ).length,
+  );
+const isOpen = (locator) =>
+  locator.evaluate((tip) => tip.querySelector(":scope > .tip__panel").checkVisibility());
+// A tooltip and its trigger, on the harness card that no filter hides.
+const HARNESS_TIP = "#harness-plain .chart-card__head [data-tip]";
 const focusIsOn = (locator) => locator.evaluate((element) => document.activeElement === element);
 
 const chosenOptionDiffers = (page) =>
@@ -357,43 +354,35 @@ async function checkInView(page, where) {
       if (!seen(element)) lacking.push(name);
     };
     const root = document.documentElement;
-    need("the header's independence line", document.querySelector("header .independence-line"));
     need("the footer's independence line", document.querySelector("footer .independence-line"));
+    const status = document.querySelectorAll("footer [data-footer-status] a");
+    if (![...status].some(seen)) lacking.push("the footer's reconciliation status");
     if (root.dataset.frame) need("the banner", document.querySelector("[data-dataset-banner]"));
     const verdict = document.querySelector('[data-section="verdict"]');
     if (verdict) {
       need("the question line", verdict.querySelector('[data-section="question"]'));
       need("the headline", verdict.querySelector("h1"));
       const text = verdict.querySelector("[data-verdict-text]");
-      if (text?.closest("details")) {
+      if (text?.closest(".tip__panel")) {
         if (root.dataset.datasetKind !== "real") lacking.push("verdict.text, on non-real data");
       } else {
         need("verdict.text", text);
       }
-      need("the headline's marker", verdict.querySelector('.status-chip[data-kind="opinion"]'));
+      if (root.dataset.frame)
+        need("the not-a-finding words", verdict.querySelector("[data-verdict-frame]"));
       const when = [...verdict.querySelectorAll(".freshness-text > *")];
       if (!when.some(seen)) lacking.push("the as-of line");
-      const trust = document.querySelectorAll('[data-section="trust-strip"] .freshness-text > *');
-      if (![...trust].some(seen)) lacking.push("the trust status");
+      // Only a build that didn't pass keeps the trust row at the top, and then it has to be seen.
+      const strip = document.querySelector('[data-section="trust-strip"]');
+      const trust = strip?.querySelectorAll(".freshness-text > *") ?? [];
+      if (strip && ![...trust].some(seen)) lacking.push("the trust status");
+      if (!strip && root.dataset.datasetKind !== "real")
+        lacking.push("the trust row, off real data");
       for (const value of document.querySelectorAll("[data-kpi-value]")) need("a KPI value", value);
-      for (const chip of document.querySelectorAll('[data-section="kpi-row"] .status-chip')) {
-        need("a KPI marker", chip.querySelector("[aria-hidden]") ?? chip);
-      }
       for (const label of document.querySelectorAll('[data-section="kpi-row"] dt')) {
         need("a KPI label", label);
       }
       need("the KPI row's chains", document.querySelector('[data-section="kpi-row"] > p'));
-      const findings = document.querySelectorAll("[data-finding-link]");
-      if (findings.length === 0) lacking.push("the findings");
-      for (const finding of findings) {
-        need("a finding", finding.querySelector(".finding__text"));
-        const chip = finding.querySelector(".status-chip");
-        need("a finding's marker", chip?.querySelector("[aria-hidden]") ?? chip);
-        if (root.dataset.frame) {
-          need("a finding's word", finding.querySelector(".chart-card__frame-word"));
-        }
-      }
-      need("the legend", document.querySelector('[data-section="marker-legend"] > p'));
     }
     // Every caveat, wherever a unit pins it. A note in a filter panel counts while its panel shows.
     for (const caveat of document.querySelectorAll("main [data-note]")) {
@@ -421,8 +410,6 @@ async function checkInView(page, where) {
     for (const card of document.querySelectorAll(".chart-card")) {
       if (!card.checkVisibility()) continue;
       need("a card's heading", card.querySelector(".chart-card__head :is(h2, h3)"));
-      const chip = card.querySelector(".chart-card__head .status-chip");
-      need("a card's marker", chip?.querySelector("[aria-hidden]") ?? chip);
       need("a card's meta line", card.querySelector(".chart-card__meta"));
       need("a card's as-of time", card.querySelector(".chart-card__meta time"));
       if (root.dataset.frame) {
@@ -431,6 +418,8 @@ async function checkInView(page, where) {
       for (const item of card.querySelectorAll("[data-pinned-notes] > li")) {
         need("a pinned note", item);
         need("a note's number", item.querySelector(".pin"));
+        // A note's words are its trigger when it has a tooltip, and stay in view either way.
+        need("a note's words", item.querySelector(":scope > p > .tip > .tip__trigger") ?? item);
       }
     }
     window.scrollTo({ left: startX, top: startY, behavior: "instant" });
@@ -448,12 +437,12 @@ async function checkInView(page, where) {
 async function checkFocusRings(page, where) {
   await page.keyboard.press("Shift");
   for (const selector of [
-    ".info-popover > summary",
+    ".tip__icon",
+    ".tip__words",
     ".data-toggle > summary",
     ".chain-filter input:checked",
     "header a",
-    ".trust-strip summary",
-    "[data-finding-link]",
+    "footer [data-footer-status] a:visible",
   ]) {
     const target = page.locator(selector).first();
     await target.focus();
@@ -482,11 +471,15 @@ async function checkForcedColors(browser, origin, folder, markup, where, options
     forcedColors: "active",
   });
   check("the chosen option shows in forced colours", where, await chosenOptionDiffers(page));
-  const trigger = page.locator("#harness-plain .info-popover > summary");
+  const trigger = page.locator(`${HARNESS_TIP} > .tip__icon`);
   const before = await trigger.evaluate((element) => getComputedStyle(element).backgroundColor);
   await trigger.click();
   const after = await trigger.evaluate((element) => getComputedStyle(element).backgroundColor);
   check("an open trigger shows in forced colours", where, before !== after);
+  const edge = await page
+    .locator(`${HARNESS_TIP} > .tip__panel`)
+    .evaluate((panel) => getComputedStyle(panel).borderTopStyle);
+  check("an open tooltip keeps its edge in forced colours", where, edge !== "none", edge);
   await context.close();
 }
 
@@ -539,82 +532,103 @@ async function checkWithoutHas(browser, origin, folder, markup, chains, where, o
   await context.close();
 }
 
-async function checkOneAtATime(page, where) {
-  const triggers = page.locator("[data-harness] .info-popover > summary:visible");
+// One open at a time. Focus opens a tooltip, Enter keeps it, and Enter again closes it.
+async function checkOneAtATime(page, where, js) {
+  const triggers = page.locator("[data-harness] .tip__icon:visible");
   await triggers.nth(0).click();
   await triggers.nth(1).click();
-  check("one popover opens at a time", where, (await openCount(page)) === 1);
+  check("one tooltip opens at a time", where, (await openCount(page)) === 1);
   await triggers.nth(1).click();
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => document.activeElement?.blur());
   await triggers.nth(0).focus();
+  check("keyboard focus opens a tooltip", where, (await openCount(page)) === 1);
   await page.keyboard.press("Enter");
-  check("Enter opens a popover", where, (await openCount(page)) === 1);
-  await page.keyboard.press("Space");
-  check("Space closes a popover", where, (await openCount(page)) === 0);
+  check("Enter keeps it open", where, (await openCount(page)) === 1);
+  await page.keyboard.press("Enter");
+  // With no script there's nothing to toggle it, and it stays while it has focus.
+  if (js) check("Enter again closes it", where, (await openCount(page)) === 0);
+  await page.evaluate(() => document.activeElement?.blur());
 }
 
-// Everything a reader needs to read must keep its own box while any popover is open.
-async function checkNothingCovered(page, where) {
+// A tooltip floats: opening one moves nothing on the page, and its panel stays inside the viewport.
+// Each is opened by keyboard focus, as a reader would, and its links can be reached from there.
+async function checkFloating(page, where, js) {
   const results = await page.evaluate(() => {
     const WATCHED =
-      ".chart-area, .hairline-table, .pinned-notes > li, .chart-card__meta, .chart-card h2, .chart-card h3, .status-chip, .data-toggle > summary, h1, [data-section='question'], .freshness-text, [data-verdict-text], [data-kpi-value], [data-section='kpi-row'] dt, [data-section='kpi-row'] > p, [data-finding-link], [data-section='marker-legend'] > p";
-    const out = [];
-    for (const popover of document.querySelectorAll(".info-popover")) {
-      // A hidden filter panel's popover has no box to check.
-      if (!popover.closest(".explain-head").checkVisibility()) continue;
-      popover.open = true;
-      const panel = popover.querySelector(".info-popover__panel");
-      const box = panel.getBoundingClientRect();
-      const covered = [...document.querySelectorAll(WATCHED)].filter((element) => {
-        // checkVisibility, as what's in a closed details keeps a box but isn't drawn.
-        if (panel.contains(element) || !element.checkVisibility()) return false;
-        const other = element.getBoundingClientRect();
-        return (
-          other.left < box.right - 0.5 &&
-          other.right > box.left + 0.5 &&
-          other.top < box.bottom - 0.5 &&
-          other.bottom > box.top + 0.5
-        );
+      ".chart-area, .hairline-table, .pinned-notes > li, .chart-card__meta, .chart-card h2, .chart-card h3, .data-toggle > summary, h1, [data-section='question'], .freshness-text, [data-verdict-text], [data-kpi-value], [data-section='kpi-row'] dt, [data-section='kpi-row'] > p, footer";
+    // What a hidden filter panel holds has no box, so it can't move, whatever the scroll does.
+    const layout = () =>
+      [...document.querySelectorAll(WATCHED)].map((element) => {
+        // What's in a tooltip shows only while it's open, so it's the panel and not the page.
+        if (element.closest(".tip__panel") || element.getClientRects().length === 0)
+          return "hidden";
+        const box = element.getBoundingClientRect();
+        return `${Math.round(box.top + window.scrollY)},${Math.round(box.left)},${Math.round(box.height)}`;
       });
-      const small = [...panel.querySelectorAll("a")].filter(
-        (link) => link.getBoundingClientRect().height < 24,
-      );
-      out.push({ covered: covered.map((element) => element.className), small: small.length });
-      popover.open = false;
+    const width = document.documentElement.clientWidth;
+    const out = [];
+    for (const tip of document.querySelectorAll("[data-tip]")) {
+      const trigger = tip.querySelector(":scope > .tip__trigger");
+      // A hidden filter panel's tooltip has no box to check.
+      if (!trigger.checkVisibility()) continue;
+      const before = layout();
+      trigger.focus({ preventScroll: false });
+      const panel = tip.querySelector(":scope > .tip__panel");
+      const box = panel.getBoundingClientRect();
+      const after = layout();
+      const moved = before.filter((value, index) => value !== after[index]).length;
+      // A link inside a sentence keeps its line, as WCAG 2.5.8 exempts it. One that stands alone doesn't.
+      const small = [...panel.querySelectorAll("a")]
+        .filter(
+          (link) =>
+            link.classList.contains("target-link") ||
+            link.parentElement.textContent.trim() === link.textContent.trim(),
+        )
+        .filter((link) => link.getBoundingClientRect().height < 24).length;
+      out.push({
+        name: trigger.getAttribute("aria-label") ?? trigger.textContent.slice(0, 30),
+        open: panel.checkVisibility(),
+        inside: box.left >= -0.5 && box.right <= width + 0.5,
+        moved,
+        small,
+      });
+      trigger.blur();
     }
     return out;
   });
-  check("the page has popovers to check", where, results.length > 0);
-  for (const { covered, small } of results) {
-    check(
-      "an open popover covers no plot, value or note",
-      where,
-      covered.length === 0,
-      `${covered}`,
-    );
-    check("a link in a popover is at least 24 px", where, small === 0);
+  check("the page has tooltips to check", where, results.length > 0);
+  for (const { name, open, inside, moved, small } of results) {
+    check("keyboard focus opens each tooltip", where, open, name);
+    check("an open tooltip moves nothing on the page", where, moved === 0, `${name}: ${moved}`);
+    // The enhancer keeps a panel inside the viewport. With no script nothing can measure it, so it
+    // only has to open.
+    if (js) check("an open tooltip stays inside the viewport", where, inside, name);
+    check("a link in a tooltip is at least 24 px", where, small === 0, name);
   }
 }
 
 async function checkHover(page, where) {
-  const popover = page.locator("#harness-plain .info-popover");
-  const trigger = popover.locator("summary");
-  const panel = popover.locator(".info-popover__panel");
+  const tip = page.locator(HARNESS_TIP);
+  const trigger = tip.locator("> .tip__trigger");
+  const panel = tip.locator("> .tip__panel");
   const away = () => page.mouse.move(0, 0);
   const settle = () => page.waitForTimeout(HOVER_SETTLE_MS);
 
   await page.evaluate(() => document.activeElement?.blur());
   await away();
   await settle();
-  check("no popover is open before a hover", where, (await openCount(page)) === 0);
+  check("no tooltip is open before a hover", where, (await openCount(page)) === 0);
   await trigger.hover();
   await settle();
-  check("hover opens", where, await isOpen(popover), `${await openCount(page)} open`);
+  check("hover opens", where, await isOpen(tip), `${await openCount(page)} open`);
+  check("the open tooltip is drawn", where, await panel.isVisible());
   await panel.hover();
   await settle();
-  check("moving onto the panel keeps it open", where, await isOpen(popover));
+  check("moving onto the panel keeps it open", where, await isOpen(tip));
   await page.keyboard.press("Escape");
-  check("Escape closes", where, !(await isOpen(popover)));
-  check("Escape returns focus to the trigger", where, await focusIsOn(trigger));
+  check("Escape closes", where, !(await isOpen(tip)));
+  check("and hides it, under the pointer", where, !(await panel.isVisible()));
 
   await away();
   await trigger.hover();
@@ -622,51 +636,58 @@ async function checkHover(page, where) {
   await trigger.click();
   await away();
   await settle();
-  check("a click pins it", where, await isOpen(popover));
+  check("a click pins it", where, await isOpen(tip));
   await page.keyboard.press("Escape");
+  check("Escape closes a pinned one", where, !(await isOpen(tip)));
+  check("Escape leaves focus on the trigger", where, await focusIsOn(trigger));
+  await page.evaluate(() => document.activeElement?.blur());
 
   await trigger.hover();
   await settle();
   await away();
   await settle();
-  check("leaving closes one that wasn't clicked", where, !(await isOpen(popover)));
+  check("leaving closes one that wasn't clicked", where, !(await isOpen(tip)));
 }
 
-// A popover left open with focus far away: Escape closes it and leaves the reader where they are.
+// A tooltip open under the pointer with focus far away: Escape closes it, leaves focus where it is
+// and doesn't move the page, as the panel took no room.
 async function checkEscapeStaysPut(page, where) {
-  const popover = page.locator("#harness-plain .info-popover");
-  await popover.locator("summary").click();
-  await page.mouse.move(0, 0);
-  const footerLink = page.locator("footer a").first();
-  await footerLink.focus();
-  const openHeight = (await popover.boundingBox()).height;
+  const trigger = page.locator(`${HARNESS_TIP} > .tip__trigger`);
+  await trigger.hover();
+  await page.waitForTimeout(HOVER_SETTLE_MS);
+  const footerLink = page.locator("footer nav a").first();
+  await footerLink.evaluate((link) => link.focus({ preventScroll: true }));
+  check("a tooltip is open to close", where, (await openCount(page)) === 1);
   const before = await page.evaluate(() => window.scrollY);
   await page.keyboard.press("Escape");
   check("Escape closes from elsewhere", where, (await openCount(page)) === 0);
   check("Escape leaves focus elsewhere", where, await focusIsOn(footerLink));
   const moved = Math.abs((await page.evaluate(() => window.scrollY)) - before);
-  // Closing a panel shortens the page, so at its foot the scroll can move by that much and no more.
-  check("Escape doesn't jump the page", where, moved <= openHeight + 1, `${moved}px`);
+  check("Escape doesn't jump the page", where, moved === 0, `${moved}px`);
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => document.activeElement?.blur());
 }
 
+// On a touch screen a tap toggles a tooltip, and one stays open at a time.
 async function checkTap(browser, origin, folder, markup, where, options) {
   const { context, page } = await openPage(browser, origin, folder, markup, {
     ...options,
     touch: true,
   });
-  const triggers = page.locator("[data-harness] .info-popover > summary:visible");
-  const first = triggers.nth(0);
-  const firstPopover = first.locator("..");
-  await first.tap();
-  check("tap opens", where, await isOpen(firstPopover));
-  await triggers.nth(1).tap();
-  check("a second tap leaves one open", where, (await openCount(page)) === 1);
+  const tips = page.locator("[data-harness] .chart-card__head [data-tip]:visible");
+  await tips.nth(0).locator("> .tip__trigger").tap();
+  check("tap opens", where, await isOpen(tips.nth(0)));
+  await tips.nth(1).locator("> .tip__trigger").tap();
+  check("a tap on another leaves one open", where, (await openCount(page)) === 1);
+  await tips.nth(1).locator("> .tip__trigger").tap();
+  if (options.js) check("a second tap closes it", where, (await openCount(page)) === 0);
   await context.close();
 }
 
-async function checkToggle(page, where, width) {
+async function checkToggle(page, where) {
   for (const [name, cardSelector] of [
     ["#harness-plain", "#harness-plain"],
+    [SUPPLY, SUPPLY],
     ...FILTERED_CARDS.map((box) => [box, `${box} > [data-chain-panel] > .chart-card:visible`]),
   ]) {
     const card = page.locator(cardSelector).first();
@@ -687,10 +708,8 @@ async function checkToggle(page, where, width) {
     );
     check("focus stays on the toggle", where, await focusIsOn(summary));
     check("notes stay visible", where, await card.locator("[data-pinned-notes]").isVisible());
-    if (width >= TWO_COLUMNS_FROM) {
-      const openWidth = (await page.locator(name).boundingBox()).width;
-      check("an open toggle's card spans both columns", where, openWidth > closedWidth * 1.5);
-    }
+    const openWidth = (await page.locator(name).boundingBox()).width;
+    check("an open toggle's card keeps its width", where, Math.abs(openWidth - closedWidth) <= 1);
 
     await page.keyboard.press("Enter");
     check("the toggle swaps back", where, await plot.isVisible());
@@ -711,7 +730,7 @@ async function checkTargets(page, where) {
           .map((element) => element.getBoundingClientRect());
       return [
         ...boxes(
-          ".info-popover > summary, .data-toggle > summary, .trust-strip summary, [data-finding-link]",
+          ".tip__icon, .data-toggle > summary, .trust-strip a, footer [data-footer-status] a, footer nav a",
         ).filter((box) => box.width < minimum || box.height < minimum),
         ...boxes(".chain-filter label").filter((box) => box.height < filterMinimum),
       ].length;
@@ -743,8 +762,7 @@ async function checkNoSidewaysScroll(page, where) {
       `${value}: ${over}px`,
     );
     const outside = await page.evaluate((slack) => {
-      const PARTS =
-        ".hairline-table, .data-toggle__panel, .info-popover__panel, .pinned-notes, .chart-area";
+      const PARTS = ".hairline-table, .data-toggle__panel, .pinned-notes, .chart-area";
       return [...document.querySelectorAll(".chart-card")]
         .filter((card) => card.checkVisibility())
         .flatMap((card) => {
@@ -811,10 +829,11 @@ async function checkAxe(page, where) {
     page.evaluate((value) => {
       for (const toggle of document.querySelectorAll(".data-toggle")) toggle.open = value;
     }, open);
+  // Axe skips what isn't drawn, so every tooltip opens for it, as one would for a reader.
   await page.evaluate(() => {
-    for (const details of document.querySelectorAll("main details:not(.data-toggle)")) {
-      details.removeAttribute("name");
-      details.open = true;
+    for (const tip of document.querySelectorAll("[data-tip]")) {
+      tip.dataset.open = "";
+      tip.querySelector(":scope > [aria-expanded]")?.setAttribute("aria-expanded", "true");
     }
   });
   for (const [state, open] of [
@@ -826,6 +845,12 @@ async function checkAxe(page, where) {
     checkAxeResults(where, state, violations);
     undetermined[state] = await checkContrast(page, where, state);
   }
+  await page.evaluate(() => {
+    for (const tip of document.querySelectorAll("[data-tip]")) {
+      delete tip.dataset.open;
+      tip.querySelector(":scope > [aria-expanded]")?.setAttribute("aria-expanded", "false");
+    }
+  });
   undeterminedContrast.push(`${where}: ${undetermined.closed} closed, ${undetermined.open} open`);
 }
 
@@ -866,6 +891,18 @@ async function checkWithoutJavaScript(page, where) {
     '[data-section="verdict"] noscript a, [data-section="verdict"] > p a',
   );
   check("the reading's definition shows in plain text", where, await reading.first().isVisible());
+  // With no script, CSS opens a tooltip on focus and on hover, so its content is still reached.
+  const tip = page.locator(HARNESS_TIP);
+  await tip.locator("> .tip__trigger").focus();
+  check("with no script, focus opens a tooltip", where, await isOpen(tip));
+  await page.keyboard.press("Tab");
+  const inside = await tip.evaluate((element) => element.contains(document.activeElement));
+  check("and Tab reaches the link inside it", where, inside);
+  check("and it stays open while focus is in it", where, await isOpen(tip));
+  await page.evaluate(() => document.activeElement?.blur());
+  await tip.locator("> .tip__trigger").hover();
+  check("with no script, hover opens a tooltip", where, await isOpen(tip));
+  await page.mouse.move(0, 0);
 }
 
 const boxOf = (page, selector) =>
@@ -882,174 +919,176 @@ const boxOf = (page, selector) =>
     };
   }, selector);
 
-// Each finding lands on its card, with the card clear of the sticky header. A click with the filter
-// on one chain goes back to All, as a finding speaks for every chain it covers.
-async function checkFindingLinks(page, where, js) {
-  const links = page.locator("[data-finding-link]");
-  const total = await links.count();
-  check("the page has four findings", where, total === 4, `${total}`);
-  for (let index = 0; index < total; index += 1) {
-    const link = links.nth(index);
-    const href = await link.getAttribute("href");
-    if (index === 0) {
-      await link.focus();
-      await page.keyboard.press("Enter");
-    } else {
-      await link.click();
-    }
-    await page.waitForFunction((target) => location.hash === target, href);
-    const card = await boxOf(page, href);
-    const header = await boxOf(page, "header");
-    check(
-      "a finding lands on its card, clear of the header",
-      where,
-      card !== null && card.top >= header.bottom - 1 && card.top < HEIGHT,
-      `${href}: ${card ? Math.round(card.top) : "no card"}, header ${Math.round(header.bottom)}`,
-    );
-  }
-  await page.evaluate(() => {
-    history.replaceState(null, "", location.pathname);
-    window.scrollTo(0, 0);
-  });
-  await page.locator(".chain-filter label").nth(1).click();
-  check("the filter is off All", where, (await shownPanels(page))[0] !== "all");
-  const supplyLink = links.first();
-  const finding = (await supplyLink.locator(".finding__text").innerText()).trim();
-  await supplyLink.click();
-  await page.waitForFunction((target) => location.hash === target, SUPPLY);
-  // With a script the filter goes back to All. Without one the targeted card shows All's panel.
-  const landed = shownCard(page, SUPPLY);
-  check(
-    "a finding lands on a card that says the same, whatever the filter",
-    where,
-    (await landed.count()) === 1 && (await landed.locator("h2").innerText()).trim() === finding,
-    await landed
-      .locator("h2")
-      .allInnerTexts()
-      .then((texts) => texts.join(" | ")),
-  );
-  if (js) {
-    check("a finding sets the filter to All", where, (await shownPanels(page))[0] === "all");
-  }
-  await page.locator(".chain-filter label").first().click();
-  await page.evaluate(() => {
-    history.replaceState(null, "", location.pathname);
-    window.scrollTo(0, 0);
-  });
-}
-
-// A popover on a KPI pushes what follows down, and hides nothing it leaves behind.
-async function checkKpiPopover(page, where) {
-  const trigger = page.locator('[data-section="kpi-row"] .info-popover > summary').nth(1);
-  const before = await boxOf(page, '[data-section="findings"]');
-  await trigger.click();
+// A KPI's tooltip floats over the page: it holds the definition, moves nothing, and hides no value.
+async function checkKpiTooltip(page, where) {
+  const tip = page.locator('[data-section="kpi-row"] [data-tip]').nth(1);
+  const next = '[data-section="kpi-row"] + *, .dashboard';
+  const before = await boxOf(page, next);
+  await tip.locator("> .tip__trigger").click();
   await page.mouse.move(0, 0);
-  const panel = page.locator('[data-section="kpi-row"] .info-popover[open] .info-popover__panel');
-  check("a KPI's popover opens", where, await panel.isVisible());
+  const panel = tip.locator("> .tip__panel");
+  check("a KPI's tooltip opens", where, await panel.isVisible());
   check(
     "and holds its definition",
     where,
     await panel.locator('a[href^="/methodology/#"]').isVisible(),
   );
-  const after = await boxOf(page, '[data-section="findings"]');
-  check("and pushes the findings down", where, after.pageTop > before.pageTop);
+  const after = await boxOf(page, next);
   check(
-    "and every KPI value stays in view",
+    "and moves nothing below it",
+    where,
+    Math.abs(after.pageTop - before.pageTop) <= BOX_SLACK_PX,
+  );
+  check(
+    "and every KPI value stays drawn",
     where,
     await page.evaluate(() =>
       [...document.querySelectorAll("[data-kpi-value]")].every((value) => value.checkVisibility()),
     ),
   );
-  await trigger.click();
-  const closed = await boxOf(page, '[data-section="findings"]');
-  check(
-    "and closing it puts them back",
-    where,
-    Math.abs(closed.pageTop - before.pageTop) <= BOX_SLACK_PX,
-  );
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => document.activeElement?.blur());
 }
 
-// The headline's popover holds verdict.text where the dataset lets it, and the rest in any case.
-async function checkHeadlinePopover(page, where) {
-  const popover = page.locator('[data-section="verdict"] .info-popover');
-  await popover.locator("> summary").click();
-  await page.mouse.move(0, 0);
-  const panel = popover.locator(".info-popover__panel");
+// "How we read this" is a tooltip, which holds verdict.text where the dataset lets it, and the rest
+// in any case, with the link to how the reading is made.
+async function checkHeadlineTooltip(page, where) {
+  const tip = page.locator('[data-section="verdict"] [data-tip]');
+  const trigger = tip.locator("> .tip__trigger");
   check(
-    "the headline's popover links its definition",
+    "the reading's trigger says How we read this",
+    where,
+    (await trigger.innerText()).trim() === "How we read this",
+  );
+  await trigger.click();
+  await page.mouse.move(0, 0);
+  const panel = tip.locator("> .tip__panel");
+  check(
+    "the reading's tooltip links its definition",
     where,
     await panel.locator('a[href="/methodology/#verdict"]').isVisible(),
   );
   const moved = await panel.locator("[data-verdict-text]").count();
   const real = (await page.evaluate(() => document.documentElement.dataset.datasetKind)) === "real";
   if (moved > 0) {
-    check("verdict.text is in the popover only on real data", where, real);
+    check("verdict.text is in the tooltip only on real data", where, real);
     check("and it's readable there", where, await panel.locator("[data-verdict-text]").isVisible());
   }
-  await popover.locator("> summary").click();
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => document.activeElement?.blur());
 }
 
-// The legend's trigger sits right after its last item at every width, and stays there as it opens.
-async function checkLegendTrigger(page, where) {
-  const legend = '[data-section="marker-legend"]';
-  const trigger = `${legend} .info-popover > summary`;
-  const last = await boxOf(page, `${legend} > p > span:last-child`);
-  const closed = await boxOf(page, trigger);
-  const gap = closed.left - last.right;
-  check(
-    "the legend's trigger sits right after its last item",
-    where,
-    gap >= 0 && gap <= LEGEND_TRIGGER_GAP && closed.top < last.bottom,
-    `gap ${gap}`,
+// The reconciliation detail is its own page. A build that passed says "Reconciled" in the footer, in
+// green with a tick, with the dated sentence as a tooltip on hover and focus. Any other keeps the
+// trust row at the top, and its footer never says "Reconciled".
+async function checkReconciliation(page, where) {
+  const passing = await page.evaluate(
+    () =>
+      document.documentElement.dataset.datasetKind === "real" &&
+      document.documentElement.dataset.freshness === "fresh" &&
+      document.querySelector("footer [data-reconciled]") !== null,
   );
-  await page.locator(trigger).click();
-  await page.mouse.move(0, 0);
-  const open = await boxOf(page, trigger);
+  const word = page.locator("footer [data-reconciled]");
+  const strip = page.locator('[data-section="trust-strip"]');
   check(
-    "and it stays put as the legend opens",
+    "the main page has no reconciliation disclosure",
     where,
-    open.left === closed.left && open.pageTop === closed.pageTop,
+    (await page.locator('[data-section="trust-strip"] details').count()) === 0,
   );
-  await page.locator(trigger).click();
-}
-
-// The trust row's one disclosure opens under the row, and leaves the state in view above it.
-async function checkTrustDisclosure(page, where, width) {
-  const details = page.locator('[data-section="trust-strip"] details');
-  check("the trust row has one disclosure", where, (await details.count()) === 1);
-  const summary = details.locator("> summary");
-  const status = '[data-section="trust-strip"] .trust-strip__status';
-  const trigger = '[data-section="trust-strip"] details > summary';
-  const before = await boxOf(page, status);
-  const closedTrigger = await boxOf(page, trigger);
-  await summary.click();
-  check("it shows the table when open", where, await details.locator("table").first().isVisible());
-  check(
-    "it shows what it doesn't verify",
-    where,
-    (await details.innerText()).includes("doesn't verify placed share or velocity"),
-  );
-  const after = await boxOf(page, status);
-  check(
-    "the state stays where it was",
-    where,
-    Math.abs(after.pageTop - before.pageTop) <= BOX_SLACK_PX,
-  );
-  const panel = await boxOf(page, '[data-section="trust-strip"] details > div');
-  check("the detail opens beneath the state", where, panel.top >= after.bottom - BOX_SLACK_PX);
-  if (width >= BREAKPOINT_MD) {
-    const openTrigger = await boxOf(page, trigger);
+  if (!passing) {
     check(
-      "the trigger stays put as it opens",
+      "a build that didn't pass keeps the trust row at the top",
       where,
-      Math.abs(openTrigger.pageTop - closedTrigger.pageTop) <= BOX_SLACK_PX,
+      await strip.isVisible(),
     );
+    const footer = await page.locator("footer [data-footer-status]").innerText();
+    check("and its footer never says Reconciled", where, !/\bReconciled\b/.test(footer), footer);
+    return;
   }
-  await summary.click();
+  check("a build that passed has no trust row at the top", where, (await strip.count()) === 0);
+  check(
+    "the footer says Reconciled",
+    where,
+    /^✓\s+Reconciled$/.test((await word.innerText()).trim()),
+    await word.innerText(),
+  );
+  const { color, contrast } = await word.evaluate((element) => {
+    const channels = (value) =>
+      value
+        .match(/[\d.]+/g)
+        .slice(0, 3)
+        .map(Number);
+    const luminance = (rgb) => {
+      const [r, g, b] = rgb.map((channel) => {
+        const c = channel / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const text = channels(getComputedStyle(element).color);
+    const page = channels(getComputedStyle(document.body).backgroundColor);
+    const [light, dark] = [luminance(text), luminance(page)].sort((a, b) => b - a);
+    return { color: text, contrast: (light + 0.05) / (dark + 0.05) };
+  });
+  check("and it's green", where, color[1] > color[0] && color[1] > color[2], `${color}`);
+  check("and meets 4.5:1", where, contrast >= 4.5, contrast.toFixed(2));
+  const link = word.locator("a");
+  const tip = word.locator("[data-tip]");
+  await link.focus();
+  check("focusing it shows the full sentence", where, await isOpen(tip));
+  check(
+    "which is the dated sentence",
+    where,
+    (await tip.locator("> .tip__panel").innerText()).startsWith("Supply reconciled on all"),
+  );
+  await page.evaluate(() => document.activeElement?.blur());
+  await link.hover();
+  await page.waitForTimeout(HOVER_SETTLE_MS);
+  check("hovering it shows the full sentence", where, await isOpen(tip));
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(HOVER_SETTLE_MS);
+}
+
+// The detail's own page: the table, what it doesn't verify, and a clear way back to the dashboard.
+async function checkReconciliationPage(browser, origin, where, js) {
+  const context = await browser.newContext({ javaScriptEnabled: js });
+  const page = await context.newPage();
+  await page.goto(`${origin}/`, { waitUntil: "networkidle" });
+  await page
+    .locator('footer [data-footer-status] a[href="/reconciliation/"]:visible')
+    .first()
+    .click();
+  await page.waitForURL(`${origin}/reconciliation/`);
+  const detail = page.locator('[data-section="reconciliation"]');
+  check("the footer's status leads to /reconciliation/", where, await detail.isVisible());
+  const text = await detail.innerText();
+  check(
+    "it says what it doesn't verify",
+    where,
+    text.includes("doesn't verify placed share or velocity"),
+  );
+  check(
+    "it has the table, or says there's none",
+    where,
+    (await detail.locator("table").count()) === 1 || text.includes("Not enough data yet"),
+  );
+  check("it keeps the normal header", where, await page.locator("header").isVisible());
+  const back = page.locator('main a[href="/"]', { hasText: "Back to the dashboard" });
+  check("it has a way back to the dashboard", where, await back.isVisible());
+  await back.click();
+  await page.waitForURL(`${origin}/`);
+  check(
+    "which leads back to it",
+    where,
+    await page.locator('[data-section="verdict"]').isVisible(),
+  );
+  await page.goto(`${origin}/reconciliation/`, { waitUntil: "networkidle" });
+  await checkInView(page, `${where} reconciliation`);
+  await context.close();
 }
 
 async function checkHeadlineLines(page, where, width, oneLine) {
-  if (width < TWO_COLUMNS_FROM) return;
+  if (width < ONE_LINE_FROM) return;
   const { text, lines } = await page.evaluate(() => {
     const heading = document.querySelector("h1");
     const { lineHeight } = getComputedStyle(heading);
@@ -1108,7 +1147,7 @@ async function checkClockSwap(browser, origin, where, width) {
     page.evaluate(() =>
       [
         ...document.querySelectorAll(
-          "header, main, main [data-section], h1, .freshness-text, [data-kpi-value], [data-finding-link], footer",
+          "header, main, main [data-section], h1, .freshness-text, [data-kpi-value], footer, footer [data-footer-status]",
         ),
       ].map((element) => {
         const box = element.getBoundingClientRect();
@@ -1123,9 +1162,11 @@ async function checkClockSwap(browser, origin, where, width) {
       };
       return {
         verdict: seen('[data-section="verdict"] .freshness-text__stale'),
+        // A build that passed has no trust row at the top: its footer status swaps instead.
         trust: seen(
-          '[data-section="trust-strip"] .trust-strip__status > .freshness-text .freshness-text__stale',
+          '[data-section="trust-strip"] .trust-strip__status > .freshness-text .freshness-text__stale, footer [data-footer-status] .freshness-text__stale',
         ),
+        reconciledGone: !seen("footer [data-reconciled]"),
         freshGone: !seen('[data-section="verdict"] .freshness-text__fresh'),
       };
     });
@@ -1133,54 +1174,61 @@ async function checkClockSwap(browser, origin, where, width) {
   check("the page starts on its fresh text", where, !(await swapped()).verdict);
   await page.clock.fastForward(CLOCK_JUMP_MS);
   await page.waitForFunction(() => document.documentElement.dataset.freshness === "stale");
-  const { verdict, trust, freshGone } = await swapped();
+  const { verdict, trust, freshGone, reconciledGone } = await swapped();
   check("the as-of line swaps to its stale text", where, verdict && freshGone);
   check("the trust status swaps to its stale text", where, trust);
+  check("and the footer no longer says Reconciled", where, reconciledGone);
   const after = await layout();
   const moved = before.filter((box, index) => box !== after[index]).length;
   check("the swap moves nothing", where, moved === 0 && before.length > 0, `${moved} moved`);
   await context.close();
 }
 
-// Cards side by side from 1056, stacked below it, and the filter above them both. The two-column grid
-// is what makes this a dashboard and the old stacked page wasn't, so it's measured, not assumed.
-async function checkDashboardGrid(page, where, width) {
-  const first = await boxOf(page, SUPPLY);
-  const second = await boxOf(page, SERIES);
-  const main = await boxOf(page, "main");
+// One card to a row at every width, each as wide as the content, with the filter above them all.
+async function checkDashboardGrid(page, where) {
+  // From the top, as the filter sticks once the page scrolls past it.
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
   const filter = await boxOf(page, ".dashboard .chain-filter");
+  const main = await page.evaluate(() => {
+    const element = document.querySelector("main");
+    const style = getComputedStyle(element);
+    const box = element.getBoundingClientRect();
+    return {
+      left: box.left + parseFloat(style.paddingLeft),
+      right: box.right - parseFloat(style.paddingRight),
+    };
+  });
+  const cards = await page.evaluate(() =>
+    [...document.querySelectorAll(".dashboard .chart-card")]
+      .filter((card) => card.checkVisibility())
+      .map((card) => {
+        const box = card.getBoundingClientRect();
+        return {
+          id: card.closest("[id]")?.id,
+          top: box.top,
+          bottom: box.bottom,
+          left: box.left,
+          right: box.right,
+        };
+      }),
+  );
+  check("the page has its six cards", where, cards.length === 6, `${cards.length}`);
   check(
     "the filter sits above the cards",
     where,
-    filter !== null && filter.bottom <= Math.min(first.top, second.top) + BOX_SLACK_PX,
+    filter !== null && cards.every((card) => filter.bottom <= card.top + BOX_SLACK_PX),
   );
-  if (width >= TWO_COLUMNS_FROM) {
-    check(
-      "two cards share a row from 1056",
-      where,
-      Math.abs(first.top - second.top) <= 1 && second.left >= first.right,
-      `tops ${Math.round(first.top)} and ${Math.round(second.top)}`,
-    );
-    const half = (main.right - main.left) / 2;
-    check(
-      "each takes half the page's width",
-      where,
-      first.right - first.left <= half && second.right - second.left <= half,
-      `${Math.round(first.right - first.left)} of ${Math.round(half * 2)}`,
-    );
-    // The cards, not their panels' boxes, which a grid stretches whatever a card does.
-    const firstCard = await shownCard(page, SUPPLY).boundingBox();
-    const secondCard = await shownCard(page, SERIES).boundingBox();
-    const endOf = (box) => box.y + box.height;
-    check(
-      "and they end together",
-      where,
-      Math.abs(endOf(firstCard) - endOf(secondCard)) <= 1,
-      `${Math.round(endOf(firstCard))} and ${Math.round(endOf(secondCard))}`,
-    );
-  } else {
-    check("cards stack below 1056", where, second.top >= first.bottom);
-  }
+  const narrow = cards.filter(
+    (card) => Math.abs(card.left - main.left) > 1 || Math.abs(card.right - main.right) > 1,
+  );
+  check(
+    "every card spans the content width",
+    where,
+    narrow.length === 0,
+    narrow.map(({ id }) => id).join(),
+  );
+  const shared = cards.filter((card, index) => index > 0 && card.top < cards[index - 1].bottom);
+  check("one card to a row", where, shared.length === 0, shared.map(({ id }) => id).join());
 }
 
 // A card with room has its legend beside its chart. Measured on every filtered card, as the rule is
@@ -1189,7 +1237,7 @@ async function checkLegendsBeside(page, where) {
   const found = await page.evaluate(
     ([slack, minimum]) => {
       const out = [];
-      for (const card of document.querySelectorAll("[data-chain-panel] > .chart-card")) {
+      for (const card of document.querySelectorAll(".dashboard .chart-card")) {
         if (!card.checkVisibility()) continue;
         const chart = card.querySelector(".chart-area")?.getBoundingClientRect();
         const legend = card.querySelector(".chart-legend")?.getBoundingClientRect();
@@ -1270,7 +1318,7 @@ async function checkStepLines(page, where, js) {
     .locator(".chain-filter input")
     .evaluateAll((inputs) => inputs.map((input) => input.value));
   const above = async () =>
-    (await boxOf(page, '[data-section="marker-legend"]')).pageTop +
+    (await boxOf(page, '[data-section="kpi-row"]')).pageTop +
     (await boxOf(page, ".dashboard")).pageTop;
   const before = await above();
   for (const value of values) {
@@ -1308,8 +1356,9 @@ async function checkStepLines(page, where, js) {
   await page.locator(".chain-filter input").first().check({ force: true });
 }
 
-// What a reader sees of the supply card, under every option: each part at its share and each label
-// whole, the band inside placed, a legend that doesn't jump, and every caveat in view.
+// What a reader sees of the supply card: every chain's bar at once, each part at its share and each
+// label whole, the band inside placed, and the bracket on the first. Under every option the legend
+// and caveats stay, and the chosen chain's bar is marked by weight and a rule, never opacity.
 async function checkSupplyOptions(page, where) {
   const values = await page
     .locator(".chain-filter input")
@@ -1319,7 +1368,23 @@ async function checkSupplyOptions(page, where) {
     await page.locator(`.chain-filter input[value="${value}"]`).check({ force: true });
     const shown = await page.evaluate(
       ([box, chosen, slack]) => {
-        const panel = document.querySelector(`${box} > [data-chain-panel="${chosen}"]`);
+        const panel = document.querySelector(`${box} [data-supply-row="${chosen}"]`);
+        const card = document.querySelector(box);
+        const style = getComputedStyle(panel);
+        const name = getComputedStyle(panel.querySelector(".supply-row__name"));
+        const marked =
+          parseFloat(style.borderLeftWidth) > 0 &&
+          style.borderLeftColor !== "rgba(0, 0, 0, 0)" &&
+          Number(name.fontWeight) >= 600;
+        const others = [...card.querySelectorAll("[data-supply-row]")].filter(
+          (row) =>
+            row !== panel &&
+            row.dataset.supplyRow !== "all" &&
+            getComputedStyle(row).borderLeftColor !== "rgba(0, 0, 0, 0)",
+        ).length;
+        const faded = [...card.querySelectorAll("*")].filter(
+          (element) => Number(getComputedStyle(element).opacity) < 1,
+        ).length;
         const track = panel.querySelector(".supply-bar__track")?.getBoundingClientRect();
         const off = [];
         const clipped = [];
@@ -1369,10 +1434,13 @@ async function checkSupplyOptions(page, where) {
           clipped,
           band,
           bracketFits,
-          rows: panel.querySelectorAll("[data-supply-legend] [data-segment]").length,
-          bandRows: panel.querySelectorAll("[data-supply-legend] [data-band]").length,
-          wallets: [...panel.querySelectorAll('[data-stat="active-wallets"]')].filter(seen).length,
-          floor: panel.querySelectorAll('[data-note="exchange-floor"]').length,
+          marked: chosen === "all" || marked,
+          others,
+          faded,
+          rows: card.querySelectorAll("[data-supply-legend] [data-segment]").length,
+          bandRows: card.querySelectorAll("[data-supply-legend] [data-band]").length,
+          wallets: [...card.querySelectorAll('[data-stat="active-wallets"]')].filter(seen).length,
+          floor: card.querySelectorAll('[data-note="exchange-floor"]').length,
         };
       },
       [SUPPLY, value, BOX_SLACK_PX],
@@ -1393,13 +1461,11 @@ async function checkSupplyOptions(page, where) {
     check("the bracket starts where circulating starts", where, shown.bracketFits, value);
     check("the bracket's word stays inside the bar", where, shown.wordFits, value);
     legendRows.add(`${shown.rows}+${shown.bandRows}`);
-    check(
-      "wallets show for one chain, and never summed",
-      where,
-      shown.wallets === (value === "all" ? 0 : 1),
-      `${value}: ${shown.wallets}`,
-    );
-    check("every panel keeps the floor note", where, shown.floor === 1, value);
+    check("wallets are never summed beside the bars", where, shown.wallets === 0, value);
+    check("the card keeps the floor note", where, shown.floor === 1, value);
+    check("the chosen chain's bar is marked", where, shown.marked, value);
+    check("and no other is", where, shown.others === 0, `${value}: ${shown.others}`);
+    check("nothing on the supply card fades", where, shown.faded === 0, `${value}: ${shown.faded}`);
     await checkInView(page, `${where} on ${value}`);
     await checkLegendRows(page, `${where} on ${value}`);
   }
@@ -1417,7 +1483,7 @@ async function checkSupplyOptions(page, where) {
 async function checkLegendRows(page, where) {
   const crowded = await page.evaluate((slack) => {
     const out = [];
-    for (const row of document.querySelectorAll("[data-chain-panel] .chart-legend__row")) {
+    for (const row of document.querySelectorAll(".dashboard .chart-legend__row")) {
       if (!row.checkVisibility()) continue;
       const figures = row.querySelector(".chart-legend__values")?.getBoundingClientRect();
       const name = row.querySelector("[data-segment-label], .chart-legend__label > :first-child");
@@ -1441,7 +1507,7 @@ async function checkLegendRows(page, where) {
 
 // An open table may wrap an amount anywhere, and never a chain's name or a heading inside a word.
 async function checkTableWords(page, where) {
-  const toggle = page.locator(`${SUPPLY} > [data-chain-panel="all"] .data-toggle`);
+  const toggle = page.locator(`${SUPPLY} .data-toggle`);
   await toggle.locator("> summary").click();
   const split = await toggle
     .locator("table")
@@ -1470,7 +1536,7 @@ async function checkTableWords(page, where) {
 
 // A row may sit under the toggle, so opening it has to show every one of them, whole.
 async function checkExchangeRowsOpen(page, where) {
-  const toggle = page.locator(`${SUPPLY} > [data-chain-panel="all"] .data-toggle`);
+  const toggle = page.locator(`${SUPPLY} .data-toggle`);
   await toggle.locator("> summary").click();
   const rows = toggle.locator("[data-exchange-row]");
   const total = await rows.count();
@@ -1481,9 +1547,7 @@ async function checkExchangeRowsOpen(page, where) {
     const seen = await Promise.all(parts.map((part) => row.locator(part).isVisible()));
     check("an open toggle shows each exchange row whole", where, seen.every(Boolean), `${index}`);
   }
-  const notes = await page
-    .locator(`${SUPPLY} > [data-chain-panel="all"] [data-note="exchange-floor"]`)
-    .isVisible();
+  const notes = await page.locator(`${SUPPLY} [data-note="exchange-floor"]`).isVisible();
   check("and the floor note stays in view beside them", where, notes);
   await toggle.locator("> summary").click();
 }
@@ -1657,7 +1721,7 @@ async function checkFolder(browser, folder, harness, widths) {
         checkHeadlineLines(page, where, width, harness.oneLineHeadline),
       );
       await group("the filter", () => checkFilter(page, where, js, chains));
-      await group("the grid", () => checkDashboardGrid(page, where, width));
+      await group("the grid", () => checkDashboardGrid(page, where));
       await group("legends beside", () => checkLegendsBeside(page, where));
       await group("the sticky filter", () => checkStickyFilter(page, where, width));
       await group("the supply card", () => checkSupplyOptions(page, where));
@@ -1666,17 +1730,15 @@ async function checkFolder(browser, folder, harness, widths) {
       await group("the chain cards", () => checkChainCards(page, where));
       await group("the exchange rows", () => checkExchangeRowsOpen(page, where));
       await group("the table's words", () => checkTableWords(page, where));
-      await group("the findings", () => checkFindingLinks(page, where, js));
-      await group("a KPI's popover", () => checkKpiPopover(page, where));
-      await group("the headline's popover", () => checkHeadlinePopover(page, where));
-      await group("the legend's trigger", () => checkLegendTrigger(page, where));
-      await group("the trust row", () => checkTrustDisclosure(page, where, width));
-      await group("one at a time", () => checkOneAtATime(page, where));
-      await group("nothing covered", () => checkNothingCovered(page, where));
+      await group("a KPI's tooltip", () => checkKpiTooltip(page, where));
+      await group("the headline's tooltip", () => checkHeadlineTooltip(page, where));
+      await group("reconciliation", () => checkReconciliation(page, where));
+      await group("one at a time", () => checkOneAtATime(page, where, js));
+      await group("floating", () => checkFloating(page, where, js));
       if (js) await group("hover", () => checkHover(page, where));
       if (js) await group("Escape", () => checkEscapeStaysPut(page, where));
       if (!js) await group("no script", () => checkWithoutJavaScript(page, where));
-      await group("the toggle", () => checkToggle(page, where, width));
+      await group("the toggle", () => checkToggle(page, where));
       await group("targets", () => checkTargets(page, where));
       await group("sideways scroll", () => checkNoSidewaysScroll(page, where));
       if (js && AXE_WIDTHS.has(width)) await group("axe", () => checkAxe(page, where));
@@ -1687,6 +1749,9 @@ async function checkFolder(browser, folder, harness, widths) {
       }
       await guarded("tap", where, () => checkTap(browser, origin, folder, markup, where, options));
       await guarded("methodology", where, () => checkMethodologyPage(browser, origin, where, js));
+      await guarded("the reconciliation page", where, () =>
+        checkReconciliationPage(browser, origin, where, js),
+      );
       await guarded("forced colours", where, () =>
         checkForcedColors(browser, origin, folder, markup, where, options),
       );

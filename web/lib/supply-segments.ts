@@ -20,11 +20,16 @@ import {
 import {
   EXCHANGE_FLOOR_LINK,
   EXCHANGE_FLOOR_NOTE,
+  EXCHANGE_FLOOR_PIN,
   exchangeCoverageNote,
+  exchangeCoveragePin,
   issuerUnlabeledNote,
+  PLACED_NOTE,
   PLACED_PIN,
+  seriesStartNote,
   seriesStartPin,
-  WALLETS_ACROSS_CHAINS_NOTE,
+  WALLETS_NOTE,
+  WALLETS_TABLE_NOTE,
 } from "./takeaways/caveats.ts";
 import {
   EXCHANGE_LINKED_LABEL,
@@ -33,7 +38,6 @@ import {
   seriesHeading,
   top10ShareBps,
 } from "./takeaways/journey.ts";
-import type { ChipKind } from "../components/status-chip.tsx";
 
 // Meaning colours, plus a pattern where the design system asks for one, so colour is never alone.
 // Only marks in ramp steps 3 and 4 (removed, idle) get the maroon hairline outline the design
@@ -52,11 +56,13 @@ export type SegmentStyle = {
   outlined?: boolean;
 };
 
-// A caveat a segment needs, with the words the views show and verify-output expects.
+// A caveat a segment needs, with the words the views show and verify-output expects. `text` stays in
+// view. `tip` is the caveat in full, in a tooltip on those words, with `link` after it.
 export type SegmentNote = {
   kind: string;
   chain?: ChainName;
   text: string;
+  tip?: string;
   link?: { href: string; text: string };
   segment?: string;
 };
@@ -68,7 +74,6 @@ export type SegmentConfig = {
   key: string;
   label: string;
   style: SegmentStyle;
-  marker: ChipKind;
   definition: DefinitionAnchor;
   // Whether the bracket for circulating covers it.
   circulating: boolean;
@@ -88,7 +93,6 @@ export const SEGMENT_CONFIG: SegmentConfig[] = [
       color: "var(--color-maroon-dark)",
       outlined: true,
     },
-    marker: "inferred",
     definition: "issuer-inventory",
     circulating: false,
     notes: ({ rows }) =>
@@ -108,17 +112,15 @@ export const SEGMENT_CONFIG: SegmentConfig[] = [
       color: "var(--color-maroon-dark)",
       outlined: true,
     },
-    marker: "inferred",
     definition: "placed-supply",
     circulating: false,
     band: { key: "placed_exchange_linked", label: EXCHANGE_LINKED_LABEL, image: BANDS },
-    notes: () => [{ kind: "placed", text: PLACED_PIN }],
+    notes: () => [{ kind: "placed", text: PLACED_PIN, tip: PLACED_NOTE }],
   },
   {
     key: "venue_dex",
     label: "DEX venues",
     style: { background: "var(--meaning-circulating)", color: "var(--color-off-white)" },
-    marker: "inferred",
     definition: "venue-supply",
     circulating: true,
   },
@@ -130,7 +132,6 @@ export const SEGMENT_CONFIG: SegmentConfig[] = [
       image: HATCH,
       color: "var(--color-off-white)",
     },
-    marker: "inferred",
     definition: "venue-supply",
     circulating: true,
   },
@@ -142,13 +143,13 @@ export const SEGMENT_CONFIG: SegmentConfig[] = [
       image: DOTS,
       color: "var(--color-off-white)",
     },
-    marker: "inferred",
     definition: "venue-supply",
     circulating: true,
     notes: ({ rows }) => [
       {
         kind: "exchange-floor",
-        text: EXCHANGE_FLOOR_NOTE,
+        text: EXCHANGE_FLOOR_PIN,
+        tip: EXCHANGE_FLOOR_NOTE,
         link: { href: definitionHref("exchange-linked-placed"), text: EXCHANGE_FLOOR_LINK },
       },
       ...rows
@@ -156,7 +157,8 @@ export const SEGMENT_CONFIG: SegmentConfig[] = [
         .map(({ chain }) => ({
           kind: "exchange-coverage",
           chain,
-          text: exchangeCoverageNote(chain),
+          text: exchangeCoveragePin(chain),
+          tip: exchangeCoverageNote(chain),
         })),
     ],
   },
@@ -164,7 +166,6 @@ export const SEGMENT_CONFIG: SegmentConfig[] = [
     key: "free_floating",
     label: "Free-floating",
     style: { background: "var(--meaning-active)", color: "var(--color-off-white)" },
-    marker: "inferred",
     definition: "free-floating",
     circulating: true,
   },
@@ -218,7 +219,7 @@ export function supplySegments(
 ): SupplySegment[] {
   const total = BigInt(row.total_supply);
   return config.map((segment) => {
-    const { key, label, style, marker, definition, circulating } = segment;
+    const { key, label, style, definition, circulating } = segment;
     const amount = BigInt(String(row[segment.key]));
     const { coverage, entities } = extras[segment.key] ?? {};
     const held = (entities ?? []).reduce((sum, entity) => sum + BigInt(entity.amount), 0n);
@@ -230,7 +231,6 @@ export function supplySegments(
       key,
       label,
       style,
-      marker,
       definition,
       circulating,
       amount: amount.toString(),
@@ -412,7 +412,7 @@ export function supplyPanel(
     ...config.flatMap((segment) =>
       (segment.notes?.({ rows }) ?? []).map((note) => ({ ...note, segment: segment.key })),
     ),
-    { kind: "wallets-not-people", text: WALLETS_ACROSS_CHAINS_NOTE },
+    { kind: "wallets-not-people", text: WALLETS_NOTE, tip: WALLETS_TABLE_NOTE },
   ];
   return {
     option,
@@ -480,7 +480,13 @@ export function seriesPanel(option: ChainOption, inputs: Parameters<typeof serie
     option,
     series,
     heading: seriesHeading(series, option.chains),
-    notes: [{ kind: "series-start", text: seriesStartPin(inputs.definitions) }],
+    notes: [
+      {
+        kind: "series-start",
+        text: seriesStartPin(inputs.definitions),
+        tip: seriesStartNote(inputs.definitions),
+      },
+    ],
     latest: series.length > 0 ? series[series.length - 1] : null,
     tableRows: series.map((point) => ({
       day: formatUtcDate(point.day),

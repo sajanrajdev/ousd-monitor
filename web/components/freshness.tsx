@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { isFreshAt, type FreshnessClock } from "@/lib/dataset/clock";
 
 const RECHECK_MS = 60_000;
@@ -29,7 +29,7 @@ export function FreshnessWatch({ clock }: { clock: FreshnessClock }) {
 // Both texts are in the server-rendered page, stacked in one grid cell so the taller sets the height
 // and nothing shifts when they swap. Fresh text is dated, so it stays true with JavaScript off or in
 // an archive. A polite status region, so the change is announced.
-export function FreshnessText({ fresh, stale }: { fresh: string | null; stale: string }) {
+export function FreshnessText({ fresh, stale }: { fresh: ReactNode | null; stale: ReactNode }) {
   return (
     <span className="freshness-text" role="status">
       {fresh === null ? null : <span className="freshness-text__fresh">{fresh}</span>}

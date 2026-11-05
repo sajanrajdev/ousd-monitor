@@ -139,7 +139,7 @@ export function WeeklyBars({ weeks, pins = [] }: { weeks: Week[]; pins?: number[
         <div className="mt-1 flex gap-1" style={{ fontSize: "var(--text-meta)" }}>
           {weeks.map((week) => (
             <span key={week.from} className="min-w-0 flex-1 text-center">
-              {formatUtcDate(week.to).replace(/ UTC$/, "")}
+              {formatUtcDate(week.to).replace(/ \d{4} UTC$/, "")}
             </span>
           ))}
         </div>

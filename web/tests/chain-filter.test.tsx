@@ -105,25 +105,20 @@ describe("chain panels", () => {
     );
   });
 
-  it("widens panels by the shown panel's toggle, for every filter value, from 1056", () => {
-    const { inside } = splitAtHasBlock(css);
-    const wide = /@media \(min-width: 1056px\) \{([^}]*)\{\s*grid-column: 1 \/ -1;/.exec(inside)!;
-    expect(wide).not.toBeNull();
-    expect(wide[1]).toContain(".card-grid > .chart-card:has(> .data-toggle[open])");
-    for (const value of ["all", ...REQUIRED_CHAINS]) {
-      expect(wide[1]).toMatch(
-        new RegExp(
-          `input\\[value="${value}"\\]:checked\\)\\s+\\.card-grid\\s+> \\.chain-panels:has\\(> \\[data-chain-panel="${value}"\\] \\.data-toggle\\[open\\]\\)`,
-        ),
-      );
-    }
+  it("keeps every card the content's width, one per row, at every width", () => {
+    const grids = [...css.matchAll(/\.card-grid\s*\{([^}]*)\}/g)].map((match) => match[1]);
+    expect(grids).toHaveLength(1);
+    expect(grids[0]).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\);/);
+    expect(css).not.toMatch(/\.card-grid[^{]*\{[^}]*repeat\(2/);
+    // With one column there's nothing for an open table to widen into.
+    expect(css).not.toMatch(/data-toggle\[open\][^{]*\{[^}]*grid-column:\s*1 \/ -1/);
   });
 
   it("keeps the chosen option and an open trigger visible in forced colours", () => {
     const forced = /@media \(forced-colors: active\) \{([^}]*\{[^}]*\})/.exec(css)!;
     expect(forced).not.toBeNull();
     expect(forced[1]).toContain(".chain-filter input:checked + span");
-    expect(forced[1]).toContain(".info-popover[open] > summary");
+    expect(forced[1]).toContain('.tip__icon[aria-expanded="true"]');
     expect(forced[1]).toContain("background: Highlight");
     expect(forced[1]).toContain("color: HighlightText");
   });

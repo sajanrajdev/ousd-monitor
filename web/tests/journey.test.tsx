@@ -11,7 +11,9 @@ import { UNKNOWN_TEXT } from "@/lib/format";
 import {
   EXCHANGE_FLOOR_LINK,
   EXCHANGE_FLOOR_NOTE,
+  EXCHANGE_FLOOR_PIN,
   exchangeCoverageNote,
+  exchangeCoveragePin,
   issuerUnlabeledNote,
   PLACED_NOTE,
   PLACED_PIN,
@@ -46,50 +48,79 @@ function view(dir = "fixtures/dataset/complete", change?: (dir: string) => void)
 
 const VALUES = ["all", "tempo", "ethereum", "base", "solana"];
 
-const supply = (container: HTMLElement, value: string) =>
-  container.querySelector<HTMLElement>(`#where-supply-sits > [data-chain-panel="${value}"]`)!;
+// The supply card is one card with every chain in it, a bar row per filter option. Its legend,
+// figures, notes and tables are the first option's, which covers every chain.
+const card = (container: HTMLElement) =>
+  container.querySelector<HTMLElement>("#where-supply-sits")!;
+const row = (container: HTMLElement, value: string) =>
+  card(container).querySelector<HTMLElement>(`[data-supply-row="${value}"]`)!;
 const series = (container: HTMLElement, value: string) =>
   container.querySelector<HTMLElement>(`#placed-vs-circulating > [data-chain-panel="${value}"]`)!;
 const noteKeys = (panel: HTMLElement) =>
   [...panel.querySelectorAll("[data-pinned-notes] > [data-note]")].map(
     (note) => `${note.getAttribute("data-note")}:${note.getAttribute("data-chain") ?? ""}`,
   );
-const noteWords = (note: Element) => note.querySelector("p")!.textContent;
+// A note's words in view: its tooltip's panel shows only on hover or focus.
+const noteWords = (note: Element) => {
+  const copy = note.querySelector("p")!.cloneNode(true) as Element;
+  copy.querySelectorAll(".tip__panel").forEach((panel) => panel.remove());
+  return copy.textContent;
+};
+const noteTip = (note: Element) => note.querySelector(".tip__panel")?.textContent ?? null;
 
 describe("journey view", () => {
-  it("renders a supply card and a step line for every filter option", () => {
+  it("renders one supply card with a bar per filter option, and a step line for each", () => {
     const { container } = render(view().ui);
-    for (const box of ["#where-supply-sits", "#placed-vs-circulating"]) {
-      const panels = [...container.querySelectorAll(`${box} > [data-chain-panel]`)];
-      expect(panels.map((panel) => panel.getAttribute("data-chain-panel"))).toEqual(VALUES);
-      for (const panel of panels) {
-        const card = panel.querySelector(".chart-card")!;
-        expect(card.querySelector("h2")!.textContent!.length).toBeGreaterThan(10);
-        expect(card.textContent).toContain("Source:");
-        expect(card.querySelector("time")).toBeTruthy();
-        expect(card.querySelector('a[href^="/methodology/#"]')).toBeTruthy();
-      }
+    const supply = card(container);
+    expect(supply.matches(".chart-card")).toBe(true);
+    expect(supply.querySelector("[data-chain-panel]")).toBeNull();
+    expect(
+      [...supply.querySelectorAll("[data-supply-row]")].map((r) =>
+        r.getAttribute("data-supply-row"),
+      ),
+    ).toEqual(VALUES);
+    const panels = [...container.querySelectorAll("#placed-vs-circulating > [data-chain-panel]")];
+    expect(panels.map((panel) => panel.getAttribute("data-chain-panel"))).toEqual(VALUES);
+    for (const each of [supply, ...panels.map((panel) => panel.querySelector(".chart-card")!)]) {
+      expect(each.querySelector("h2")!.textContent!.length).toBeGreaterThan(10);
+      expect(each.querySelector(".chart-card__head .tip__panel")!.textContent).toContain("Source:");
+      expect(each.querySelector(".chart-card__meta time")).toBeTruthy();
+      expect(each.querySelector('a[href^="/methodology/#"]')).toBeTruthy();
     }
-    expect(container.querySelectorAll(".chart-card")).toHaveLength(10);
+    expect(container.querySelectorAll(".chart-card")).toHaveLength(1 + VALUES.length);
   });
 
-  it("draws one bar per panel, of that option's own chains", () => {
+  it("draws one bar per option, of that option's own chains, named in its row", () => {
     const { container } = render(view().ui);
     for (const value of VALUES) {
-      const bars = supply(container, value).querySelectorAll("[data-supply-bar]");
+      const bars = row(container, value).querySelectorAll("[data-supply-bar]");
       expect(bars).toHaveLength(1);
       expect(bars[0].getAttribute("data-supply-bar")).toBe(value);
     }
-    const tempo = supply(container, "tempo");
+    const tempo = row(container, "tempo");
     expect(tempo.querySelector("[data-supply-bar]")!.getAttribute("data-total")).toBe(
       "800000000000000",
     );
-    expect(tempo.querySelector("h2")!.textContent).toMatch(/^On Tempo, /);
+    expect(tempo.querySelector(".supply-row__name")!.textContent).toBe("Tempo");
+    expect(tempo.querySelector("[data-row-total]")!.textContent).toBe("$800M");
+    expect(row(container, "all").querySelector(".supply-row__name")!.textContent).toBe(
+      "All chains",
+    );
+    // The card's heading is the first option's, about every chain.
+    expect(card(container).querySelector("h2")!.textContent).not.toMatch(/^On /);
+  });
+
+  it("marks where circulating starts on the first bar only", () => {
+    const { container } = render(view().ui);
+    expect(row(container, "all").querySelector(".supply-bar__bracket")).not.toBeNull();
+    for (const value of VALUES.slice(1)) {
+      expect(row(container, value).querySelector(".supply-bar__bracket")).toBeNull();
+    }
   });
 
   it("shows exact amounts in the table, circulating from activity, and top-10 share", () => {
     const { container } = render(view().ui);
-    const first = supply(container, "all").querySelectorAll("table")[0];
+    const first = card(container).querySelectorAll("table")[0];
     const tempo = within(first).getByText("Tempo").closest("tr")!;
     expect(tempo.textContent).toContain("$800,000,000"); // total
     expect(tempo.textContent).toContain("$320,000,000"); // circulating, from activity
@@ -104,25 +135,21 @@ describe("journey view", () => {
     expect(free.className).not.toContain("maroon");
   });
 
-  it("gives a panel only its own chain's table rows", () => {
+  it("holds every chain's rows in the one card's tables", () => {
     const { container } = render(view().ui);
-    expect(
-      supply(container, "all").querySelectorAll("table")[0].querySelectorAll("tbody tr"),
-    ).toHaveLength(4);
-    const base = supply(container, "base").querySelectorAll("table");
-    expect(base[0].querySelectorAll("tbody tr")).toHaveLength(1);
-    expect(base[0].textContent).toContain("Base");
-    expect(base[0].textContent).not.toContain("Tempo");
-    expect(base[1].querySelectorAll("tbody tr")).toHaveLength(1);
+    const tables = card(container).querySelectorAll("table");
+    expect(tables[0].querySelectorAll("tbody tr")).toHaveLength(4);
+    expect(tables[1].querySelectorAll("tbody tr")).toHaveLength(4);
+    expect(container.querySelectorAll("#where-supply-sits .data-toggle")).toHaveLength(1);
   });
 
   it("marks exchange venues as a floor and shows the exchange-linked band inside placed", () => {
     const { container } = render(view().ui);
-    const panel = supply(container, "all");
+    const panel = card(container);
     const first = panel.querySelectorAll("table")[0];
     expect(first.textContent).toContain("Exchange venues, at least");
     expect(first.textContent).toContain("Of placed, exchange-linked");
-    const band = panel.querySelector(
+    const band = row(container, "all").querySelector(
       '[data-part="placed_supply"] [data-testid="exchange-linked-band"]',
     );
     expect(band).not.toBeNull();
@@ -134,92 +161,77 @@ describe("journey view", () => {
     expect(panel.querySelector("[data-exchange-linked]")!.textContent).toContain("of supply");
   });
 
-  it("carries data-exchange-linked once for each bar with a band, and keeps the line at zero", () => {
+  it("carries data-exchange-linked once, in the legend, and draws a band only where there is one", () => {
     const { container } = render(view().ui);
     const lines = [...container.querySelectorAll("[data-exchange-linked]")];
-    expect(lines.map((line) => line.getAttribute("data-exchange-linked"))).toEqual([
-      "all",
-      "ethereum",
-    ]);
-    const tempo = supply(container, "tempo");
-    expect(tempo.querySelector("[data-exchange-linked]")).toBeNull();
-    expect(tempo.querySelector('[data-testid="exchange-linked-band"]')).toBeNull();
-    expect(tempo.querySelector('[data-band="placed_supply"]')!.textContent).toContain("$0");
+    expect(lines.map((line) => line.getAttribute("data-exchange-linked"))).toEqual(["all"]);
+    expect(lines[0].closest("[data-supply-legend]")).not.toBeNull();
+    expect(
+      row(container, "tempo").querySelector('[data-testid="exchange-linked-band"]'),
+    ).toBeNull();
+    expect(
+      row(container, "ethereum").querySelector('[data-testid="exchange-linked-band"]'),
+    ).not.toBeNull();
   });
 
-  it("shows each exchange beside its source, once, under All's data toggle", () => {
+  it("shows each exchange beside its source, once, under the card's data toggle", () => {
     const { container } = render(view().ui);
     const rows = [...container.querySelectorAll("[data-exchange-row]")];
-    expect(rows.map((row) => row.textContent)).toEqual([
+    expect(rows.map((r) => r.textContent)).toEqual([
       "Sample Exchange, 2 wallets, at least $610,000,000. Source: each wallet's label.",
       "Sample Listing, no wallet labeled. Source: its OUSD listing.",
     ]);
-    for (const row of rows) {
-      expect(row.closest(".data-toggle")).not.toBeNull();
-      expect(row.closest("[data-labels-table]")).not.toBeNull();
-      expect(row.closest('[data-chain-panel="all"]')).not.toBeNull();
+    for (const r of rows) {
+      expect(r.closest(".data-toggle")).not.toBeNull();
+      expect(r.closest("[data-labels-table]")).not.toBeNull();
+      expect(r.closest("#where-supply-sits")).not.toBeNull();
     }
-    const links = rows.map((row) => row.querySelector("a")!);
+    const links = rows.map((r) => r.querySelector("a")!);
     expect(links[0].getAttribute("href")).toBe("/methodology/#named-labels");
     expect(links[1].getAttribute("href")).toBe("https://example.com/sample-listing/ousd");
     expect(links[1].getAttribute("rel")).toBe("noopener noreferrer");
   });
 
-  it("keeps the floor and coverage notes in view on every panel they apply to, word for word", () => {
+  it("keeps the floor and coverage notes in view, short, with each in full as a tooltip", () => {
     const { container } = render(view().ui);
-    for (const value of VALUES) {
-      const panel = supply(container, value);
-      const floor = panel.querySelector('[data-note="exchange-floor"]')!;
-      expect(floor.closest("details")).toBeNull();
-      expect(noteWords(floor)).toBe(`${EXCHANGE_FLOOR_NOTE} ${EXCHANGE_FLOOR_LINK}.`);
-    }
-    const tempo = supply(container, "tempo").querySelector(
-      '[data-note="exchange-coverage"][data-chain="tempo"]',
-    )!;
-    expect(tempo.closest("details")).toBeNull();
-    expect(noteWords(tempo)).toBe(exchangeCoverageNote("tempo"));
+    const panel = card(container);
+    const floor = panel.querySelector('[data-note="exchange-floor"]')!;
+    expect(floor.closest("details, .tip__panel")).toBeNull();
+    expect(noteWords(floor)).toBe(EXCHANGE_FLOOR_PIN);
+    expect(noteTip(floor)).toBe(`${EXCHANGE_FLOOR_NOTE} ${EXCHANGE_FLOOR_LINK}.`);
+    // It holds a link, so its trigger is a disclosure.
+    expect(floor.querySelector(".tip__trigger")!.getAttribute("aria-expanded")).toBe("false");
+    const tempo = panel.querySelector('[data-note="exchange-coverage"][data-chain="tempo"]')!;
+    expect(tempo.closest("details, .tip__panel")).toBeNull();
+    expect(noteWords(tempo)).toBe(exchangeCoveragePin("tempo"));
+    expect(noteTip(tempo)).toBe(exchangeCoverageNote("tempo"));
+    expect(tempo.querySelector('[role="tooltip"]')).not.toBeNull();
   });
 
-  it("names only a panel's own chains in its coverage and issuer notes", () => {
+  it("lists every chain's coverage and issuer notes once, on the one card", () => {
     const { container } = render(view().ui);
-    const common = ["placed:", "exchange-floor:"];
-    const wallets = ["wallets-not-people:"];
-    expect(noteKeys(supply(container, "all"))).toEqual([
+    expect(noteKeys(card(container))).toEqual([
       "issuer-unlabeled:solana",
-      ...common,
+      "placed:",
+      "exchange-floor:",
       "exchange-coverage:solana",
       "exchange-coverage:tempo",
-      ...wallets,
+      "wallets-not-people:",
     ]);
-    expect(noteKeys(supply(container, "solana"))).toEqual([
-      "issuer-unlabeled:solana",
-      ...common,
-      "exchange-coverage:solana",
-      ...wallets,
-    ]);
-    expect(noteKeys(supply(container, "tempo"))).toEqual([
-      ...common,
-      "exchange-coverage:tempo",
-      ...wallets,
-    ]);
-    expect(noteKeys(supply(container, "ethereum"))).toEqual([...common, ...wallets]);
-    expect(noteKeys(supply(container, "base"))).toEqual([...common, ...wallets]);
+    expect(container.querySelectorAll("[data-pinned-notes]")).toHaveLength(1 + VALUES.length);
   });
 
-  it("pins the issuer note on All and its own chain's legend row, and no other", () => {
+  it("pins the issuer note on the legend's issuer row", () => {
     const { container } = render(view().ui);
-    const pin = (value: string) =>
-      supply(container, value).querySelector('[data-segment="issuer_inventory"] .pin');
-    expect(pin("all")!.textContent).toBe("1");
-    expect(pin("solana")!.textContent).toBe("1");
-    for (const value of ["tempo", "ethereum", "base"]) expect(pin(value)).toBeNull();
-    const note = supply(container, "solana").querySelector('[data-note="issuer-unlabeled"]')!;
+    const pin = card(container).querySelector('[data-segment="issuer_inventory"] .pin');
+    expect(pin!.textContent).toBe("1");
+    const note = card(container).querySelector('[data-note="issuer-unlabeled"]')!;
     expect(noteWords(note)).toBe(issuerUnlabeledNote("solana"));
   });
 
-  it("numbers a legend row's pins as its notes are numbered", () => {
+  it("numbers a legend row's pins as its notes are numbered, and leaves the bars unpinned", () => {
     const { container } = render(view().ui);
-    const panel = supply(container, "all");
+    const panel = card(container);
     const numbered = [...panel.querySelectorAll("[data-pinned-notes] > [data-note]")].map(
       (note) => [note.getAttribute("data-note"), note.querySelector(".pin")!.textContent],
     );
@@ -228,73 +240,68 @@ describe("journey view", () => {
     const of = (kind: string) => numbered.filter(([name]) => name === kind).map(([, n]) => n);
     expect(pins("placed_supply")).toEqual(of("placed"));
     expect(pins("venue_exchange")).toEqual([...of("exchange-floor"), ...of("exchange-coverage")]);
-    expect(panel.querySelector('[data-part="placed_supply"] .pin')!.textContent).toBe(
-      of("placed")[0],
-    );
+    expect(panel.querySelector("[data-supply-bar] .pin")).toBeNull();
   });
 
-  it("holds the short placed pin in view, with the note in full in the popover", () => {
+  it("holds the short placed pin in view, with the note in full as its tooltip and the card's", () => {
     const { container } = render(view().ui);
-    const panel = supply(container, "all");
-    expect(noteWords(panel.querySelector('[data-note="placed"]')!)).toBe(PLACED_PIN);
-    expect(panel.querySelector(".info-popover__panel")!.textContent).toContain(PLACED_NOTE);
+    const panel = card(container);
+    const note = panel.querySelector('[data-note="placed"]')!;
+    expect(noteWords(note)).toBe(PLACED_PIN);
+    expect(noteTip(note)).toBe(PLACED_NOTE);
+    expect(panel.querySelector(".chart-card__head .tip__panel")!.textContent).toContain(
+      PLACED_NOTE,
+    );
     expect(panel.querySelector('a[href="/methodology/#venue-supply"]')).toBeTruthy();
   });
 
-  it("lists every segment on every panel, a zero as $0 and not a gap", () => {
+  it("lists every segment once, and draws no part at zero", () => {
     const { container } = render(view().ui);
-    for (const value of VALUES) {
-      const rows = supply(container, value).querySelectorAll("[data-supply-legend] [data-segment]");
-      expect(rows).toHaveLength(6);
-    }
-    const tempo = supply(container, "tempo");
-    expect(
-      tempo.querySelector('[data-segment="venue_exchange"] [data-segment-amount]')!.textContent,
-    ).toBe("≥$0");
-    expect(tempo.querySelector('[data-part="venue_exchange"]')).toBeNull();
+    expect(card(container).querySelectorAll("[data-supply-legend]")).toHaveLength(1);
+    expect(card(container).querySelectorAll("[data-supply-legend] [data-segment]")).toHaveLength(6);
+    expect(row(container, "tempo").querySelector('[data-part="venue_exchange"]')).toBeNull();
+    expect(row(container, "all").querySelector('[data-part="venue_exchange"]')).not.toBeNull();
   });
 
-  it("puts the legend and figures outside the hidden graphic, and the bar in it", () => {
+  it("puts the legend and figures outside the hidden graphic, and the bars in it", () => {
     const { container } = render(view().ui);
-    const panel = supply(container, "all");
+    const panel = card(container);
     expect(panel.querySelector("[data-supply-legend]")!.closest("[aria-hidden]")).toBeNull();
     expect(panel.querySelector("[data-stat]")!.closest("[aria-hidden]")).toBeNull();
-    expect(panel.querySelector("[data-supply-bar]")!.closest("[aria-hidden]")).not.toBeNull();
-  });
-
-  it("shows circulating and clean volume beside the bar, and wallets only for one chain", () => {
-    const { container } = render(view().ui);
-    const stats = (value: string) =>
-      [...supply(container, value).querySelectorAll("[data-stat]")].map((stat) =>
-        stat.getAttribute("data-stat"),
-      );
-    expect(stats("all")).toEqual(["circulating", "clean-7d"]);
-    for (const value of VALUES.slice(1)) {
-      expect(stats(value)).toEqual(["circulating", "clean-7d", "active-wallets"]);
+    for (const bar of panel.querySelectorAll("[data-supply-bar]")) {
+      expect(bar.closest("[aria-hidden]")).not.toBeNull();
     }
-    const wallets = supply(container, "tempo").querySelector('[data-stat="active-wallets"]')!;
-    expect(wallets.querySelector("[data-stat-value]")!.textContent).toBe("300");
-    expect(wallets.querySelector(".pin")).not.toBeNull();
-    expect(supply(container, "all").querySelector("[data-pinned-notes]")!.textContent).toContain(
-      "never added across chains",
-    );
   });
 
-  it("shows no wallet total under All, in any figure", () => {
+  it("shows circulating and clean volume beside the bars, and no wallet count in view", () => {
     const { container } = render(view().ui);
-    const panel = supply(container, "all");
+    const stats = [...card(container).querySelectorAll("[data-stat]")].map((stat) =>
+      stat.getAttribute("data-stat"),
+    );
+    expect(stats).toEqual(["circulating", "clean-7d"]);
+    const wallets = card(container).querySelector('[data-note="wallets-not-people"]')!;
+    expect(noteWords(wallets)).toBe("Wallets, not people.");
+    expect(noteTip(wallets)).toContain("never added across chains");
+  });
+
+  it("shows no wallet total, in any figure", () => {
+    const { container } = render(view().ui);
+    const panel = card(container);
     const beside = panel.querySelector(".chart-card__beside")!.textContent;
     expect(beside).not.toMatch(/wallets/i);
     expect(beside).not.toContain("1,200");
+    const rows = [...panel.querySelectorAll("[data-supply-row]")].map((r) => r.textContent).join();
+    expect(rows).not.toMatch(/wallets/i);
   });
 
   it("shows each chain's own day when chains differ", () => {
     const { container } = render(view().ui);
-    const table = supply(container, "all").querySelectorAll("table")[0];
+    const table = card(container).querySelectorAll("table")[0];
     const base = within(table).getByText("Base").closest("tr")!;
     expect(base.textContent).toContain("2 Nov 2026");
-    expect(container.textContent).toContain("2 Nov 2026 to 3 Nov 2026 UTC");
-    expect(supply(container, "base").querySelector("time")!.textContent).toBe("2 Nov 2026 UTC");
+    expect(card(container).querySelector(".chart-card__meta time")!.textContent).toBe(
+      "2 Nov 2026 to 3 Nov 2026 UTC",
+    );
   });
 
   it("does not divide by zero on a chain with no supply", () => {
@@ -316,15 +323,16 @@ describe("journey view", () => {
       }),
     );
     const { container } = render(ui);
-    const panel = supply(container, "solana");
-    expect(panel.querySelector("h2")!.textContent).toBe(UNKNOWN_TEXT);
-    expect(panel.querySelector("[data-supply-bar]")).toBeNull();
-    expect(panel.querySelector('[data-chart="supply-bar"]')!.textContent).toContain(
+    const solana = row(container, "solana");
+    expect(solana.querySelector("[data-supply-bar]")).toBeNull();
+    expect(solana.querySelector('[data-chart="supply-bar"]')!.textContent).toContain(
       "this chain has no supply",
     );
-    const row = within(panel.querySelectorAll("table")[0]).getByText("Solana").closest("tr")!;
-    expect(row.textContent).toContain(UNKNOWN_TEXT);
-    expect(supply(container, "all").querySelector("[data-supply-bar]")).not.toBeNull();
+    const tableRow = within(card(container).querySelectorAll("table")[0])
+      .getByText("Solana")
+      .closest("tr")!;
+    expect(tableRow.textContent).toContain(UNKNOWN_TEXT);
+    expect(row(container, "all").querySelector("[data-supply-bar]")).not.toBeNull();
   });
 
   it("shows circulating only from the journey row's own day", () => {
@@ -336,23 +344,21 @@ describe("journey view", () => {
       }),
     );
     const { container } = render(ui);
-    const tempo = within(supply(container, "all").querySelectorAll("table")[0])
+    const tempo = within(card(container).querySelectorAll("table")[0])
       .getByText("Tempo")
       .closest("tr")!;
     expect(tempo.textContent).not.toContain("$320,000,000");
     expect(tempo.textContent).toContain(UNKNOWN_TEXT);
-    const stat = (value: string) =>
-      supply(container, value).querySelector('[data-stat="circulating"] [data-stat-value]')!
-        .textContent;
-    expect(stat("tempo")).toBe(UNKNOWN_TEXT);
-    expect(stat("all")).toBe(UNKNOWN_TEXT);
+    expect(
+      card(container).querySelector('[data-stat="circulating"] [data-stat-value]')!.textContent,
+    ).toBe(UNKNOWN_TEXT);
   });
 
   it("labels a segment on the bar only at or above the threshold", () => {
     const { container } = render(view().ui);
-    const panel = supply(container, "ethereum");
-    expect(panel.querySelector('[data-part="venue_dex"]')!.textContent).toBe("");
-    expect(panel.querySelector('[data-part="placed_supply"]')!.textContent).toContain("75.00%");
+    const ethereum = row(container, "ethereum");
+    expect(ethereum.querySelector('[data-part="venue_dex"]')!.textContent).toBe("");
+    expect(ethereum.querySelector('[data-part="placed_supply"]')!.textContent).toContain("75.00%");
   });
 
   it("renders the unknown text and no chart for an empty series", () => {
@@ -392,16 +398,17 @@ describe("journey view", () => {
     expect(rows.textContent).toMatch(/\$/);
   });
 
-  it("pins the start of the series, with the note in full in the popover", () => {
+  it("pins the start of the series, with the note in full in its tooltip and the card's", () => {
     const { dataset, ui } = view();
     const { container } = render(ui);
     const definitions = dataset.manifest.definitions;
     for (const value of VALUES) {
       const panel = series(container, value);
       const note = panel.querySelector('[data-note="series-start"]')!;
-      expect(note.closest("details")).toBeNull();
+      expect(note.closest("details, .tip__panel")).toBeNull();
       expect(noteWords(note)).toBe(seriesStartPin(definitions));
-      expect(panel.querySelector(".info-popover__panel")!.textContent).toContain(
+      expect(noteTip(note)).toBe(seriesStartNote(definitions));
+      expect(panel.querySelector(".chart-card__head .tip__panel")!.textContent).toContain(
         seriesStartNote(definitions),
       );
     }
@@ -426,8 +433,8 @@ describe("journey view", () => {
   });
 
   it("has no axe violations", async () => {
-    // All and one chain, as every chain's panel is the same markup, and axe is slow on the ten cards
-    // of the whole view. acceptance.mjs runs axe on every panel in a browser.
+    // All and one chain, as every chain's panel is the same markup, and axe is slow on the whole
+    // view. acceptance.mjs runs axe on every panel in a browser.
     const { dataset, ui } = view();
     const options = chainOptions(dataset.manifest.coverage.chains_included).slice(0, 2);
     const { container } = render(<main>{cloneElement(ui, { options })}</main>);

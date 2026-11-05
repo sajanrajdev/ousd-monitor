@@ -3,7 +3,6 @@ import { ChartCard } from "@/components/chart-card";
 import { ExchangeRows } from "@/components/exchange-rows";
 import { HairlineTable } from "@/components/hairline-table";
 import { PinMark, type PinnedNote } from "@/components/pinned-notes";
-import { StatusChip } from "@/components/status-chip";
 import { dayRange } from "@/lib/aggregate";
 import type { ChainOption } from "@/lib/chain-scope";
 import type { ActivityRow, Definitions, DatasetState, JourneyRow, KpiRow } from "@/lib/dataset";
@@ -45,20 +44,24 @@ export type JourneyViewProps = {
 
 const SOURCE = "Chain data and public labels";
 
-function pinnedNote({ kind, chain, text, link }: SegmentNote): PinnedNote {
+// The short words stay in view, and the note in full is a tooltip on them, with its link if it has one.
+function pinnedNote({ kind, chain, text, tip, link }: SegmentNote): PinnedNote {
+  if (!tip) return { kind, chain, text };
   return {
     kind,
     chain,
-    text: link ? (
+    text,
+    interactive: Boolean(link),
+    tip: link ? (
       <>
-        {text}{" "}
+        {tip}{" "}
         <a href={link.href} className="underline underline-offset-4">
           {link.text}
         </a>
         .
       </>
     ) : (
-      text
+      tip
     ),
   };
 }
@@ -86,7 +89,7 @@ function LegendRow({ segment, pins }: { segment: SupplySegment; pins: number[] }
         }}
       />
       <span className="chart-legend__label">
-        <span data-segment-label>{segmentLabel(segment)}</span> <StatusChip kind={segment.marker} />
+        <span data-segment-label>{segmentLabel(segment)}</span>
         {pins.map((number) => (
           <PinMark key={number} number={number} />
         ))}
@@ -176,7 +179,7 @@ function SupplyDetail({ panel, definitions }: { panel: SupplyPanel; definitions:
         Clean volume and active wallets sit beside the supply parts because they are flows, not
         slices of a balance.
       </p>
-      <ul className="info-popover__links">
+      <ul className="tip__links">
         {links.map((segment) => (
           <li key={segment.definition}>
             <a
@@ -200,24 +203,60 @@ function SupplyDetail({ panel, definitions }: { panel: SupplyPanel; definitions:
   );
 }
 
+// A row's name: "All chains" only when it is all four, as on the filter.
+function rowName(option: ChainOption): string {
+  if (option.value !== "all") return option.label;
+  return option.label === "All" ? "All chains" : "All covered";
+}
+
+// One bar for a filter option, with its name and total. Wallet counts are in the table, by chain.
+function SupplyRow({ panel }: { panel: SupplyPanel }) {
+  return (
+    <div className="supply-row" data-supply-row={panel.option.value}>
+      <p className="supply-row__head">
+        <span className="supply-row__name">{rowName(panel.option)}</span>{" "}
+        <span data-row-total>
+          {panel.bar ? formatCompact(panel.bar.journey.total_supply) : UNKNOWN_TEXT}
+        </span>
+      </p>
+      {panel.bar ? (
+        <SupplyBar
+          row={panel.bar}
+          segments={panel.segments.map(withoutEntities)}
+          pins={{}}
+          bracket={panel.option.value === "all"}
+        />
+      ) : (
+        <p>{UNKNOWN_TEXT}</p>
+      )}
+    </div>
+  );
+}
+
+// Every chain together in one view, as the page had it before the filter: the first panel's bar
+// over all of them, then one bar per chain. Its legend, figures, notes and tables are the first
+// panel's, which covers every chain. It compares chains, so the filter highlights a row and hides
+// none.
 function SupplyCard({
-  panel,
+  panels,
   definitions,
   state,
 }: {
-  panel: SupplyPanel;
+  panels: SupplyPanel[];
   definitions: Definitions;
   state: DatasetState;
 }) {
+  const [panel] = panels;
   const { chains, rows, kpis } = panel;
   const asOf = dayRange(rows.map((row) => row.day)) ?? definitions.journey_first_day;
   const pins = pinsOf(panel.notes);
+  const walletPin = panel.notes.findIndex((note) => note.kind === "wallets-not-people") + 1;
   const entities = panel.segments.flatMap((segment) => segment.entities ?? []);
   return (
     <ChartCard
+      id={CARD_ANCHORS.supply}
       takeaway={panel.heading}
       detail={<SupplyDetail panel={panel} definitions={definitions} />}
-      chip="inferred"
       source={SOURCE}
       asOf={asOf}
       definitionHref={definitionHref("placed-supply")}
@@ -225,14 +264,14 @@ function SupplyCard({
       summary={
         rows.length === 0
           ? UNKNOWN_TEXT
-          : `Where supply sits on ${scopeText(chains)}: issuer inventory, placed, DEX, lending and exchange venues, and free-floating. Circulating is everything except issuer inventory and placed.`
+          : `Where supply sits on ${scopeText(chains)}, together and per chain: issuer inventory, placed, DEX, lending and exchange venues, and free-floating. Circulating is everything except issuer inventory and placed.`
       }
       notes={panel.notes.map(pinnedNote)}
       beside={
         panel.bar ? (
           <>
             <SupplyLegend panel={panel} pins={pins} />
-            <SupplyStats panel={panel} walletPin={panel.notes.length} />
+            <SupplyStats panel={panel} walletPin={walletPin} />
           </>
         ) : null
       }
@@ -263,15 +302,12 @@ function SupplyCard({
         </>
       }
     >
-      {panel.bar ? (
-        <SupplyBar
-          row={panel.bar}
-          segments={panel.segments.map(withoutEntities)}
-          pins={Object.fromEntries(Object.entries(pins).map(([key, numbers]) => [key, numbers[0]]))}
-        />
-      ) : (
-        <p className="p-4">{UNKNOWN_TEXT}</p>
-      )}
+      <div className="supply-rows" data-supply-rows>
+        {/* The legend carries each segment's pins, so the bars don't repeat them. */}
+        {panels.map((row) => (
+          <SupplyRow key={row.option.value} panel={row} />
+        ))}
+      </div>
     </ChartCard>
   );
 }
@@ -297,7 +333,6 @@ function SeriesCard({
           <p data-full-note="series-start">{seriesStartNote(definitions)}</p>
         </>
       }
-      chip="inferred"
       source={SOURCE}
       asOf={asOf}
       definitionHref={definitionHref("placed-supply")}
@@ -309,7 +344,7 @@ function SeriesCard({
           : `Total, placed and circulating supply over time on ${scopeText(chains)}, from ${formatUtcDate(series[0].day)}.`
       }
       notes={notes}
-      beside={latest ? <SeriesLegend latest={latest} /> : null}
+      beside={latest ? <SeriesLegend /> : null}
       table={{
         caption: `Supply over time, ${scope}`,
         columns: [
@@ -338,22 +373,20 @@ export function JourneyView({
 }: JourneyViewProps) {
   return (
     <section id="supply-journey" data-section="view-a" className="card-grid">
-      <ChainPanels options={options} id={CARD_ANCHORS.supply}>
-        {(option) => (
-          <SupplyCard
-            panel={supplyPanel(option, {
-              journey,
-              activity,
-              kpis,
-              definitions,
-              exchanges,
-              config: segmentConfig,
-            })}
-            definitions={definitions}
-            state={state}
-          />
+      <SupplyCard
+        panels={options.map((option) =>
+          supplyPanel(option, {
+            journey,
+            activity,
+            kpis,
+            definitions,
+            exchanges,
+            config: segmentConfig,
+          }),
         )}
-      </ChainPanels>
+        definitions={definitions}
+        state={state}
+      />
       <ChainPanels options={options} id={CARD_ANCHORS.series}>
         {(option) => (
           <SeriesCard

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { expectedFromDataset, verifyOutput } from "@/scripts/verify-output.mjs";
 import { at, editJson, plantFile, releaseGrade, tempDir } from "./dataset-helpers";
-import { plantedFlight, plantedRealMain } from "./planted-first-screen";
+import {
+  plantedFlight,
+  plantedFooter,
+  plantedRealMain,
+  plantedReconciliationMain,
+} from "./planted-first-screen";
 
 // Each whole-page group is a file of its own, and so a worker of its own, as one worker running
 // them all ran out of memory in CI.
@@ -9,12 +14,19 @@ import { plantedFlight, plantedRealMain } from "./planted-first-screen";
 // times, which the heap of a file with hundreds of tests can't also hold. For the same reason they get
 // longer than the default, as a slower machine takes seconds over a test with several such pages.
 const WHOLE_PAGE_TIMEOUT_MS = 30_000;
-const LINE = "Independent. Not affiliated with Open Standard or Bridge.";
+// The release-grade copy, long past its 36 hours, so its detail page states it as stale.
+const RECONCILED_TRUST =
+  "Last reconciled 4 Nov 2026, 05:30 UTC. Nothing newer has reached this page, so it may be out of date.";
 
 function site({ main, methodology }: { main: string; methodology: string }) {
   const dir = tempDir();
   plantFile(dir, "index.html", main);
   plantFile(dir, "methodology/index.html", methodology);
+  plantFile(
+    dir,
+    "reconciliation/index.html",
+    methodology.replace("<main>Fine</main>", plantedReconciliationMain(RECONCILED_TRUST)),
+  );
   return dir;
 }
 
@@ -36,11 +48,11 @@ describe("the velocity chart and the chain grid", { timeout: WHOLE_PAGE_TIMEOUT_
     ];
   });
   const expected = expectedFromDataset(at(dir));
-  const main = plantedRealMain(expected, STALE, TRUST);
+  const main = plantedRealMain(expected, TRUST);
   const page = (body: string) =>
     `<!doctype html><html data-dataset-kind="real" data-dataset-version="${expected.version}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
-    <header><p>${LINE}</p></header><p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
-    <footer><p>${LINE}</p><p>Not financial advice.</p></footer></body></html>`;
+    <header><a href="/">Open USD Monitor</a></header><p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
+    ${plantedFooter(false, { fresh: null, stale: TRUST })}</body></html>`;
   const check = (body: string) =>
     verifyOutput(site({ main: page(body), methodology: page("<main>Fine</main>") }), expected);
 
@@ -77,19 +89,25 @@ describe("the velocity chart and the chain grid", { timeout: WHOLE_PAGE_TIMEOUT_
     );
   });
 
-  it("fails when the popover loses a full note, or the denominators pin leaves its legend entry", () => {
+  it("fails when the tooltip loses a full note, or the denominators pin leaves its headline row", () => {
     const full = main.replace(/<p data-full-note="velocity-denominators">.*?<\/p>/, "");
     expect(check(full)).toEqual(
       expect.arrayContaining([
         expect.stringContaining("lost the velocity-denominators note in full"),
       ]),
     );
-    const pin = main.replace(/(Headline velocity)<span class="pin">\d+<\/span>/, "$1");
+    // There's no legend: the pin sits on the first chain's headline row.
+    const pin = main.replace(
+      /(<div data-measure="headline_velocity_bps"><span class="velocity-chart__label">M)<span class="pin">\d+<\/span>/,
+      "$1",
+    );
+    expect(pin).not.toBe(main);
     expect(check(pin)).toEqual(
       expect.arrayContaining([
-        expect.stringContaining("the denominators pin isn't on the headline velocity legend"),
+        expect.stringContaining("the denominators pin isn't on the first headline velocity row"),
       ]),
     );
+    expect(main).not.toContain("data-velocity-legend");
   });
 
   it("fails on a grid cell, bar or lead marker that isn't the dataset's", () => {

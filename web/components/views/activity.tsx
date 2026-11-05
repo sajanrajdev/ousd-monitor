@@ -28,11 +28,7 @@ export type ActivityViewProps = {
 
 const SOURCE = "Chain data and public labels";
 
-const pinnedNote = ({ kind, text, chip }: ActivityNote): PinnedNote => ({
-  kind,
-  text,
-  ...(chip ? { chip } : {}),
-});
+const pinnedNote = ({ kind, text }: ActivityNote): PinnedNote => ({ kind, text });
 
 // Each note's number on the row its pin sits on, by its place in the list, as PinnedNotes counts.
 function stepPins(notes: ActivityNote[]): StepPins {
@@ -41,7 +37,7 @@ function stepPins(notes: ActivityNote[]): StepPins {
   );
 }
 
-// The notes in full, for the popover. Nothing here is the only copy of a caveat.
+// The notes in full, for the tooltip. Nothing here is the only copy of a caveat.
 function FullNotes({ notes }: { notes: Record<string, string> }) {
   return (
     <>
@@ -65,7 +61,6 @@ function WaterfallCard({ panel, state }: { panel: WaterfallPanel; state: Dataset
           <FullNotes notes={panel.fullNotes} />
         </>
       }
-      chip="inferred"
       source={SOURCE}
       asOf={panel.asOf}
       definitionHref={definitionHref("clean-volume")}
@@ -100,7 +95,6 @@ function WeeklyCard({ panel, state }: { panel: WeeklyPanel; state: DatasetState 
           <FullNotes notes={panel.fullNotes} />
         </>
       }
-      chip="inferred"
       source={SOURCE}
       asOf={panel.asOf}
       definitionHref={definitionHref("everyday-large")}

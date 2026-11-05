@@ -5,7 +5,6 @@ import { JUMPY_NOTE, VELOCITY_NOTE } from "@/lib/takeaways/caveats";
 
 type Verdict = { sentence: string; text: string; textVisible: boolean; items: string[] };
 type Note = { kind: string; chain?: string; text: string };
-type Finding = { id: string; text: string };
 
 export const PLANTED_VERDICT: Verdict = {
   sentence: "A headline.",
@@ -21,20 +20,45 @@ function escaped(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;");
 }
 
-export function plantedHeadline(verdict: Verdict = PLANTED_VERDICT): string {
-  const text = `<p data-verdict-text>${escaped(verdict.text)}</p>`;
-  const items = verdict.items.map((item) => `<li>${escaped(item)}</li>`).join("");
-  return `<p data-section="question">A question?</p><h1>${escaped(verdict.sentence)}</h1>
-    <details class="info-popover" name="info"><summary aria-label="About this reading"></summary>
-    <div class="info-popover__panel"><a href="/methodology/#verdict">How we read this</a>
-    ${verdict.textVisible ? "" : text}<ul>${items}</ul></div></details>
-    ${verdict.textVisible ? text : ""}`;
+// Ids for tooltip panels, unique on a planted page as React's are on a built one.
+let nextTipId = 0;
+const tipId = () => `tip-${(nextTipId += 1)}`;
+
+// A tooltip as components/tooltip.tsx writes it. With a link in it, it's a disclosure. Its class
+// comes before its id, so a test that slices a panel at the next `<div id="` isn't cut short.
+export function plantedTip(
+  trigger: string,
+  panel: string,
+  { interactive = /<a\s/.test(panel), icon = false, tag = "span" } = {},
+): string {
+  const id = tipId();
+  const label = icon ? ` aria-label="${trigger}"` : "";
+  const points = interactive
+    ? `aria-expanded="false" aria-controls="${id}"`
+    : `aria-describedby="${id}"`;
+  const role = interactive ? "" : ' role="tooltip"';
+  return `<${tag} class="tip" data-tip><button type="button" class="tip__trigger"${label} ${points}>${icon ? "" : trigger}</button><${tag} class="tip__panel" id="${id}"${role}>${panel}</${tag}></${tag}>`;
 }
 
-const kpiCell = (value: string) => `<div><dt>A label</dt><dd><span data-kpi-value>${value}</span>
-  <span class="status-chip" data-kind="fact"><span aria-hidden="true">F</span><span class="sr-only">Fact</span></span></dd>
-  <dd><details class="info-popover" name="info"><summary aria-label="About: A label"></summary>
-  <div class="info-popover__panel"><p data-kpi-note>A note.</p><a href="/methodology/#velocity">Definition</a></div></details>
+// An "i" button's tooltip, as a card's or a KPI's head has it.
+export const plantedInfoTip = (label: string, panel: string) =>
+  plantedTip(label, panel, { icon: true, interactive: true, tag: "div" });
+
+export function plantedHeadline(verdict: Verdict = PLANTED_VERDICT): string {
+  const text = `<span data-verdict-text>${escaped(verdict.text)}</span>`;
+  const items = verdict.items.map((item) => `<span>${escaped(item)}</span>`).join("");
+  return `<p data-section="question">A question?</p><div class="verdict-block__head"><h1>${escaped(verdict.sentence)}</h1>
+    ${plantedTip(
+      "How we read this",
+      `${verdict.textVisible ? "" : text}${items}<a href="/methodology/#verdict">How the reading is made</a>`,
+    )}</div>
+    ${verdict.textVisible ? `<p>${text}</p>` : ""}`;
+}
+
+const kpiCell = (
+  value: string,
+) => `<div><dt>A label</dt><dd><span data-kpi-value>${value}</span></dd>
+  <dd>${plantedInfoTip("About: A label", '<p data-kpi-note>A note.</p><a href="/methodology/#velocity">Definition</a>')}
   <noscript><p>A note. <a href="/methodology/#velocity">Definition</a></p></noscript></dd></div>`;
 
 export function plantedKpis(
@@ -44,33 +68,43 @@ export function plantedKpis(
   return `<dl>${values.map(kpiCell).join("")}</dl><p>${scope}</p>`;
 }
 
-export const PLANTED_FINDING_TARGET = "card";
+// The trust row's link to its own page, where the disclosure used to be.
+export const PLANTED_TRUST_LINK = '<a href="/reconciliation/">Reconciliation detail</a>';
 
-// All four on the one planted card, so a test can plant one fault in them.
-export const PLANTED_FINDINGS: Finding[] = Array(4).fill({ id: PLANTED_FINDING_TARGET, text: "T" });
+export const PLANTED_INDEPENDENCE = "Independent. Not affiliated with Open Standard or Bridge.";
 
-// Each links to a planted card, and reads as that card's heading and marker.
-export function plantedFindings(
-  frameWord: string | null,
-  findings: Finding[] = PLANTED_FINDINGS,
+// The footer's status as components/trust-strip.tsx writes it: "Reconciled" only when the build
+// passed, with the dated sentence as its tooltip and the stale text beside it to swap to.
+export function plantedFooterStatus(
+  passing: boolean,
+  trustLine: { fresh: string | null; stale: string },
 ): string {
-  const word = frameWord ? `<strong>${frameWord}</strong>` : "";
-  const edge = frameWord ? ` data-frame="${frameWord}"` : "";
-  const links = findings.map(
-    ({ id, text }) => `<li><a href="#${id}" class="finding" data-finding-link${edge}>
-    <span class="finding__text">${text}</span>
-    <span class="finding__marks"><span class="status-chip" data-kind="fact">F</span>${word}</span></a></li>`,
-  );
-  return `<section data-section="findings"><ul>${links.join("")}</ul></section>`;
+  const stale = `<span>▲ <a href="/reconciliation/">${escaped(trustLine.stale)}</a></span>`;
+  const fresh = passing
+    ? `<span data-reconciled><span class="tip" data-tip><a href="/reconciliation/" class="tip__trigger" aria-describedby="footer-tip"><span aria-hidden="true">✓</span> Reconciled</a><span id="footer-tip" class="tip__panel" role="tooltip">${escaped(trustLine.fresh ?? "")}</span></span></span>`
+    : "";
+  return `<p data-footer-status><span class="freshness-text"><span class="freshness-text__fresh">${fresh}</span><span class="freshness-text__stale">${stale}</span></span></p>`;
 }
 
-export const PLANTED_LEGEND = `<div data-section="marker-legend"><p>F Fact, I Inferred, E Estimate</p>
-  <details class="info-popover" name="info"><summary aria-label="What the markers mean"></summary>
-  <div class="info-popover__panel"><a href="/methodology/#fact-estimate-opinion">Fact, estimate and opinion</a></div></details></div>`;
+export function plantedFooter(
+  passing: boolean,
+  trustLine: { fresh: string | null; stale: string },
+  extra = "",
+): string {
+  return `<footer><p>${PLANTED_INDEPENDENCE}</p>${plantedFooterStatus(passing, trustLine)}
+    <nav><a href="/methodology">Methodology</a></nav><p>Not financial advice.</p>${extra}</footer>`;
+}
 
-export const PLANTED_TRUST_DETAIL = `<details class="accordion"><summary>Reconciliation detail</summary>
-  <a href="/methodology/#reconciliation">What this covers</a>
-  <p>It doesn't verify placed share or velocity.</p></details>`;
+export const PLANTED_TRUST_CAVEAT = "It doesn't verify placed share or velocity.";
+
+// The reconciliation page's main, as app/reconciliation/page.tsx writes it.
+export function plantedReconciliationMain(stateLine: string): string {
+  return `<main><p><a href="/">Back to the dashboard</a></p><h1>Reconciliation</h1>
+    <section data-section="reconciliation"><p class="trust-strip__status">${escaped(stateLine)}</p>
+    <p><a href="/methodology/#reconciliation">What this covers</a></p>
+    <p>Reconciliation compares mints minus burns. ${PLANTED_TRUST_CAVEAT}</p>
+    <table><tbody><tr><td>Tempo</td></tr></tbody></table></section></main>`;
+}
 
 // The page's serialized copy, as Next writes it into the page, with an id no other chunk has.
 let nextFlightId = 0x1000;
@@ -126,10 +160,11 @@ export type PlantedBand = {
 };
 
 // The band as the card draws it, and its figures as the client component's props and the table's row.
+// The card's one legend is the first option's, so only its line is drawn; each chain's is in the table.
 export function plantedBands(bands: PlantedBand[], { withLines = true } = {}): string {
   const lines = bands
     .filter(() => withLines)
-    .filter(({ amount }) => BigInt(amount) > 0n)
+    .filter(({ key, amount }) => key === "all" && BigInt(amount) > 0n)
     .map(({ key, line }) => `<p data-exchange-linked="${key}">${line}</p>`)
     .join("");
   const rows = bands
@@ -166,16 +201,16 @@ export function plantedExchangeRows(
     .join("");
 }
 
+export const PLANTED_CARD = { id: "card", text: "T" };
+
 export function plantedCard(
   frameWord: string | null,
-  { id, text }: Finding = PLANTED_FINDINGS[0],
+  { id, text }: { id: string; text: string } = PLANTED_CARD,
 ): string {
   const edge = frameWord ? ` data-frame="${frameWord}"` : "";
   const word = frameWord ? `\n  · <strong>${frameWord}</strong>` : "";
   return `<section id="${id}" class="chart-card"${edge}><div class="chart-card__head"><h2>${text}</h2>
-  <span class="status-chip" data-kind="fact">F</span>
-  <details class="info-popover" name="info"><summary aria-label="About: T"></summary>
-  <div class="info-popover__panel"><p>Source: S</p><a href="/methodology/#velocity">Definition</a></div></details></div>
+  ${plantedInfoTip("About: T", '<p>Source: S</p><a href="/methodology/#velocity">Definition</a>')}</div>
   <table></table>
   <p class="chart-card__meta">As of <time datetime="2026-11-03">3 Nov</time>${word}</p>
   <noscript><p class="chart-card__source-note">Source: S · <a href="/methodology/#velocity">Definition</a></p></noscript></section>`;
@@ -194,7 +229,7 @@ export type PlantedPart = {
   bandLine: string | null;
   pins: string[];
 };
-type PlantedPanelNote = { kind: string; chain?: string; words: string };
+type PlantedPanelNote = { kind: string; chain?: string; words: string; tip?: string };
 type PlantedTable = {
   columns: { key: string; label: string }[];
   rows: Record<string, string>[];
@@ -204,6 +239,7 @@ export type PlantedSupplyPanel = {
   heading: string;
   key: string | null;
   total: string | null;
+  rowTotal: string;
   parts: PlantedPart[];
   stats: { key: string; label: string; value: string }[];
   notes: PlantedPanelNote[];
@@ -218,7 +254,6 @@ export type PlantedSeriesPanel = {
   notes: PlantedPanelNote[];
   fullNote: string;
   rows: Record<string, string>[];
-  latest: string[];
 };
 const SERIES_TABLE = [
   ["day", "Day"],
@@ -241,19 +276,24 @@ function plantedTable({ columns, rows }: PlantedTable, caption = ""): string {
     .join("")}</tbody></table>`;
 }
 
-function plantedPanelNotes(notes: PlantedPanelNote[]): string {
+// A note's short words in view, with the note in full as a tooltip on them where it has one.
+export function plantedPanelNotes(notes: PlantedPanelNote[]): string {
   const items = notes.map(
-    ({ kind, chain, words }, index) =>
-      `<li data-note="${kind}"${chain ? ` data-chain="${chain}"` : ""}><span class="pin" aria-hidden="true">${index + 1}</span><p>${escaped(words)}</p></li>`,
+    ({ kind, chain, words, tip }, index) =>
+      `<li data-note="${kind}"${chain ? ` data-chain="${chain}"` : ""}><span class="pin" aria-hidden="true">${index + 1}</span><p>${tip ? plantedTip(escaped(words), escaped(tip)) : escaped(words)}</p></li>`,
   );
   return `<ol data-pinned-notes>${items.join("")}</ol>`;
 }
 
-function plantedPanelCard(heading: string, inner: string, panelText: string, toggle: string) {
-  return `<section class="chart-card"><div class="chart-card__head"><h2>${escaped(heading)}</h2>
-  <span class="status-chip" data-kind="fact">F</span>
-  <details class="info-popover" name="info"><summary aria-label="About"></summary>
-  <div class="info-popover__panel"><p>Source: S</p><a href="/methodology/#velocity">Definition</a>${panelText}</div></details></div>
+function plantedPanelCard(
+  heading: string,
+  inner: string,
+  panelText: string,
+  toggle: string,
+  id = "",
+) {
+  return `<section${id ? ` id="${id}"` : ""} class="chart-card"><div class="chart-card__head"><h2>${escaped(heading)}</h2>
+  ${plantedInfoTip("About", `<p>Source: S</p><a href="/methodology/#velocity">Definition</a>${panelText}`)}</div>
   ${inner}<details class="data-toggle"><summary>Table</summary>${toggle}</details>
   <p class="chart-card__meta">As of <time datetime="2026-11-03">3 Nov</time></p>
   <noscript><p class="chart-card__source-note">Source: S · <a href="/methodology/#velocity">Definition</a></p></noscript></section>`;
@@ -282,38 +322,45 @@ function plantedLegend({ key, parts }: PlantedSupplyPanel): string {
   return `<ul data-supply-legend>${rows.join("")}</ul>`;
 }
 
-// Each filter option's supply card and step line, as the views write them.
+// The supply card, as the view writes it: one card, a bar row per filter option, and the first
+// option's legend, figures, notes and tables.
 export function plantedSupplyPanels(
   panels: PlantedSupplyPanel[],
   id: string,
   rowsHtml: string,
 ): string {
-  const items = panels.map((panel) => {
-    const stats = panel.stats
-      .map(
-        ({ key, label, value }) =>
-          `<div data-stat="${key}"><dt>${label}</dt><dd data-stat-value>${value}</dd></div>`,
-      )
-      .join("");
-    const entities = panel.entities > 0 ? `<div data-labels-table><ul>${rowsHtml}</ul></div>` : "";
-    const walletsTable = plantedTable(
-      { columns: WALLET_TABLE, rows: panel.kpiRows },
-      `Last 7 days. ${PLANTED_WALLETS_CAPTION}`,
-    );
-    return `<div data-chain-panel="${panel.value}">${plantedPanelCard(
-      panel.heading,
-      `${plantedSupplyBar(panel)}${plantedLegend(panel)}<dl>${stats}</dl>${plantedPanelNotes(panel.notes)}`,
-      `<p data-full-note="placed">${escaped(panel.placedNote)}</p>`,
-      `${plantedTable(panel.table)}${walletsTable}${entities}`,
-    )}</div>`;
-  });
-  return `<div id="${id}" class="chain-panels">${items.join("")}</div>`;
+  if (panels.length === 0) return "";
+  const [all] = panels;
+  const rows = panels
+    .map(
+      (panel) =>
+        `<div data-supply-row="${panel.value}"><p><span class="supply-row__name">${panel.value}</span> <span data-row-total>${panel.rowTotal}</span></p>${plantedSupplyBar(panel)}</div>`,
+    )
+    .join("");
+  const stats = all.stats
+    .map(
+      ({ key, label, value }) =>
+        `<div data-stat="${key}"><dt>${label}</dt><dd data-stat-value>${value}</dd></div>`,
+    )
+    .join("");
+  const entities = all.entities > 0 ? `<div data-labels-table><ul>${rowsHtml}</ul></div>` : "";
+  const walletsTable = plantedTable(
+    { columns: WALLET_TABLE, rows: all.kpiRows },
+    `Last 7 days. ${PLANTED_WALLETS_CAPTION}`,
+  );
+  return plantedPanelCard(
+    all.heading,
+    `<div class="chart-area" aria-hidden="true"><div data-supply-rows>${rows}</div></div>${plantedLegend(all)}<dl>${stats}</dl>${plantedPanelNotes(all.notes)}`,
+    `<p data-full-note="placed">${escaped(all.placedNote)}</p>`,
+    `${plantedTable(all.table)}${walletsTable}${entities}`,
+    id,
+  );
 }
 
 export function plantedSeriesPanels(panels: PlantedSeriesPanel[], id: string): string {
   const items = panels.map((panel) => {
-    const lines = panel.latest
-      .map((figure) => `<li data-series-line><span data-series-value>${figure}</span></li>`)
+    const lines = ["Total", "Circulating", "Placed"]
+      .map((line) => `<li data-series-line>${line}</li>`)
       .join("");
     return `<div data-chain-panel="${panel.value}">${plantedPanelCard(
       panel.heading,
@@ -325,7 +372,7 @@ export function plantedSeriesPanels(panels: PlantedSeriesPanel[], id: string): s
   return `<div id="${id}" class="chain-panels">${items.join("")}</div>`;
 }
 
-type PlantedActivityNote = { kind: string; words: string; step?: string; chip?: string };
+type PlantedActivityNote = { kind: string; words: string; step?: string };
 export type PlantedWaterfallPanel = {
   value: string;
   heading: string;
@@ -362,10 +409,10 @@ const WEEK_TABLE = [
 ].map(([key, label]) => ({ key, label }));
 
 function plantedActivityNotes(notes: PlantedActivityNote[]): string {
-  const items = notes.map(({ kind, words, chip }, index) => {
-    const marker = chip ? `<span class="status-chip" data-kind="${chip}">F</span> ` : "";
-    return `<li data-note="${kind}"><span class="pin" aria-hidden="true">${index + 1}</span><p>${marker}${escaped(words)}</p></li>`;
-  });
+  const items = notes.map(
+    ({ kind, words }, index) =>
+      `<li data-note="${kind}"><span class="pin" aria-hidden="true">${index + 1}</span><p>${escaped(words)}</p></li>`,
+  );
   return `<ol data-pinned-notes>${items.join("")}</ol>`;
 }
 
@@ -418,7 +465,7 @@ export function plantedWeeklyPanels(panels: PlantedWeeklyPanel[], id: string): s
 export type PlantedVelocity = {
   heading: string;
   bars: string[];
-  notes: { kind: string; chain?: string; words: string }[];
+  notes: PlantedPanelNote[];
   fullWarnings: { chain: string; text: string }[];
 };
 export type PlantedGrid = {
@@ -430,6 +477,8 @@ export type PlantedGrid = {
 
 // The velocity card and the chain grid's card, as the views write them.
 export function plantedVelocity(velocity: PlantedVelocity, id: string): string {
+  const denominators =
+    velocity.notes.findIndex((note) => note.kind === "velocity-denominators") + 1;
   const groups = new Map<string, string[]>();
   for (const bar of velocity.bars) {
     const [, chain, measure, value, width] = /^(\w+):(\w+)=(.*)@(.*)$/.exec(bar)!;
@@ -437,9 +486,16 @@ export function plantedVelocity(velocity: PlantedVelocity, id: string): string {
       width === "null" || width === "0"
         ? ""
         : `<span class="velocity-chart__bar" data-width="${width}"></span>`;
+    // The denominators note's pin sits on the first chain's headline row, as there's no legend.
+    const pin =
+      groups.size === 0 || (groups.size === 1 && groups.has(chain))
+        ? measure === "headline_velocity_bps"
+          ? `<span class="pin">${denominators}</span>`
+          : ""
+        : "";
     groups.set(chain, [
       ...(groups.get(chain) ?? []),
-      `<div data-measure="${measure}">${drawn}<span data-velocity-value>${value}</span></div>`,
+      `<div data-measure="${measure}"><span class="velocity-chart__label">M${pin}</span>${drawn}<span data-velocity-value>${value}</span></div>`,
     ]);
   }
   const pinOf = (chain: string) => {
@@ -452,15 +508,7 @@ export function plantedVelocity(velocity: PlantedVelocity, id: string): string {
         `<div data-velocity-chain="${chain}"><p class="velocity-chart__name">${chain}${pinOf(chain)}</p>${rows.join("")}</div>`,
     )
     .join("");
-  const notes = velocity.notes
-    .map(
-      ({ kind, chain, words }, index) =>
-        `<li data-note="${kind}"${chain ? ` data-chain="${chain}"` : ""}><span class="pin" aria-hidden="true">${index + 1}</span><p>${escaped(words)}</p></li>`,
-    )
-    .join("");
-  const denominators =
-    velocity.notes.findIndex((note) => note.kind === "velocity-denominators") + 1;
-  const legend = `<ul><li data-legend-measure="headline_velocity_bps">Headline velocity<span class="pin">${denominators}</span></li></ul>`;
+  const notes = plantedPanelNotes(velocity.notes);
   const fullNotes = `<p data-full-note="velocity-denominators">${escaped(VELOCITY_NOTE)}</p><p data-full-note="velocity-jumpy">${escaped(JUMPY_NOTE)}</p>`;
   const full = velocity.fullWarnings
     .map(
@@ -470,7 +518,7 @@ export function plantedVelocity(velocity: PlantedVelocity, id: string): string {
     .join("");
   return `<div id="${id}">${plantedPanelCard(
     velocity.heading,
-    `<div class="chart-area" aria-hidden="true">${legend}${chart}</div><ol data-pinned-notes>${notes}</ol>`,
+    `<div class="chart-area" aria-hidden="true">${chart}</div>${notes}`,
     `${fullNotes}${full}`,
     `<table><caption>Velocity. Wallets, not people.</caption></table>`,
   )}</div>`;
@@ -504,13 +552,15 @@ export function plantedFilter(options: { value: string; label: string }[]): stri
   return `<div class="chain-filter" data-section="chain-filter"><fieldset>${inputs.join("")}</fieldset></div>`;
 }
 
-// A whole real main page, from what verify-output expects of a dataset.
+// A whole real main page, from what verify-output expects of a dataset. The trust row is at the
+// top only on a build that didn't pass.
 export function plantedRealMain(
   expected: {
     verdict: Verdict;
+    passing: boolean;
+    headStale: string;
     kpiScope: string;
     kpiValues: string[];
-    findings: Finding[];
     essentialNotes: Note[];
     exchangeRows: Parameters<typeof plantedExchangeRows>[0];
     bands: PlantedBand[];
@@ -522,29 +572,21 @@ export function plantedRealMain(
     velocity: PlantedVelocity;
     grid: PlantedGrid;
   },
-  staleNote: string,
   staleTrust: string,
 ): string {
-  const own: string[] = [
-    CARD_ANCHORS.supply,
-    CARD_ANCHORS.waterfall,
-    CARD_ANCHORS.weekly,
-    CARD_ANCHORS.chainRoles,
-  ];
-  const others = expected.findings.filter(({ id }) => !own.includes(id));
-  const roles = expected.findings.find(({ id }) => id === CARD_ANCHORS.chainRoles)!;
-  return `<main><section data-section="verdict">${plantedHeadline(expected.verdict)}<p>${staleNote}</p></section>
+  const trust = expected.passing
+    ? ""
+    : `<section data-section="trust-strip">${staleTrust}${PLANTED_TRUST_LINK}</section>`;
+  return `<main>${trust}<section data-section="verdict">${plantedHeadline(expected.verdict)}<p>${expected.headStale}</p></section>
     <section data-section="kpi-row">${plantedKpis(expected.kpiScope, expected.kpiValues)}</section>
-    <section data-section="trust-strip">${staleTrust}${PLANTED_TRUST_DETAIL}</section>
-    ${plantedFindings(null, expected.findings)}${PLANTED_LEGEND}${plantedNotes(expected.essentialNotes)}
+    ${plantedNotes(expected.essentialNotes)}
     <div class="dashboard">${plantedFilter(expected.filter)}
     ${plantedSupplyPanels(expected.supplyPanels, CARD_ANCHORS.supply, plantedExchangeRows(expected.exchangeRows))}
     ${plantedSeriesPanels(expected.seriesPanels, CARD_ANCHORS.series)}
     ${plantedWaterfallPanels(expected.waterfallPanels, CARD_ANCHORS.waterfall)}
     ${plantedWeeklyPanels(expected.weeklyPanels, CARD_ANCHORS.weekly)}
     ${plantedVelocity(expected.velocity, CARD_ANCHORS.velocity)}
-    ${plantedGrid(expected.grid, roles.text, CARD_ANCHORS.chainRoles)}</div>
+    ${plantedGrid(expected.grid, "A heading.", CARD_ANCHORS.chainRoles)}</div>
     ${plantedFlight(expected.exchangeRows.map(plantedRowFlight))}
-    ${plantedBands(expected.bands, { withLines: false })}
-    ${others.map((finding) => plantedCard(null, finding)).join("")}</main>`;
+    ${plantedBands(expected.bands, { withLines: false })}</main>`;
 }

@@ -2,15 +2,15 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { locateDataset } from "@/lib/dataset/load";
-import { CARD_ANCHORS, TOKEN_CONTRACTS } from "@/lib/definitions";
+import { TOKEN_CONTRACTS } from "@/lib/definitions";
 import { expectedFromDataset, verifyOutput } from "@/scripts/verify-output.mjs";
 import { at, copySample, editJson, plantFile, releaseGrade, tempDir } from "./dataset-helpers";
 import {
-  PLANTED_FINDINGS,
+  PLANTED_INDEPENDENCE,
   PLANTED_KPI_SCOPE,
   PLANTED_KPI_VALUES,
-  PLANTED_LEGEND,
-  PLANTED_TRUST_DETAIL,
+  PLANTED_TRUST_CAVEAT,
+  PLANTED_TRUST_LINK,
   PLANTED_VERDICT,
   type PlantedBand,
   type PlantedRow,
@@ -22,21 +22,25 @@ import {
   plantedCard,
   plantedExchangeRows,
   plantedFlight,
-  plantedRowFlight,
-  plantedFindings,
+  plantedFooter,
   plantedHeadline,
   plantedKpis,
   plantedNotes,
   plantedNotesFlight,
+  plantedReconciliationMain,
+  plantedRowFlight,
+  plantedTip,
 } from "./planted-first-screen";
 
-const LINE = "Independent. Not affiliated with Open Standard or Bridge.";
+const LINE = PLANTED_INDEPENDENCE;
 const BLOCKED = JSON.parse(readFileSync("scripts/blocked-names.json", "utf8")) as string[];
 const CARD = plantedCard("Sample");
 
 const STALE_NOTE = "Data from 4 Nov. Nothing newer has reached this page.";
 const STALE_TRUST = "Last reconciled 4 Nov. Nothing newer has reached this page.";
 const FRESH_TRUST = "Supply reconciled on all 4 chains as of 4 Nov 2026, 05:30 UTC";
+// A passing build's as-of line, once stale, says when it was reconciled, as no trust row is above.
+const HEAD_STALE = "Data from 4 Nov. Last reconciled 4 Nov. Nothing newer has reached this page.";
 
 const sampleExpected = {
   kind: "sample",
@@ -49,12 +53,13 @@ const sampleExpected = {
   blockedNames: BLOCKED,
   tokenContracts: TOKEN_CONTRACTS,
   freshness: "stale",
+  passing: false,
   asOfLine: { fresh: null, stale: STALE_NOTE },
+  headStale: STALE_NOTE,
   trustLine: { fresh: "Not reconciled", stale: "Not reconciled" },
   verdict: PLANTED_VERDICT,
   kpiScope: PLANTED_KPI_SCOPE,
   kpiValues: PLANTED_KPI_VALUES,
-  findings: PLANTED_FINDINGS,
   essentialNotes: [] as { kind: string; chain?: string; text: string }[],
   exchangeRows: [] as PlantedRow[],
   bands: [] as PlantedBand[],
@@ -78,40 +83,81 @@ const realExpected = {
 const freshRealExpected = {
   ...realExpected,
   freshness: "fresh",
+  passing: true,
   asOfLine: { fresh: "Data as of 3 Nov 2026 UTC.", stale: STALE_NOTE },
+  headStale: HEAD_STALE,
   trustLine: { fresh: FRESH_TRUST, stale: STALE_TRUST },
 };
+
+const REPORTS = '<a href="https://example.com/r" rel="noopener noreferrer">Reports</a>';
+const SAMPLE_FOOTER = plantedFooter(false, sampleExpected.trustLine, REPORTS);
+const REAL_FOOTER = plantedFooter(false, realExpected.trustLine, REPORTS);
+const FRESH_FOOTER = plantedFooter(true, freshRealExpected.trustLine, REPORTS);
 
 function page(
   body: string,
   attrs = 'data-dataset-kind="sample" data-dataset-version="20261104T060000Z" data-frame="Sample" data-freshness="stale"',
   title = "[Sample] Open USD Monitor",
   head = '<meta name="robots" content="noindex, nofollow"/>',
+  footer = SAMPLE_FOOTER,
 ) {
   return `<!doctype html><html ${attrs}><head><title>${title}</title>${head}</head><body>
-    <header><p>${LINE}</p></header>
+    <header><a href="/">Open USD Monitor</a></header>
     <aside data-dataset-banner>Sample data. Nothing here is real.</aside>
     <p data-stale-note>${STALE_NOTE}</p>
     ${plantedFlight([["$", "main", null, {}]])}
     ${body}
-    <footer><p>${LINE}</p><p>Not financial advice.</p>
-    <a href="https://example.com/r" rel="noopener noreferrer">Reports</a></footer></body></html>`;
+    ${footer}</body></html>`;
 }
 
-const MAIN = `<main><section data-section="verdict">${plantedHeadline()}
-  <span class="status-chip" data-kind="opinion">Sample, not a finding</span><p>${STALE_NOTE}</p></section>
+const MAIN = `<main><section data-section="trust-strip">Not reconciled${PLANTED_TRUST_LINK}</section>
+  <section data-section="verdict">${plantedHeadline()}
+  <p data-verdict-frame>Sample, not a finding.</p><p>${STALE_NOTE}</p></section>
   <section data-section="kpi-row"><strong>Sample</strong>${plantedKpis()}</section>
-  <section data-section="trust-strip">Not reconciled${PLANTED_TRUST_DETAIL}</section>
-  ${plantedFindings("Sample")}${PLANTED_LEGEND}${CARD}</main>`;
+  ${CARD}</main>`;
 
-function site(overrides: { main?: string; methodology?: string; extra?: [string, string][] } = {}) {
-  const dir = tempDir();
-  plantFile(dir, "index.html", overrides.main ?? page(MAIN));
-  plantFile(
-    dir,
-    "methodology/index.html",
-    overrides.methodology ?? page("<main>Methodology</main>"),
+// The detail page, in the same frame, state and footer as the methodology page planted beside it, so
+// a test that changes only that page or the main page leaves it right.
+function reconciliationLike(methodology: string): string {
+  const attrs = /<html ([^>]*)>/.exec(methodology)?.[1] ?? "";
+  const footer = /<footer>[^]*<\/footer>/.exec(methodology)?.[0] ?? SAMPLE_FOOTER;
+  const frame = /data-frame="(\w+)"/.exec(attrs)?.[1];
+  const line = attrs.includes('data-dataset-kind="real"')
+    ? attrs.includes('data-freshness="fresh"')
+      ? `${FRESH_TRUST} ${STALE_TRUST}`
+      : STALE_TRUST
+    : "Not reconciled";
+  const html = page(
+    plantedReconciliationMain(line),
+    attrs,
+    frame ? `[${frame}] Open USD Monitor` : "Open USD Monitor",
+    frame ? '<meta name="robots" content="noindex, nofollow"/>' : "",
+    footer,
   );
+  return frame
+    ? html
+    : html.replace("<aside data-dataset-banner>Sample data. Nothing here is real.</aside>", "");
+}
+
+function site(
+  overrides: {
+    main?: string;
+    methodology?: string;
+    reconciliation?: string | null;
+    extra?: [string, string][];
+  } = {},
+) {
+  const dir = tempDir();
+  const methodology = overrides.methodology ?? page("<main>Methodology</main>");
+  plantFile(dir, "index.html", overrides.main ?? page(MAIN));
+  plantFile(dir, "methodology/index.html", methodology);
+  if (overrides.reconciliation !== null) {
+    plantFile(
+      dir,
+      "reconciliation/index.html",
+      overrides.reconciliation ?? reconciliationLike(methodology),
+    );
+  }
   for (const [path, content] of overrides.extra ?? []) plantFile(dir, path, content);
   return dir;
 }
@@ -123,19 +169,21 @@ function mainWith(body: string) {
 const realAttrs =
   'data-dataset-kind="real" data-dataset-version="20261104T060000Z" data-freshness="stale"';
 const REAL_HEADLINE = plantedHeadline(realExpected.verdict);
-const REAL_REST = `<section data-section="kpi-row">${plantedKpis()}</section>
-  ${plantedFindings(null)}${PLANTED_LEGEND}${plantedCard(null)}`;
-const REAL_MAIN = `<main><section data-section="verdict">${REAL_HEADLINE}<p>${STALE_NOTE}</p></section>
-  <section data-section="trust-strip">${STALE_TRUST}${PLANTED_TRUST_DETAIL}</section>${REAL_REST}</main>`;
-const FRESH_MAIN = `<main><section data-section="verdict">${REAL_HEADLINE}<p>Data as of 3 Nov 2026 UTC.</p><p>${STALE_NOTE}</p></section>
-  <section data-section="trust-strip">${FRESH_TRUST} ${STALE_TRUST}${PLANTED_TRUST_DETAIL}</section>${REAL_REST}</main>`;
+const REAL_REST = `<section data-section="kpi-row">${plantedKpis()}</section>${plantedCard(null)}`;
+const REAL_MAIN = `<main><section data-section="trust-strip">${STALE_TRUST}${PLANTED_TRUST_LINK}</section>
+  <section data-section="verdict">${REAL_HEADLINE}<p>${STALE_NOTE}</p></section>${REAL_REST}</main>`;
+// A passing build: no trust row at the top, and its as-of line carries the reconciled time.
+const FRESH_MAIN = `<main><section data-section="verdict">${REAL_HEADLINE}<p>Data as of 3 Nov 2026 UTC.</p><p>${HEAD_STALE}</p></section>${REAL_REST}</main>`;
 
-function realPage(body: string) {
-  return page(body, realAttrs, "Open USD Monitor", "").replace(
+function realPage(body: string, footer = REAL_FOOTER) {
+  return page(body, realAttrs, "Open USD Monitor", "", footer).replace(
     "<aside data-dataset-banner>Sample data. Nothing here is real.</aside>",
     "",
   );
 }
+
+const freshPage = (body: string) =>
+  realPage(body, FRESH_FOOTER).replace('data-freshness="stale"', 'data-freshness="fresh"');
 
 describe("verifyOutput", () => {
   it("passes a good sample site", () => {
@@ -151,9 +199,10 @@ describe("verifyOutput", () => {
   });
 
   it("passes a good real site, fresh", () => {
-    const fresh = (body: string) =>
-      realPage(body).replace('data-freshness="stale"', 'data-freshness="fresh"');
-    const dir = site({ main: fresh(FRESH_MAIN), methodology: fresh("<main>Methodology</main>") });
+    const dir = site({
+      main: freshPage(FRESH_MAIN),
+      methodology: freshPage("<main>Methodology</main>"),
+    });
     expect(verifyOutput(dir, freshRealExpected)).toEqual([]);
   });
 
@@ -163,45 +212,68 @@ describe("verifyOutput", () => {
     expect(verifyOutput(dir, sampleExpected)).toContain("methodology/index.html: missing");
   });
 
-  it("fails with no independence line", () => {
+  it("fails with no reconciliation page", () => {
+    const problems = verifyOutput(site({ reconciliation: null }), sampleExpected);
+    expect(problems).toContain("reconciliation/index.html: missing");
+  });
+
+  it("fails with no independence line, on every page", () => {
     const html = page(MAIN).replaceAll(LINE, "Something else");
     const problems = verifyOutput(site({ main: html }), sampleExpected);
-    expect(problems).toContain("index.html: no independence line in the header");
     expect(problems).toContain("index.html: no independence line in the footer");
+    expect(problems).not.toContain("methodology/index.html: no independence line in the footer");
+    const elsewhere = verifyOutput(
+      site({ methodology: page("<main>Methodology</main>").replaceAll(LINE, "Else") }),
+      sampleExpected,
+    );
+    expect(elsewhere).toContain("methodology/index.html: no independence line in the footer");
+    expect(elsewhere).toContain("reconciliation/index.html: no independence line in the footer");
+  });
+
+  it("no longer needs the independence line in the header, which keeps only the name", () => {
+    expect(page(MAIN)).not.toMatch(new RegExp(`<header>[^]*${LINE}[^]*</header>`));
+    expect(verifyOutput(site(), sampleExpected)).toEqual([]);
   });
 
   it.each([
+    ["gone", (html: string) => html.replace(`<footer><p>${LINE}</p>`, "<footer>")],
     [
-      "header",
-      (html: string) => html.replace(`<header><p>${LINE}</p></header>`, "<header></header>"),
-    ],
-    [
-      "header",
+      "in a details",
       (html: string) =>
         html.replace(
-          `<header><p>${LINE}</p></header>`,
-          `<header><details><summary>More</summary><p>${LINE}</p></details></header>`,
+          `<footer><p>${LINE}</p>`,
+          `<footer><details><summary>More</summary><p>${LINE}</p></details>`,
         ),
     ],
     [
-      "header",
+      "in a tooltip",
       (html: string) =>
-        html.replace(`<header><p>${LINE}</p></header>`, `<header><p hidden>${LINE}</p></header>`),
+        html.replace(`<footer><p>${LINE}</p>`, `<footer>${plantedTip("About", LINE)}`),
     ],
-    ["footer", (html: string) => html.replace(`<footer><p>${LINE}</p>`, "<footer>")],
     [
-      "footer",
+      "in a noscript",
       (html: string) =>
         html.replace(`<footer><p>${LINE}</p>`, `<footer><noscript><p>${LINE}</p></noscript>`),
     ],
     [
-      "footer",
+      "visually hidden",
       (html: string) =>
         html.replace(`<footer><p>${LINE}</p>`, `<footer><p class="sr-only">${LINE}</p>`),
     ],
-  ])("checks the independence line on its own in the %s", (where, change) => {
+    [
+      "hidden",
+      (html: string) => html.replace(`<footer><p>${LINE}</p>`, `<footer><p hidden>${LINE}</p>`),
+    ],
+  ])("fails with the footer's independence line %s", (_name, change) => {
     const problems = verifyOutput(site({ main: change(page(MAIN)) }), sampleExpected);
-    expect(problems).toContain(`index.html: no independence line in the ${where}`);
+    expect(problems).toContain("index.html: no independence line in the footer");
+  });
+
+  it("fails with no methodology link in the footer", () => {
+    const html = page(MAIN).replace('<nav><a href="/methodology">Methodology</a></nav>', "");
+    expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
+      "index.html: no methodology link in the footer",
+    );
   });
 
   it('fails with "not financial advice" only in a details', () => {
@@ -258,9 +330,27 @@ describe("verifyOutput", () => {
         'a card has no "Sample" beside its as-of time',
       ],
       [
-        "no opinion swap",
-        (html: string) => html.replace("Sample, not a finding", "Our reading"),
-        'the verdict chip doesn\'t say "Sample, not a finding"',
+        "no frame words on the verdict",
+        (html: string) => html.replace("Sample, not a finding.", "Our reading"),
+        'the verdict doesn\'t say "Sample, not a finding." in view',
+      ],
+      [
+        "the frame words back in a marker chip",
+        (html: string) =>
+          html.replace(
+            "<p data-verdict-frame>Sample, not a finding.</p>",
+            '<p data-verdict-frame><span class="status-chip" data-kind="opinion">Sample, not a finding.</span></p>',
+          ),
+        "a marker is back on the main page",
+      ],
+      [
+        "the frame words in a tooltip",
+        (html: string) =>
+          html.replace(
+            "<p data-verdict-frame>Sample, not a finding.</p>",
+            `<p data-verdict-frame>${plantedTip("Note", "Sample, not a finding.")}</p>`,
+          ),
+        'the verdict doesn\'t say "Sample, not a finding." in view',
       ],
       [
         "no word in the KPI row",
@@ -291,13 +381,13 @@ describe("verifyOutput", () => {
         "no Sample banner",
       ],
       [
-        "the verdict chip in a details",
+        "the verdict's frame words in a details",
         (html: string) =>
           html.replace(
-            '<span class="status-chip" data-kind="opinion">Sample, not a finding</span>',
-            '<details><summary>More</summary><span class="status-chip" data-kind="opinion">Sample, not a finding</span></details>',
+            "<p data-verdict-frame>Sample, not a finding.</p>",
+            "<details><summary>More</summary><p data-verdict-frame>Sample, not a finding.</p></details>",
           ),
-        'the verdict chip doesn\'t say "Sample, not a finding"',
+        'the verdict doesn\'t say "Sample, not a finding." in view',
       ],
       [
         "the KPI word in a details",
@@ -643,7 +733,18 @@ describe("verifyOutput", () => {
         (card: string) =>
           card
             .replace(TIME, "")
-            .replace("</details>", `<p class="chart-card__meta">${TIME}</p></details>`),
+            .replace(
+              "</section>",
+              `<details><summary>More</summary><p class="chart-card__meta">${TIME}</p></details></section>`,
+            ),
+        "a card has no visible as-of time",
+      ],
+      [
+        "as-of time but in its tooltip",
+        (card: string) =>
+          card
+            .replace(TIME, "")
+            .replace(POPOVER_SOURCE, `${POPOVER_SOURCE}<p class="chart-card__meta">${TIME}</p>`),
         "a card has no visible as-of time",
       ],
       [
@@ -655,17 +756,17 @@ describe("verifyOutput", () => {
         "a card has no visible as-of time",
       ],
       [
-        "source in the popover",
+        "source in the tooltip",
         (card: string) => card.replace(POPOVER_SOURCE, ""),
-        "a card's popover has no source",
+        "a card's tooltip has no source",
       ],
       [
-        "definition link in the popover",
+        "definition link in the tooltip",
         (card: string) => card.replace(POPOVER_LINK, "</div>"),
-        "a card's popover has no definition link",
+        "a card's tooltip has no definition link",
       ],
       [
-        "noscript note, so the source is only in the popover",
+        "noscript note, so the source is only in the tooltip",
         (card: string) => card.replace(NOTE, ""),
         "a card's noscript note has no source",
       ],
@@ -683,8 +784,8 @@ describe("verifyOutput", () => {
 
     it("a card's frame word doesn't count from inside a details", () => {
       const moved = CARD.replace("<strong>Sample</strong>", "").replace(
-        "</details>",
-        '<p class="chart-card__meta"><strong>Sample</strong></p></details>',
+        "</section>",
+        '<details><summary>More</summary><p class="chart-card__meta"><strong>Sample</strong></p></details></section>',
       );
       const html = page(MAIN.replace(CARD, moved));
       expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
@@ -711,24 +812,18 @@ describe("verifyOutput", () => {
       );
     });
 
-    it.each([
-      ["deleted", (card: string) => card.replace(CHIP, "")],
-      ["empty", (card: string) => card.replace(">F</span>", "></span>")],
-      ["in the popover", (card: string) => inPanel(card, CHIP)],
-      ["in a noscript", (card: string) => card.replace(CHIP, `<noscript>${CHIP}</noscript>`)],
-      [
-        "only a word for assistive tech",
-        (card: string) => card.replace(">F</span>", '><span class="sr-only">Fact</span></span>'),
-      ],
-      [
-        "outside the head",
-        (card: string) => card.replace(CHIP, "").replace("<table>", `${CHIP}<table>`),
-      ],
-    ])("fails on a marker that's %s", (_name, change) => {
-      const html = page(MAIN.replace(CARD, change(CARD)));
-      expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
-        "index.html: a card has no visible marker",
-      );
+    it("has no marker on a card, and fails on one put back, wherever it is", () => {
+      expect(CARD).not.toContain("status-chip");
+      for (const marked of [
+        CARD.replace(HEADING, `${HEADING}${CHIP}`),
+        CARD.replace("<table>", `${CHIP}<table>`),
+        CARD.replace(POPOVER_SOURCE, `${POPOVER_SOURCE}${CHIP}`),
+      ]) {
+        const html = page(MAIN.replace(CARD, marked));
+        expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
+          "index.html: a marker is back on the main page",
+        );
+      }
     });
 
     it.each([
@@ -761,9 +856,9 @@ describe("verifyOutput", () => {
         "a card has no visible as-of time",
       ],
       [
-        "a popover source with no value",
+        "a tooltip source with no value",
         (card: string) => card.replace("<p>Source: S</p>", "<p>Source: </p>"),
-        "a card's popover has no source",
+        "a card's tooltip has no source",
       ],
       [
         "a noscript source with no value",
@@ -771,13 +866,13 @@ describe("verifyOutput", () => {
         "a card's noscript note has no source",
       ],
       [
-        "a popover link that isn't to the methodology",
+        "a tooltip link that isn't to the methodology",
         (card: string) =>
           card.replace(
             '<a href="/methodology/#velocity">Definition</a></div>',
             '<a href="#velocity">Definition</a></div>',
           ),
-        "a card's popover has no definition link",
+        "a card's tooltip has no definition link",
       ],
       [
         "a noscript link with no anchor",
@@ -824,9 +919,10 @@ describe("verifyOutput", () => {
     it.each([
       ["a details", "<details><ol data-pinned-notes><li>A caveat</li></ol></details>"],
       ["a noscript", "<noscript><ol data-pinned-notes><li>A caveat</li></ol></noscript>"],
+      ["a tooltip", plantedTip("Notes", "<ol data-pinned-notes><li>A caveat</li></ol>")],
     ])("fails on pinned notes inside %s", (_name, html) => {
       expect(verifyOutput(mainWith(html), sampleExpected)).toContain(
-        "index.html: pinned notes inside a details or noscript",
+        "index.html: pinned notes inside a details, noscript or tooltip",
       );
     });
 
@@ -837,29 +933,41 @@ describe("verifyOutput", () => {
   });
 });
 
-describe('"Our reading" outside the verdict chip', () => {
-  it("is fine in the verdict's accordion heading, on a framed page", () => {
+describe('"Our reading" and the frame words', () => {
+  it("is fine as a group's title in the reading's tooltip, on a framed page", () => {
     const heading = MAIN.replace(
-      `<p>${STALE_NOTE}</p></section>`,
-      `<p>${STALE_NOTE}</p><h3>Our reading</h3></section>`,
+      "<span>An estimate.</span>",
+      "<span>An estimate.</span><span>Our reading</span>",
     );
+    expect(heading).not.toBe(MAIN);
     expect(verifyOutput(site({ main: page(heading) }), sampleExpected)).toEqual([]);
   });
 
-  it("is fine in the methodology page's chip table, on a framed page", () => {
+  it("is fine in the methodology page's table, on a framed page", () => {
     const table = page(
-      "<table><tr><td>Our reading</td><td>An opinion about the facts</td></tr></table>",
+      "<main><table><tr><td>Our reading</td><td>An opinion about the facts</td></tr></table></main>",
     );
     expect(verifyOutput(site({ methodology: table }), sampleExpected)).toEqual([]);
   });
 
-  it("fails when the verdict has no chip at all", () => {
+  it("fails when the frame words aren't the verdict's own line", () => {
     const html = page(MAIN).replace(
-      '<span class="status-chip" data-kind="opinion">Sample, not a finding</span>',
-      "<span>Sample, not a finding</span>",
+      "<p data-verdict-frame>Sample, not a finding.</p>",
+      "<p>Sample, not a finding.</p>",
     );
     expect(verifyOutput(site({ main: html }), sampleExpected)).toContain(
-      'index.html: the verdict chip doesn\'t say "Sample, not a finding"',
+      'index.html: the verdict doesn\'t say "Sample, not a finding." in view',
+    );
+  });
+
+  it("fails when real data says it isn't a finding", () => {
+    const html = REAL_MAIN.replace(
+      `<p>${STALE_NOTE}</p>`,
+      `<p data-verdict-frame>Sample, not a finding.</p><p>${STALE_NOTE}</p>`,
+    );
+    const dir = site({ main: realPage(html), methodology: realPage("<main>Methodology</main>") });
+    expect(verifyOutput(dir, realExpected)).toContain(
+      "index.html: real data says it isn't a finding",
     );
   });
 });
@@ -870,7 +978,8 @@ describe("the first screen", () => {
     return html.replaceAll(from, to);
   };
   const inDetails = (inner: string) => `<details><summary>More</summary>${inner}</details>`;
-  const finding = /<li><a href="#card"[\s\S]*?<\/a><\/li>/;
+  const inTooltip = (inner: string) => plantedTip("More", inner);
+  const VERDICT_TEXT = "<span data-verdict-text>The verdict's text, 12% &amp; more.</span>";
 
   it.each([
     [
@@ -884,21 +993,28 @@ describe("the first screen", () => {
       "the headline isn't the verdict's sentence",
     ],
     [
+      "the headline in a tooltip",
+      change("<h1>A headline.</h1>", inTooltip("<h1>A headline.</h1>")),
+      "the headline isn't the verdict's sentence",
+    ],
+    [
       "no question line",
       change('<p data-section="question">A question?</p>', ""),
       "no question line in view",
     ],
     [
       "verdict.text in a details on a dataset that keeps it in view",
-      change(
-        "<p data-verdict-text>The verdict's text, 12% &amp; more.</p>",
-        inDetails("<p data-verdict-text>The verdict's text, 12% &amp; more.</p>"),
-      ),
+      change(`<p>${VERDICT_TEXT}</p>`, inDetails(`<p>${VERDICT_TEXT}</p>`)),
+      "verdict.text isn't in view on this dataset",
+    ],
+    [
+      "verdict.text in a tooltip on a dataset that keeps it in view",
+      change(`<p>${VERDICT_TEXT}</p>`, `<p>${inTooltip(VERDICT_TEXT)}</p>`),
       "verdict.text isn't in view on this dataset",
     ],
     [
       "verdict.text visually hidden",
-      change("<p data-verdict-text>", '<p class="sr-only" data-verdict-text>'),
+      change("<span data-verdict-text>", '<span class="sr-only" data-verdict-text>'),
       "verdict.text isn't in view on this dataset",
     ],
     [
@@ -907,37 +1023,37 @@ describe("the first screen", () => {
       "verdict.text isn't in view on this dataset",
     ],
     [
-      "a verdict item lost from the popover",
-      change("<li>An estimate.</li>", ""),
-      "the headline's popover has lost a verdict item",
+      "a verdict item lost from the tooltip",
+      change("<span>An estimate.</span>", ""),
+      "the headline's tooltip has lost a verdict item",
     ],
     [
-      "no definition link in the headline's popover",
-      change('<a href="/methodology/#verdict">How we read this</a>', ""),
-      "the headline's popover has no definition link",
+      "no definition link in the headline's tooltip",
+      change('<a href="/methodology/#verdict">How the reading is made</a>', ""),
+      "the headline's tooltip has no definition link",
     ],
     [
       "a KPI cell gone",
-      (html: string) => html.replace(/<dl><div>[\s\S]*?<\/div>/, "<dl>"),
+      (html: string) => html.replace(/<dl><div>[\s\S]*?<\/div><\/div>/, "<dl>"),
       "the KPI row has 3 cells",
     ],
     [
-      "a KPI value in its popover",
+      "a KPI value gone",
       change("<span data-kpi-value>$1</span>", ""),
       "a KPI has no value in view",
     ],
     [
-      "a KPI marker that's only a word for assistive tech",
+      "a KPI value only in its tooltip",
       change(
-        '<span aria-hidden="true">F</span><span class="sr-only">Fact</span>',
-        '<span class="sr-only">Fact</span>',
+        "<span data-kpi-value>$1</span>",
+        `<span>${inTooltip("<span data-kpi-value>$1</span>")}</span>`,
       ),
-      "a KPI has no marker in view",
+      "a KPI has no value in view",
     ],
     [
       "a KPI with no note",
       change("<p data-kpi-note>A note.</p>", "<p>As of 3 Nov.</p>"),
-      "a KPI's popover has no note",
+      "a KPI's tooltip has no note",
     ],
     [
       "a KPI with no definition link",
@@ -945,7 +1061,7 @@ describe("the first screen", () => {
         '<p data-kpi-note>A note.</p><a href="/methodology/#velocity">Definition</a>',
         "<p data-kpi-note>A note.</p>",
       ),
-      "a KPI's popover has no definition link",
+      "a KPI's tooltip has no definition link",
     ],
     [
       "a KPI with no plain note",
@@ -960,84 +1076,47 @@ describe("the first screen", () => {
       change("<p>Across Tempo.</p>", inDetails("<p>Across Tempo.</p>")),
       "the KPI row doesn't say which chains it covers",
     ],
-    ["a finding gone", (html: string) => html.replace(finding, ""), "there are 3 findings"],
     [
-      "a finding's text in a details",
+      "the KPI row's chains in a tooltip",
+      change("<p>Across Tempo.</p>", `<p>${inTooltip("Across Tempo.")}</p>`),
+      "the KPI row doesn't say which chains it covers",
+    ],
+    [
+      "a marker back on a KPI",
       change(
-        '<span class="finding__text">T</span>',
-        inDetails('<span class="finding__text">T</span>'),
+        "<span data-kpi-value>$1</span>",
+        '<span data-kpi-value>$1</span><span class="status-chip" data-kind="fact">F</span>',
       ),
-      "a finding has no text in view",
+      "a marker is back on the main page",
     ],
     [
-      "a finding's marker gone",
+      "the marker legend back",
       change(
-        '<span class="finding__marks"><span class="status-chip" data-kind="fact">F</span>',
-        '<span class="finding__marks">',
+        '<section data-section="kpi-row">',
+        '<div data-section="marker-legend"><p>F Fact</p></div><section data-section="kpi-row">',
       ),
-      "a finding has no marker in view",
+      "a marker is back on the main page",
     ],
     [
-      "a finding with a different marker",
+      "a push-down popover back on the first screen",
       change(
-        '<span class="finding__marks"><span class="status-chip" data-kind="fact">',
-        '<span class="finding__marks"><span class="status-chip" data-kind="estimate">',
+        '<section data-section="kpi-row">',
+        '<details class="info-popover"><summary aria-label="About"></summary><p>A note.</p></details><section data-section="kpi-row">',
       ),
-      "a finding's marker differs from #card",
+      "an explanation pushes the page down, in a details element",
     ],
     [
-      "a finding with no frame word",
-      change("</span><strong>Sample</strong></span></a>", "</span></span></a>"),
-      'a finding has no "Sample"',
-    ],
-    [
-      "a finding's target gone",
-      change('id="card"', 'id="elsewhere"'),
-      "a finding links to #card, which isn't on the page",
-    ],
-    [
-      "a finding that differs from its chart's heading",
+      "the trust row's disclosure back",
       change(
-        '<span class="finding__text">T</span>',
-        '<span class="finding__text">Another finding</span>',
+        PLANTED_TRUST_LINK,
+        `<details class="accordion"><summary>Reconciliation detail</summary><p>${PLANTED_TRUST_CAVEAT}</p></details>`,
       ),
-      "a finding differs from the heading of #card",
+      "an explanation pushes the page down, in a details element",
     ],
     [
-      "the legend gone",
-      change("<p>F Fact, I Inferred, E Estimate</p>", ""),
-      "the marker legend isn't in view",
-    ],
-    [
-      "the legend in a details",
-      change(
-        "<p>F Fact, I Inferred, E Estimate</p>",
-        inDetails("<p>F Fact, I Inferred, E Estimate</p>"),
-      ),
-      "the marker legend isn't in view",
-    ],
-    [
-      "no definition link in the legend's popover",
-      change('<a href="/methodology/#fact-estimate-opinion">Fact, estimate and opinion</a>', ""),
-      "the marker legend's popover has no definition link",
-    ],
-    [
-      "a second disclosure on the trust row",
-      change(
-        "Reconciliation detail</summary>",
-        "Reconciliation detail</summary><details><summary>x</summary></details>",
-      ),
-      "the trust row has 2 disclosures, not one",
-    ],
-    [
-      "the trust row's caveat lost",
-      change("<p>It doesn't verify placed share or velocity.</p>", ""),
-      "the trust row's disclosure has lost what it says it doesn't verify",
-    ],
-    [
-      "the trust row's definition link lost",
-      change('<a href="/methodology/#reconciliation">What this covers</a>', ""),
-      "the trust row's disclosure has no definition link",
+      "the trust row gone on a build that didn't pass",
+      (html: string) => html.replace(/<section data-section="trust-strip">[\s\S]*?<\/section>/, ""),
+      "the trust row isn't at the top on a build that didn't pass",
     ],
   ])("fails on %s", (_name, mutate, problem) => {
     const problems = verifyOutput(site({ main: mutate(page(MAIN)) }), sampleExpected);
@@ -1050,7 +1129,7 @@ describe("the first screen", () => {
     );
     const dir = site({ main: moved, methodology: realPage("<main>M</main>") });
     expect(verifyOutput(dir, realExpected)).toContain(
-      "index.html: verdict.text is neither in view nor in its popover",
+      "index.html: verdict.text is neither in view nor in its tooltip",
     );
   });
 
@@ -1143,32 +1222,6 @@ describe("the first screen", () => {
   });
 
   describe("the figures the dataset fixes", () => {
-    it.each(["51.00%", "Tempo leads on three measures"])(
-      "fails when a finding and its card both change to %s",
-      (text) => {
-        const both = page(
-          MAIN.replaceAll(
-            '<span class="finding__text">T</span>',
-            `<span class="finding__text">${text}</span>`,
-          ).replace("<h2>T</h2>", `<h2>${text}</h2>`),
-        );
-        const problems = verifyOutput(site({ main: both }), sampleExpected);
-        expect([...new Set(problems)]).toEqual([
-          "index.html: the finding for #card isn't the dataset's heading",
-        ]);
-      },
-    );
-
-    it("fails when a finding isn't there for one of the dataset's headings", () => {
-      const expected = {
-        ...sampleExpected,
-        findings: [...PLANTED_FINDINGS, { id: "another-card", text: "T" }],
-      };
-      expect(verifyOutput(site(), expected)).toEqual([
-        "index.html: the finding for #another-card isn't the dataset's heading",
-      ]);
-    });
-
     it("fails on a KPI value the dataset doesn't give", () => {
       const html = page(
         MAIN.replace("<span data-kpi-value>$1</span>", "<span data-kpi-value>$2</span>"),
@@ -1265,37 +1318,42 @@ describe("freshness in the output", () => {
   it("reads a details' summary as in view", () => {
     const html = realPage(
       REAL_MAIN.replace(
-        `${STALE_TRUST}${PLANTED_TRUST_DETAIL}`,
-        PLANTED_TRUST_DETAIL.replace("Reconciliation detail", STALE_TRUST),
+        `${STALE_TRUST}${PLANTED_TRUST_LINK}`,
+        `<details class="data-toggle"><summary>${STALE_TRUST}</summary></details>${PLANTED_TRUST_LINK}`,
       ),
     );
     const dir = site({ main: html, methodology: realPage("<main>M</main>") });
     expect(verifyOutput(dir, realExpected)).toEqual([]);
   });
 
-  it("fails when a fresh page's fresh sentence is only in a details", () => {
-    const fresh = (body: string) =>
-      realPage(body).replace('data-freshness="stale"', 'data-freshness="fresh"');
-    const dir = site({
-      main: fresh(
-        FRESH_MAIN.replace(FRESH_TRUST, `<details><summary>More</summary>${FRESH_TRUST}</details>`),
-      ),
-      methodology: fresh("<main>M</main>"),
-    });
+  it("fails when a passing build keeps the trust row at the top", () => {
+    const back = FRESH_MAIN.replace(
+      "<main>",
+      `<main><section data-section="trust-strip">${FRESH_TRUST}${PLANTED_TRUST_LINK}</section>`,
+    );
+    const dir = site({ main: freshPage(back), methodology: freshPage("<main>M</main>") });
     expect(verifyOutput(dir, freshRealExpected)).toContain(
-      "index.html: the trust strip has no fresh text",
+      "index.html: a build that passed still has the trust row at the top",
     );
   });
 
-  it("fails when a fresh page drops the fresh sentence", () => {
-    const fresh = (body: string) =>
-      realPage(body).replace('data-freshness="stale"', 'data-freshness="fresh"');
+  it("fails when a passing build's as-of line can't say when it was last reconciled", () => {
     const dir = site({
-      main: fresh(FRESH_MAIN.replace(FRESH_TRUST, "")),
-      methodology: fresh("<main>M</main>"),
+      main: freshPage(FRESH_MAIN.replace(HEAD_STALE, STALE_NOTE)),
+      methodology: freshPage("<main>M</main>"),
     });
     expect(verifyOutput(dir, freshRealExpected)).toContain(
-      "index.html: the trust strip has no fresh text",
+      "index.html: the verdict block has no stale text",
+    );
+  });
+
+  it("fails when a fresh page drops its fresh as-of text", () => {
+    const dir = site({
+      main: freshPage(FRESH_MAIN.replace("<p>Data as of 3 Nov 2026 UTC.</p>", "")),
+      methodology: freshPage("<main>M</main>"),
+    });
+    expect(verifyOutput(dir, freshRealExpected)).toContain(
+      "index.html: the verdict block has no fresh text",
     );
   });
 
@@ -1324,6 +1382,265 @@ describe("freshness in the output", () => {
   });
 });
 
+describe("the footer's reconciliation status", () => {
+  const RECONCILED = plantedFooter(true, freshRealExpected.trustLine, REPORTS);
+  const preview = { ...sampleExpected, kind: "preview", frameWord: "Preview" };
+  const previewPage = (body: string, footer = SAMPLE_FOOTER) =>
+    page(
+      body,
+      'data-dataset-kind="preview" data-dataset-version="20261104T060000Z" data-frame="Preview" data-freshness="stale"',
+      "[Preview] Open USD Monitor",
+      '<meta name="robots" content="noindex, nofollow"/>',
+      footer,
+    )
+      .replace("Sample data. Nothing here is real.", "Local preview. Not the published site.")
+      .replaceAll("Sample", "Preview");
+  const PROBLEM = 'the footer says "Reconciled" on a build that didn\'t pass';
+
+  it("passes Reconciled, with its tooltip, on a build that passed", () => {
+    expect(FRESH_FOOTER).toContain("data-reconciled");
+    const dir = site({ main: freshPage(FRESH_MAIN), methodology: freshPage("<main>M</main>") });
+    expect(verifyOutput(dir, freshRealExpected)).toEqual([]);
+  });
+
+  it.each([
+    [
+      "sample",
+      () => site({ main: page(MAIN, undefined, undefined, undefined, RECONCILED) }),
+      sampleExpected,
+    ],
+    [
+      "preview",
+      () =>
+        site({
+          main: previewPage(MAIN, RECONCILED),
+          methodology: previewPage("<main>Methodology</main>"),
+        }),
+      preview,
+    ],
+    [
+      "stale",
+      () =>
+        site({
+          main: realPage(REAL_MAIN, RECONCILED),
+          methodology: realPage("<main>Methodology</main>"),
+        }),
+      realExpected,
+    ],
+  ])("fails on Reconciled in the footer of a %s build", (_name, dir, expected) => {
+    const problems = verifyOutput(dir(), expected);
+    expect(problems).toContain(`index.html: ${PROBLEM}`);
+    // Each page has the footer, so each is checked.
+    expect(problems).not.toContain(`methodology/index.html: ${PROBLEM}`);
+  });
+
+  it("fails on the word alone, swapped out or unmarked, on a build that didn't pass", () => {
+    const swappedOut = SAMPLE_FOOTER.replace(
+      '<span class="freshness-text__stale">',
+      '<span class="freshness-text__stale">Reconciled ',
+    );
+    expect(
+      verifyOutput(
+        site({ main: page(MAIN, undefined, undefined, undefined, swappedOut) }),
+        sampleExpected,
+      ),
+    ).toContain(`index.html: ${PROBLEM}`);
+  });
+
+  it("fails when a passing build's Reconciled loses its tooltip, its tick or its link", () => {
+    const check = (footer: string) =>
+      verifyOutput(
+        site({
+          main: realPage(FRESH_MAIN, footer).replace(
+            'data-freshness="stale"',
+            'data-freshness="fresh"',
+          ),
+          methodology: freshPage("<main>M</main>"),
+        }),
+        freshRealExpected,
+      );
+    expect(check(FRESH_FOOTER.replace(FRESH_TRUST, "Fine."))).toContain(
+      'index.html: the footer\'s "Reconciled" has no tooltip with the dated sentence',
+    );
+    expect(check(FRESH_FOOTER.replace('<span aria-hidden="true">✓</span> ', ""))).toContain(
+      'index.html: the footer\'s "Reconciled" lost its tick or its word',
+    );
+    expect(check(FRESH_FOOTER.replaceAll('href="/reconciliation/"', 'href="/"'))).toEqual(
+      expect.arrayContaining([
+        "index.html: the footer's status doesn't link to the reconciliation page",
+      ]),
+    );
+    expect(
+      check(
+        FRESH_FOOTER.replace(
+          /<span class="freshness-text__stale">.*?<\/span><\/span><\/p>/,
+          "</span></p>",
+        ),
+      ),
+    ).toContain("index.html: the footer's status has no stale text to swap to");
+  });
+
+  it("fails with no status in the footer, and with the wrong state's words", () => {
+    const none = page(
+      MAIN,
+      undefined,
+      undefined,
+      undefined,
+      `<footer><p>${LINE}</p><nav><a href="/methodology">M</a></nav><p>Not financial advice.</p></footer>`,
+    );
+    expect(verifyOutput(site({ main: none }), sampleExpected)).toContain(
+      "index.html: no reconciliation status in the footer",
+    );
+    const wrong = SAMPLE_FOOTER.replaceAll("Not reconciled", "Checked");
+    expect(
+      verifyOutput(
+        site({ main: page(MAIN, undefined, undefined, undefined, wrong) }),
+        sampleExpected,
+      ),
+    ).toContain("index.html: the footer's status doesn't say \"Not reconciled\"");
+  });
+});
+
+describe("the reconciliation page", () => {
+  const check = (main: string) =>
+    verifyOutput(site({ reconciliation: page(main) }), sampleExpected);
+  const DETAIL = plantedReconciliationMain("Not reconciled");
+
+  it("passes the detail with its state, caveat, link, table and a way back", () => {
+    expect(check(DETAIL)).toEqual([]);
+  });
+
+  it.each([
+    [
+      "the detail gone",
+      (html: string) => html.replace('data-section="reconciliation"', ""),
+      "there are 0 reconciliation details, not one",
+    ],
+    [
+      "the caveat lost",
+      (html: string) => html.replace(PLANTED_TRUST_CAVEAT, ""),
+      "the detail has lost what it says it doesn't verify",
+    ],
+    [
+      "the caveat only in a tooltip",
+      (html: string) =>
+        html.replace(PLANTED_TRUST_CAVEAT, plantedTip("More", PLANTED_TRUST_CAVEAT)),
+      "the detail has lost what it says it doesn't verify",
+    ],
+    [
+      "the state lost",
+      (html: string) => html.replace('<p class="trust-strip__status">Not reconciled</p>', ""),
+      "the detail doesn't state the reconciliation's state",
+    ],
+    [
+      "the definition link lost",
+      (html: string) =>
+        html.replace('<a href="/methodology/#reconciliation">What this covers</a>', ""),
+      "the detail has no definition link",
+    ],
+    [
+      "the table lost, with no unknown text",
+      (html: string) => html.replace(/<table>.*?<\/table>/, ""),
+      'the detail has neither its table nor "Not enough data yet"',
+    ],
+    [
+      "the way back lost",
+      (html: string) => html.replace('<p><a href="/">Back to the dashboard</a></p>', ""),
+      'no "Back to the dashboard" link to /',
+    ],
+    [
+      "the way back pointing elsewhere",
+      (html: string) => html.replace('<a href="/">Back', '<a href="/methodology">Back'),
+      'no "Back to the dashboard" link to /',
+    ],
+  ])("fails with %s", (_name, change, problem) => {
+    const changed = change(DETAIL);
+    expect(changed).not.toBe(DETAIL);
+    expect(check(changed)).toContain(`reconciliation/index.html: ${problem}`);
+  });
+});
+
+describe("tooltips", () => {
+  const TEXT =
+    '<span class="tip" data-tip><button type="button" class="tip__trigger" aria-describedby="t1">Short</button><span class="tip__panel" id="t1" role="tooltip">In full.</span></span>';
+  const LINKED =
+    '<span class="tip" data-tip><button type="button" class="tip__trigger" aria-expanded="false" aria-controls="t2">More</button><span class="tip__panel" id="t2"><a href="/methodology/#velocity">Definition</a></span></span>';
+  const check = (html: string) => verifyOutput(mainWith(`<p>${html}</p>`), sampleExpected);
+  const KEYBOARD = "index.html: a tooltip's trigger can't be reached by keyboard, or has no name";
+
+  it("passes a plain tooltip and a disclosure with a link, as the components write them", () => {
+    expect(plantedTip("Short", "In full.")).toContain('role="tooltip"');
+    expect(plantedTip("More", '<a href="/">x</a>')).toContain('aria-expanded="false"');
+    expect(check(`${TEXT}${LINKED}`)).toEqual([]);
+  });
+
+  it.each([
+    ["a div for its trigger", TEXT.replace("<button", "<div").replace("</button>", "</div>")],
+    ["a trigger out of the tab order", TEXT.replace("<button", '<button tabindex="-1"')],
+    ["a link with no destination", TEXT.replace("<button", "<a").replace("</button>", "</a>")],
+    ["a trigger with no name", TEXT.replace(">Short</button>", "></button>")],
+  ])("fails on %s", (_name, html) => {
+    expect(check(html)).toContain(KEYBOARD);
+  });
+
+  it("fails on a panel that doesn't follow its trigger, so Tab can't move into it", () => {
+    const apart = TEXT.replace(
+      '</button><span class="tip__panel"',
+      '</button><span>between</span><span class="tip__panel"',
+    );
+    expect(check(apart)).toContain("index.html: a tooltip's panel doesn't follow its trigger");
+  });
+
+  it("fails on a link in a role=tooltip panel, which can't be reached", () => {
+    const linked = TEXT.replace("In full.", '<a href="/methodology/#velocity">Definition</a>');
+    expect(check(linked)).toContain("index.html: a tooltip with a link isn't a disclosure");
+    const noExpanded = LINKED.replace(' aria-expanded="false"', "");
+    expect(check(noExpanded)).toContain("index.html: a tooltip with a link isn't a disclosure");
+  });
+
+  it("fails on a trigger that doesn't point at its panel, or a description with no role", () => {
+    expect(check(TEXT.replace('aria-describedby="t1"', ""))).toContain(
+      "index.html: a tooltip's trigger doesn't point at its panel",
+    );
+    expect(check(TEXT.replace(' role="tooltip"', ""))).toContain(
+      'index.html: a tooltip describing its trigger has no role="tooltip"',
+    );
+  });
+
+  it("checks every page's tooltips, the footer's included", () => {
+    const methodology = page(`<main>${TEXT.replace("<button", '<button tabindex="-1"')}</main>`);
+    expect(verifyOutput(site({ methodology }), sampleExpected)).toContain(
+      `methodology/index.html: ${KEYBOARD.replace("index.html: ", "")}`,
+    );
+  });
+});
+
+describe("push-down explanations", () => {
+  const inMain = (html: string) => site({ main: page(MAIN.replace("</main>", `${html}</main>`)) });
+
+  it("allows a data toggle, and fails on any other details in main", () => {
+    expect(
+      verifyOutput(
+        inMain('<details class="data-toggle"><summary>Table</summary></details>'),
+        sampleExpected,
+      ),
+    ).toEqual([]);
+    for (const details of [
+      '<details class="info-popover" name="info"><summary aria-label="About"></summary><p>x</p></details>',
+      '<details class="accordion"><summary>How we read this</summary><p>x</p></details>',
+      "<details><summary>Legend</summary><p>x</p></details>",
+    ]) {
+      expect(verifyOutput(inMain(details), sampleExpected)).toContain(
+        "index.html: an explanation pushes the page down, in a details element",
+      );
+    }
+    // Outside main, the methodology page's contents may still fold on a phone.
+    expect(
+      verifyOutput(mainWith("<details><summary>x</summary></details>"), sampleExpected),
+    ).toEqual([]);
+  });
+});
+
 describe("the Preview frame", () => {
   const preview = { ...sampleExpected, kind: "preview", frameWord: "Preview" };
 
@@ -1332,7 +1649,7 @@ describe("the Preview frame", () => {
     expect(problems).toContain("index.html: page root says sample, dataset is preview");
     expect(problems).toContain("index.html: no [Preview] in the title");
     expect(problems).toContain(
-      'index.html: the verdict chip doesn\'t say "Preview, not a finding"',
+      'index.html: the verdict doesn\'t say "Preview, not a finding." in view',
     );
   });
 
@@ -1457,25 +1774,24 @@ describe("what to expect comes from the dataset", () => {
     });
     const notes = expectedFromDataset(at(dir)).essentialNotes as { kind: string; text: string }[];
     const text = (kind: string) => notes.filter((note) => note.kind === kind).map((n) => n.text);
-    expect(text("series-start")[0]).toContain("Placed supply needs 21 days of history");
+    expect(text("series-start")[0]).toContain("placed supply needs 21 days of history");
     expect(text("everyday-meaning")).toEqual(["Everyday means under $2M, nothing more."]);
-    // The velocity table's wallet counts are under its toggle, and its caption says it there.
-    expect(text("wallets-not-people")).toEqual([
-      "Wallets, not people, and never added across chains.",
-    ]);
-    // The weekly bars pin the history; "Weeks end on the date shown" is in their popover.
+    // The supply card's wallet counts are under its toggle, and the note stays in view beside it.
+    expect(text("wallets-not-people")).toEqual(["Wallets, not people."]);
+    // The weekly bars pin the history; "Weeks end on the date shown" is in their tooltip.
     expect(text("history")[0]).toMatch(/^\d+ days of history: a direction, not a trend\.$/);
   });
 
-  it("recomputes the four headings and the KPI values from the dataset", () => {
+  it("recomputes the headings and the KPI values from the dataset", () => {
     const dir = releaseGrade();
+    const headings = (expected: ReturnType<typeof expectedFromDataset>) => [
+      expected.supplyPanels[0].heading,
+      expected.waterfallPanels[0].heading,
+      expected.weeklyPanels[0].heading,
+    ];
     const before = expectedFromDataset(at(dir));
-    expect(before.findings.map((finding: { id: string }) => finding.id)).toEqual([
-      CARD_ANCHORS.supply,
-      CARD_ANCHORS.waterfall,
-      CARD_ANCHORS.weekly,
-      CARD_ANCHORS.chainRoles,
-    ]);
+    // No findings row: each finding is its card's heading, held where the card is.
+    expect("findings" in before).toBe(false);
     editJson(dir, "journey.json", (payload) => {
       for (const row of payload.data) {
         const moved = BigInt(row.placed_supply);
@@ -1485,9 +1801,9 @@ describe("what to expect comes from the dataset", () => {
       }
     });
     const after = expectedFromDataset(at(dir));
-    expect(after.findings[0].text).not.toBe(before.findings[0].text);
-    expect(after.findings[0].text).toContain("0.00% of supply");
-    expect(after.findings.slice(1)).toEqual(before.findings.slice(1));
+    expect(headings(after)[0]).not.toBe(headings(before)[0]);
+    expect(headings(after)[0]).toContain("0.00% of supply");
+    expect(headings(after).slice(1)).toEqual(headings(before).slice(1));
     editJson(dir, "summary.json", (summary) => {
       for (const row of summary.kpis) row.clean_everyday_7d = "0";
     });
@@ -1781,9 +2097,10 @@ describe("exchange names on the main page", () => {
     });
 
     it("refuses another amount in the line, the table or the payload", () => {
-      const line = plantedBands(bands).replace(": $5 (2", ": $9 (2");
+      const line = plantedBands(bands).replace(": $5 (1", ": $9 (1");
+      expect(line).not.toBe(plantedBands(bands));
       expect(verifyOutput(mainWith(line), expected)).toContain(
-        "index.html: the exchange-linked line for ethereum isn't the dataset's",
+        "index.html: the exchange-linked line for all isn't the dataset's",
       );
       const table = plantedBands(bands).replace("<td>$5</td>", "<td>$9</td>");
       expect(verifyOutput(mainWith(table), expected)).toContain(
@@ -1794,6 +2111,13 @@ describe("exchange names on the main page", () => {
       const inPage = `${payload}${plantedBands(changed).match(/<script>.*<\/script>/)![0]}`;
       expect(verifyOutput(mainWith(inPage), expected)).toContain(
         "index.html: the payload's exchange-linked amount for all isn't the dataset's",
+      );
+    });
+
+    it("refuses a chain's own line, as the one legend is the first option's", () => {
+      const extra = `<p data-exchange-linked="ethereum">${bands[1].line}</p>`;
+      expect(verifyOutput(mainWith(`${plantedBands(bands)}${extra}`), expected)).toContain(
+        "index.html: there are 2 exchange-linked lines",
       );
     });
 

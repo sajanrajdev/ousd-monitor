@@ -62,7 +62,8 @@ h2 {
   overflow: visible;
 }
 
-/* Header: sticky at every width. The independence line wraps to a second row and is never cut. */
+/* Header: sticky at every width, and one row of the mark and name. The independence line is in the
+   footer. */
 .site-header {
   position: sticky;
   top: 0;
@@ -79,14 +80,14 @@ h2 {
   gap: 0.25rem 1rem;
   max-width: var(--page-max-width);
   margin: 0 auto;
-  padding: 0.5rem var(--page-margin);
+  min-height: var(--header-height);
+  padding: 0.25rem var(--page-margin);
 }
 
 /* A link that stands alone, not in a sentence, is at least 24px on its short side (WCAG 2.2, 2.5.8).
    Links inside a sentence keep the text's own line box, as the rule exempts them, so this is
    opt-in by class and never matches a link in running text. */
-.target-link,
-.site-header nav a {
+.target-link {
   display: inline-flex;
   align-items: center;
   min-height: 1.5rem;
@@ -95,19 +96,6 @@ h2 {
 .independence-line {
   font-size: var(--text-small);
   color: var(--color-body-text);
-}
-
-.site-header__line {
-  flex-basis: 100%;
-  order: 3;
-}
-
-@media (min-width: 768px) {
-  .site-header__line {
-    flex-basis: auto;
-    order: 0;
-    margin-left: auto;
-  }
 }
 
 .site-footer {
@@ -124,45 +112,31 @@ h2 {
   font-size: var(--text-small);
 }
 
-.status-chip {
-  display: inline-block;
-  padding: 0.125rem 0.5rem;
-  border: 1px solid var(--color-maroon);
-  border-radius: var(--radius-control);
-  font-size: var(--text-meta);
-  font-weight: 650;
-  line-height: 1.4;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.status-chip[data-kind="fact"] {
-  background: var(--color-maroon);
-  color: var(--color-off-white);
-}
-
-.status-chip[data-kind="estimate"] {
-  border-style: dashed;
-}
-
-.status-chip[data-kind="inferred"] {
-  background: var(--color-secondary-strong);
-}
-
-.status-chip[data-kind="opinion"] {
-  border-style: dotted;
-  font-style: italic;
-}
-
 .chart-card {
   /* Its width is what its tables and notes respond to, and not the viewport's. */
   container-type: inline-size;
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 1rem;
   padding: 1.25rem;
   background: var(--surface-card);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-card);
+}
+
+/* One part to a row, but for the closed toggle and the as-of line, which share the last. An open
+   toggle takes its row, and the as-of line goes under it. */
+.chart-card > * {
+  flex: 0 0 100%;
+}
+
+.chart-card > .data-toggle:not([open]) {
+  flex: 0 0 auto;
+}
+
+.chart-card > .data-toggle:not([open]) + .chart-card__meta {
+  flex: 1 1 0;
 }
 
 .chart-card__head > :first-child {
@@ -174,7 +148,6 @@ h2 {
 /* It takes what a taller neighbour leaves, so every card's toggle and as-of line share a baseline. */
 .chart-card__body {
   display: grid;
-  flex: 1 0 auto;
   grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 1rem;
@@ -193,6 +166,12 @@ h2 {
   .chart-card__body[data-notes] {
     grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
   }
+}
+
+.chart-card__clock {
+  display: inline-block;
+  margin-right: 0.25rem;
+  vertical-align: -1px;
 }
 
 .chart-card__meta,
@@ -231,15 +210,10 @@ h2 {
     grid-column: 1;
   }
 
+  /* A grid, not CSS columns: columns rebalance when an open tooltip's panel appears in them. */
   .chart-card__body:not([data-notes]) > .pinned-notes:has(> li + li) {
-    display: block;
-    columns: 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     column-gap: 1.25rem;
-  }
-
-  .chart-card__body:not([data-notes]) > .pinned-notes > li {
-    break-inside: avoid;
-    margin-bottom: 0.5rem;
   }
 }
 
@@ -312,10 +286,6 @@ h2 {
   flex: 1 1 0;
   min-width: 0;
   color: var(--color-meta-text);
-}
-
-.chart-legend .status-chip {
-  padding: 0 0.25rem;
 }
 
 .chart-stats {
@@ -562,7 +532,7 @@ h2 {
   }
 }
 
-/* A head that holds an info popover: its trigger goes in the corner this reserves. */
+/* A head that holds an info tooltip: its trigger goes in the corner this reserves. */
 .explain-head {
   position: relative;
   display: flex;
@@ -572,62 +542,127 @@ h2 {
   padding-right: 2rem;
 }
 
-.info-popover > summary {
+/* Tooltips float over the page and move nothing. With no script, :hover and :focus-within open them,
+   so their content is still reached. Once ExplainEnhance runs, data-open alone does, so Escape can
+   close one under the pointer or around the focus. */
+.tip {
+  position: relative;
+  display: inline-block;
+}
+
+.explain-head > .tip--info {
   position: absolute;
   top: 0;
   right: 0;
+}
+
+.tip__icon {
   display: flex;
   align-items: center;
   justify-content: center;
   width: 1.5rem;
   height: 1.5rem;
+  padding: 0;
+  background: transparent;
   border: 1px solid var(--color-maroon);
   border-radius: 50%;
+  color: inherit;
   cursor: pointer;
+  font-family: var(--font-sans);
   font-size: var(--text-meta);
   font-weight: 650;
-  list-style: none;
 }
 
-.info-popover > summary::-webkit-details-marker {
-  display: none;
-}
-
-.info-popover > summary::before {
+.tip__icon::before {
   content: "i";
   content: "i" / "";
 }
 
-.info-popover[open] > summary {
+/* Words that open their own explanation: a dotted underline says there's more. */
+.tip--text {
+  display: inline;
+}
+
+.tip__words {
+  display: inline;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: help;
+  font: inherit;
+  text-align: inherit;
+  text-decoration: underline dotted;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.tip__panel {
+  position: absolute;
+  top: calc(100% + 0.375rem);
+  left: 0;
+  z-index: 40;
+  display: none;
+  gap: 0.5rem;
+  width: max-content;
+  max-width: min(22rem, calc(100vw - 2rem));
+  padding: 0.75rem;
+  background: var(--color-off-white);
+  border: 1px solid var(--color-maroon);
+  border-radius: var(--radius-control);
+  color: var(--color-body-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-small);
+  font-style: normal;
+  font-weight: 450;
+  letter-spacing: normal;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  translate: var(--tip-shift, 0) 0;
+}
+
+.tip[data-align="end"] > .tip__panel {
+  right: 0;
+  left: auto;
+}
+
+.tip[data-above]:not([data-flipped]) > .tip__panel,
+.tip[data-flipped]:not([data-above]) > .tip__panel {
+  top: auto;
+  bottom: calc(100% + 0.375rem);
+}
+
+html:not([data-tips]) .tip:is(:hover, :focus-within) > .tip__panel,
+.tip[data-open] > .tip__panel {
+  display: grid;
+}
+
+/* A panel of running text flows as one block, so a link and the words after it share their line. */
+html:not([data-tips]) .tip:not(.tip--info):is(:hover, :focus-within) > .tip__panel,
+.tip:not(.tip--info)[data-open] > .tip__panel {
+  display: block;
+}
+
+html:not([data-tips]) .tip--info:is(:hover, :focus-within) > .tip__icon,
+.tip__icon[aria-expanded="true"] {
   background: var(--color-maroon);
   color: var(--color-off-white);
 }
 
-/* The popover pushes and doesn't float: the panel opens in flow under the head, so it moves the plot
-   down and covers nothing at any width. To float it instead, change this block and nothing else. */
-.info-popover {
-  flex: 0 0 100%;
+/* A card is its own stacking context, as its container query contains it, so the one with an open
+   panel rises over the cards after it. It stays under the sticky header. */
+.chart-card:has(.tip:is([data-open], :hover, :focus-within)) {
+  z-index: 9;
 }
 
-.info-popover__links {
+.tip__links {
   display: flex;
   flex-wrap: wrap;
   gap: 0 0.75rem;
   margin: 0;
   padding: 0;
   list-style: none;
-}
-
-.info-popover__panel {
-  display: grid;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-  padding: 0.75rem;
-  background: var(--color-secondary);
-  border-radius: var(--radius-control);
-  font-family: var(--font-sans);
-  font-size: var(--text-small);
-  font-weight: 450;
 }
 
 .pin {
@@ -665,7 +700,7 @@ h2 {
   margin-top: 0.75rem;
 }
 
-/* The dashboard under the first screen: the filter, then a two-column grid per view from 1056. */
+/* The dashboard under the first screen: the filter, then one card to a row at every width. */
 .dashboard {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -713,7 +748,7 @@ h2 {
   overflow-wrap: normal;
 }
 
-/* Tighter, so the widest table's unbroken headings fit a card that spans both columns from 1056. */
+/* Tighter, so the widest table's unbroken headings fit inside its card. */
 .data-toggle__panel .hairline-table th,
 .data-toggle__panel .hairline-table td {
   padding-inline: 0.375rem;
@@ -790,7 +825,7 @@ h2 {
   min-width: 0;
 }
 
-/* A grid, so the shown card takes the row's height and two cards side by side end together. */
+/* A grid, so the shown card takes its panel's whole width. */
 .chain-panel {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -811,17 +846,6 @@ h2 {
   }
 }
 
-@media (min-width: 1056px) {
-  .card-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  /* A card left alone on its row takes the row, so the grid has no hole. */
-  .card-grid > :last-child:nth-child(odd) {
-    grid-column: 1 / -1;
-  }
-}
-
 /* Without :has() nothing here applies, so an old browser shows every panel, long but complete, and
    the plot and table together. Each filter value is listed, as CSS can't compare two attributes. */
 @supports selector(:has(*)) {
@@ -836,7 +860,7 @@ h2 {
     display: none;
   }
 
-  /* With no script to reset the filter, a finding's link still lands on the finding: its card shows
+  /* With no script to reset the filter, a link to a card still lands on it: its card shows
      All, whatever the filter says, and its heading says what it covers. */
   @media (scripting: none) {
     :root:has(.chain-filter input:checked)
@@ -867,29 +891,6 @@ h2 {
   .chart-card:has(> .data-toggle[open]) .chart-card__body {
     grid-template-columns: minmax(0, 1fr);
   }
-
-  /* An open table needs the width. In panels it's the shown panel's toggle that counts, as a hidden
-     panel may still have one open. */
-  @media (min-width: 1056px) {
-    .card-grid > .chart-card:has(> .data-toggle[open]),
-    :root:has(.chain-filter input[value="all"]:checked)
-      .card-grid
-      > .chain-panels:has(> [data-chain-panel="all"] .data-toggle[open]),
-    :root:has(.chain-filter input[value="tempo"]:checked)
-      .card-grid
-      > .chain-panels:has(> [data-chain-panel="tempo"] .data-toggle[open]),
-    :root:has(.chain-filter input[value="ethereum"]:checked)
-      .card-grid
-      > .chain-panels:has(> [data-chain-panel="ethereum"] .data-toggle[open]),
-    :root:has(.chain-filter input[value="base"]:checked)
-      .card-grid
-      > .chain-panels:has(> [data-chain-panel="base"] .data-toggle[open]),
-    :root:has(.chain-filter input[value="solana"]:checked)
-      .card-grid
-      > .chain-panels:has(> [data-chain-panel="solana"] .data-toggle[open]) {
-      grid-column: 1 / -1;
-    }
-  }
 }
 
 /* Choosing an option couldn't change anything here, so there's no control to mislead with. */
@@ -902,7 +903,7 @@ h2 {
 /* Forced colours drop backgrounds, and the background is what shows these are chosen. */
 @media (forced-colors: active) {
   .chain-filter input:checked + span,
-  .info-popover[open] > summary {
+  .tip__icon[aria-expanded="true"] {
     background: Highlight;
     color: HighlightText;
     forced-color-adjust: none;
@@ -934,6 +935,8 @@ h2 {
   position: relative;
   display: flex;
   flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
   padding: 0.5rem 0;
   border-bottom: 1px solid var(--color-border);
   font-size: var(--text-small);
@@ -941,47 +944,9 @@ h2 {
 
 .trust-strip__status {
   display: flex;
-  flex: 1 1 100%;
+  flex: 1 1 auto;
   gap: 0.5rem;
   min-width: 0;
-}
-
-.trust-strip__detail.accordion {
-  flex: 0 0 100%;
-  border: 0;
-}
-
-.trust-strip__detail > summary {
-  justify-content: flex-start;
-  align-items: center;
-  gap: 0.5rem;
-  min-height: 1.5rem;
-  padding: 0;
-}
-
-/* From 768 the trigger shares the row, in a corner this reserves, and stays there when it opens. */
-@media (min-width: 768px) {
-  .trust-strip {
-    padding-right: 11rem;
-  }
-
-  .trust-strip__detail.accordion {
-    flex-basis: calc(100% + 11rem);
-    margin-right: -11rem;
-  }
-
-  .trust-strip__detail > summary {
-    position: absolute;
-    top: 0.5rem;
-    right: 0;
-  }
-}
-
-.trust-strip__detail[open] > div {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0.5rem;
-  padding-top: 0.5rem;
 }
 
 .verdict-block {
@@ -991,8 +956,19 @@ h2 {
 }
 
 .verdict-block__head {
+  display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  row-gap: 0.25rem;
+  gap: 0.25rem 0.75rem;
+}
+
+.verdict-block__head > .tip,
+.verdict-block__frame {
+  font-size: var(--text-small);
+}
+
+.verdict-block__frame {
+  font-weight: 650;
 }
 
 .verdict-block__head h1 {
@@ -1055,86 +1031,9 @@ h2 {
   min-width: 0;
 }
 
-.kpi-cell .info-popover > summary {
-  top: 0.75rem;
-  right: 0.75rem;
-}
-
 .kpi-cell__note {
   font-size: var(--text-meta);
   color: var(--color-meta-text);
-}
-
-/* Two to a row is too narrow to read a panel in, so the open cell takes the row and pushes the rest. */
-@media (max-width: 1055.98px) {
-  .kpi-cell:has(.info-popover[open]) {
-    grid-column: 1 / -1;
-  }
-}
-
-.findings-row ul {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: var(--grid-gap);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-@media (min-width: 768px) {
-  .findings-row ul {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (min-width: 1056px) {
-  .findings-row ul {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
-.finding {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 0.5rem;
-  height: 100%;
-  padding: 0.75rem;
-  background: var(--surface-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-card);
-}
-
-.finding:hover {
-  border-color: var(--color-maroon);
-}
-
-.finding__text {
-  font-size: var(--text-card-title);
-  font-weight: 550;
-  line-height: 1.25;
-}
-
-.finding__marks {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: var(--text-meta);
-}
-
-/* As wide as its words, so the trigger sits right after the last one. The panel takes that width and
-   adds none, or opening it would move the trigger. */
-.marker-legend {
-  width: fit-content;
-  max-width: 100%;
-  column-gap: 0;
-  padding-right: 1.75rem;
-  font-size: var(--text-small);
-}
-
-.marker-legend .info-popover {
-  width: 0;
-  min-width: 100%;
 }
 
 .page-main > *,
@@ -1167,8 +1066,7 @@ html[data-frame] body {
 
 html[data-frame] body::before,
 html[data-frame] body::after,
-.chart-card[data-frame]::before,
-.finding[data-frame]::before {
+.chart-card[data-frame]::before {
   content: "";
   position: absolute;
   top: 0;
@@ -1188,15 +1086,14 @@ html[data-frame] body::after {
   z-index: 20;
 }
 
-.chart-card[data-frame],
-.finding[data-frame] {
+/* The edge follows the card's corners itself, so the card needn't clip, which would cut a tooltip. */
+.chart-card[data-frame] {
   position: relative;
-  overflow: hidden;
 }
 
-.chart-card[data-frame]::before,
-.finding[data-frame]::before {
+.chart-card[data-frame]::before {
   left: 0;
+  border-radius: var(--radius-card) 0 0 var(--radius-card);
 }
 
 .chart-card__frame-word {
@@ -1256,7 +1153,18 @@ html[data-freshness="stale"] .freshness-text__fresh {
 }
 
 .velocity-chart__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
   color: var(--color-meta-text);
+}
+
+/* A full-width card has room for the chains two to a row, on the same scale. */
+@container (min-width: 860px) {
+  .velocity-chart {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 2rem;
+  }
 }
 
 /* A narrow card gives the bar the row's width: the measure's name goes above it. */
@@ -1290,28 +1198,6 @@ html[data-freshness="stale"] .freshness-text__fresh {
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-weight: 550;
-}
-
-.velocity-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 1rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: var(--text-small);
-}
-
-.velocity-legend li {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-}
-
-.velocity-legend__swatch {
-  display: inline-block;
-  width: 0.875rem;
-  height: 0.75rem;
 }
 
 /* The chain grid: measures as rows and chains as columns, with a bar in each cell scaled to its row.
@@ -1450,4 +1336,125 @@ html[data-freshness="stale"] .freshness-text__fresh {
       inset 2px 0 0 var(--color-maroon),
       inset -2px 0 0 var(--color-maroon);
   }
+}
+
+/* A KPI's trigger sits in its cell's corner, which the cell's padding keeps clear. */
+.kpi-cell .tip--info {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+}
+
+/* Every chain's bar in one view, the sum first. The filter highlights a row by weight and a rule. */
+.supply-rows {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.supply-row {
+  display: grid;
+  gap: 0.25rem;
+  padding-left: 0.5rem;
+  border-left: 2px solid transparent;
+}
+
+.supply-row__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.375rem;
+  font-size: var(--text-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.supply-row__name {
+  font-weight: 550;
+}
+
+.supply-row[data-supply-row="all"] .supply-row__name {
+  font-weight: 650;
+}
+
+@supports selector(:has(*)) {
+  :root:has(.chain-filter input[value="tempo"]:checked) [data-supply-row="tempo"],
+  :root:has(.chain-filter input[value="ethereum"]:checked) [data-supply-row="ethereum"],
+  :root:has(.chain-filter input[value="base"]:checked) [data-supply-row="base"],
+  :root:has(.chain-filter input[value="solana"]:checked) [data-supply-row="solana"] {
+    border-left-color: var(--color-maroon);
+  }
+
+  :root:has(.chain-filter input[value="tempo"]:checked) [data-supply-row="tempo"] .supply-row__name,
+  :root:has(.chain-filter input[value="ethereum"]:checked)
+    [data-supply-row="ethereum"]
+    .supply-row__name,
+  :root:has(.chain-filter input[value="base"]:checked) [data-supply-row="base"] .supply-row__name,
+  :root:has(.chain-filter input[value="solana"]:checked)
+    [data-supply-row="solana"]
+    .supply-row__name {
+    font-weight: 650;
+  }
+}
+
+/* A card spans the content width, so from a wide card its notes take a column beside the chart and
+   its legend, instead of a row under them. */
+@container (min-width: 860px) {
+  .chart-card__body:has(> .pinned-notes) {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+  }
+
+  .chart-card__body:not([data-notes]) > .pinned-notes:has(> li + li) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The legend and the figures share the second column, and the bars take the first. */
+  .chart-card__plot[data-beside] .chart-legend {
+    grid-row: 1;
+  }
+
+  .chart-card__plot[data-beside] .chart-stats {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .chart-card__plot[data-beside] > .chart-area {
+    grid-row: 1 / span 2;
+  }
+
+  .supply-row {
+    grid-template-columns: 8rem minmax(0, 1fr);
+    align-items: center;
+    column-gap: 0.75rem;
+  }
+
+  .supply-row__head {
+    display: grid;
+    gap: 0;
+  }
+
+  .supply-row .supply-bar {
+    grid-column: 2;
+  }
+}
+
+/* The footer's reconciliation status: green, with a tick and the word, only on a build that passed. */
+.footer-status--reconciled {
+  color: var(--meaning-positive);
+  font-weight: 650;
+}
+
+.reconciliation-page {
+  display: grid;
+  gap: 1rem;
+  max-width: var(--page-content-width);
+}
+
+.reconciliation-detail {
+  display: grid;
+  gap: 0.75rem;
+  font-size: var(--text-small);
+}
+
+.reconciliation-detail__checks {
+  margin-top: 0.5rem;
+  font-size: var(--text-card-title);
 }

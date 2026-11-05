@@ -67,14 +67,21 @@ describe("pins and notes", () => {
     expect(container.querySelector('[data-note="placed"]')!.hasAttribute("data-chain")).toBe(false);
   });
 
-  it("gives a note its own marker only when it has one", () => {
+  it("keeps a note's short words in view, with the note in full as a tooltip on them", () => {
     const { container } = render(
       <PinnedNotes
-        notes={[{ kind: "day-0", chip: "fact", text: "Minted minus burned." }, notes[1]]}
+        notes={[{ kind: "day-0", text: "Short words.", tip: "The words in full." }, notes[1]]}
       />,
     );
-    expect(container.querySelector('[data-note="day-0"] .status-chip')).not.toBeNull();
-    expect(container.querySelector('[data-note="placed"] .status-chip')).toBeNull();
+    const note = container.querySelector('[data-note="day-0"]')!;
+    const trigger = note.querySelector(".tip__trigger")!;
+    expect(trigger.textContent).toBe("Short words.");
+    expect(trigger.closest(".tip__panel")).toBeNull();
+    expect(document.getElementById(trigger.getAttribute("aria-describedby")!)!.textContent).toBe(
+      "The words in full.",
+    );
+    expect(container.querySelector('[data-note="placed"] [data-tip]')).toBeNull();
+    expect(container.querySelector(".status-chip")).toBeNull();
   });
 
   it("never makes a pin focusable", () => {

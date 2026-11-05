@@ -39,11 +39,11 @@ describe("the chain roles view", () => {
     expect(card.classList.contains("chart-card")).toBe(true);
     expect(card.querySelector("h2")!.textContent).toBe("Ethereum leads on all five measures.");
     expect(card.querySelector(".chart-card__meta")!.textContent).toContain("As of");
-    const panel = card.querySelector(".info-popover__panel")!;
+    const panel = card.querySelector(".tip__panel")!;
     expect(panel.textContent).toContain("Ethereum leads on all 5 measures");
     expect(panel.textContent).toContain("Source:");
     expect(panel.querySelector('a[href="/methodology/#chain-roles"]')).not.toBeNull();
-    expect(card.querySelector("svg, canvas")).toBeNull();
+    expect(card.querySelector(".chart-area svg, canvas")).toBeNull();
   });
 
   it("shows each leading_for value as its sentence, and nothing for a chain with none", () => {
@@ -83,7 +83,7 @@ describe("the chain roles view", () => {
     }));
     expect(days.find((d) => d.chain === "Base")!.day).toContain("2 Nov 2026");
     expect(days.find((d) => d.chain === "Ethereum")!.day).toContain("3 Nov 2026");
-    expect(container.querySelector(".info-popover__panel")!.textContent).toContain(
+    expect(container.querySelector(".tip__panel")!.textContent).toContain(
       "Chains end on different days",
     );
   });
@@ -137,7 +137,11 @@ describe("the chain roles view", () => {
     const { container } = mount();
     const note = container.querySelector('[data-note="no-swaps"]')!;
     expect(note.textContent).toContain("We don’t ingest swaps, so this view can’t show trading.");
-    expect(note.querySelector('a[href="/methodology/#chain-roles"]')).not.toBeNull();
+    // The definition link is the card's tooltip's, so the note keeps only its caveat.
+    expect(note.querySelector("a")).toBeNull();
+    expect(
+      container.querySelector('.chart-card__head .tip__panel a[href="/methodology/#chain-roles"]'),
+    ).not.toBeNull();
     const rest = container.cloneNode(true) as HTMLElement;
     rest.querySelector('[data-note="no-swaps"]')!.remove();
     expect(rest.textContent).not.toMatch(/trading|settlement/i);
@@ -260,7 +264,7 @@ describe("the chain roles view", () => {
       ].find((bar) => bar.getAttribute("data-width") === "0");
       expect(negative).toBeTruthy();
       expect(container.querySelector("[data-chain-grid] caption")!.textContent).toContain(
-        "The marked chain leads that measure.",
+        "The marked chain leads.",
       );
     });
   });

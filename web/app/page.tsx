@@ -1,7 +1,5 @@
 import { ChainFilter } from "@/components/chain-filter";
-import { FindingsRow } from "@/components/findings-row";
 import { KpiRow } from "@/components/kpi-row";
-import { MarkerLegend } from "@/components/marker-legend";
 import { TrustStrip } from "@/components/trust-strip";
 import { VerdictBlock } from "@/components/verdict-block";
 import { ActivityView } from "@/components/views/activity";
@@ -19,23 +17,9 @@ export default function Home() {
   return (
     <main id="main-content" className="page-main">
       <div className="first-screen">
-        <TrustStrip
-          reconciliation={dataset.reconciliation}
-          latest_run={dataset.latest_run}
-          checks={manifest.checks}
-          coverage={manifest.coverage}
-          state={state}
-        />
+        <TrustStrip state={state} />
         <VerdictBlock verdict={verdict} kpis={kpis} state={state} />
         <KpiRow kpis={kpis} state={state} />
-        <FindingsRow
-          journey={dataset.journey}
-          activity={dataset.activity}
-          chain_roles={dataset.chain_roles}
-          definitions={manifest.definitions}
-          state={state}
-        />
-        <MarkerLegend />
       </div>
       <div className="dashboard">
         <ChainFilter options={options} />

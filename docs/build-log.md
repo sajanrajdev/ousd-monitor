@@ -184,3 +184,12 @@ Units U1 to U5 of `docs/plans/2026-11-04-002-dashboard-refurbish-plan.md`. U6 wr
 - **Checks computed by the code they check, again.** U5's first `verify-output` checks for the velocity chart and the grid took their expected figures from the same functions the views render. They now work the figures out from the KPI and chain roles rows on their own, as review asked of U3 and U4 too.
 - **CI ran out of memory again.** With the activity and chain-card groups added, `verify-output-panels.test.ts` crashed its CI worker (SIGABRT, out of memory), as U3's tests had in `verify-output.test.ts`. Each whole-page group is now a file of its own, so a worker of its own. The heap growth behind it is still not understood.
 
+
+### Maintainer review after U5
+
+The changes are listed in [the plan's Maintainer review](plans/2026-11-04-002-dashboard-refurbish-plan.md#maintainer-review).
+
+- **A card clipped what floats out of it.** Sample and preview cards had `overflow: hidden` for their hatched edge, which would have cut any tooltip at the card's border. The edge now rounds its own corners, and nothing clips.
+- **A card is its own stacking context.** Its container query contains it, so an open tooltip painted under the next card. The card with an open tooltip now rises over the cards after it, and stays under the sticky header.
+- **A check counted hidden panels as moved.** The browser check that opening a tooltip moves nothing read each element's place on the page. A hidden filter panel has no box, so its place followed the scroll, and focus scrolling to a tooltip counted as 87 moves. Hidden elements are now left out.
+- **`verify-output` run from the repository root of a worktree** can't find the dataset schemas, as it resolves them from the working directory's parent. Run it from `web/`. This predates the review.

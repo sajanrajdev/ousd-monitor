@@ -21,18 +21,21 @@ export function measureStyle(measure: VelocityMeasure) {
 
 // Hand-built marks, so the chart is in the static HTML and its pins need no script. Each bar has a
 // direct label, on a linear scale from zero to the chart's largest figure. A chain's pin sits beside
-// its name, for the note about that chain.
+// its name, for the note about that chain. Each row names its measure, so there's no legend, and the
+// denominators note's pin sits on the first headline row.
 export function VelocityChart({
   chart,
   pins,
+  headlinePin,
 }: {
   chart: Chart;
   pins: Partial<Record<ChainName, number>>;
+  headlinePin: number;
 }) {
   if (chart.max === null) return <p className="p-4">{UNKNOWN_TEXT}</p>;
   return (
     <div data-flow className="velocity-chart" data-chart="velocity">
-      {chart.groups.map((group) => (
+      {chart.groups.map((group, index) => (
         <div key={group.chain} className="velocity-chart__group" data-velocity-chain={group.chain}>
           <p className="velocity-chart__name">
             {group.name}
@@ -44,7 +47,12 @@ export function VelocityChart({
           </p>
           {group.bars.map((bar) => (
             <div key={bar.measure} className="velocity-chart__row" data-measure={bar.measure}>
-              <span className="velocity-chart__label">{bar.label}</span>
+              <span className="velocity-chart__label">
+                {bar.label}
+                {index === 0 && bar.measure === "headline_velocity_bps" && headlinePin > 0 ? (
+                  <PinMark number={headlinePin} />
+                ) : null}
+              </span>
               <span className="velocity-chart__track">
                 {bar.widthBps !== null && bar.widthBps > 0 ? (
                   <span

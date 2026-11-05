@@ -29,15 +29,13 @@ import {
   SMALL_TICKET_NOTE,
   SMALL_TICKET_PIN,
 } from "./takeaways/caveats.ts";
-import type { ChipKind } from "../components/status-chip.tsx";
 
 // A caveat a card pins, with the words the views show and verify-output expects. `step` is the
-// waterfall row its pin sits on. `chip` marks a note whose marker differs from its card's.
+// waterfall row its pin sits on.
 export type ActivityNote = {
   kind: string;
   text: string;
   step?: WaterfallStep["key"];
-  chip?: ChipKind;
 };
 
 export type ActivityInputs = {
@@ -57,7 +55,7 @@ export type WaterfallPanel = {
   summary: string;
   asOf: string | AsOfRange;
   notes: ActivityNote[];
-  // The notes in full, for the popover, by kind.
+  // The notes in full, for the tooltip, by kind.
   fullNotes: Record<string, string>;
   steps: Table;
   periods: Table;
@@ -125,7 +123,6 @@ export function waterfallPanel(
             kind: "day-0-scope",
             text: day0Pin(scope, chainName),
             ...on("headline_value"),
-            chip: "fact" as const,
           },
         ]
       : []),

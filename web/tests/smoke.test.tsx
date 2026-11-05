@@ -11,7 +11,9 @@ describe("the test setup", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
       "At least half of Open USD (OUSD) supply is sitting still.",
     );
-    expect(screen.getByText(/Is that turning into money that moves\?/)).toBeTruthy();
+    expect(
+      screen.getByText(/Is Open USD \(OUSD\) supply turning into money that moves\?/),
+    ).toBeTruthy();
   });
 
   it("keeps id=main-content on main, so the skip link has somewhere to go", () => {

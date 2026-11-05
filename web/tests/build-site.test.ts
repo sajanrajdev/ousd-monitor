@@ -13,9 +13,13 @@ import { describe, expect, it } from "vitest";
 import { buildRelease, buildSite, Refused } from "@/scripts/build-site.mjs";
 import { expectedFromDataset } from "@/scripts/verify-output.mjs";
 import { at, copySample, editJson, plantFile, releaseGrade, tempDir } from "./dataset-helpers";
-import { plantedFlight, plantedRealMain } from "./planted-first-screen";
+import {
+  plantedFlight,
+  plantedFooter,
+  plantedRealMain,
+  plantedReconciliationMain,
+} from "./planted-first-screen";
 
-const LINE = "Independent. Not affiliated with Open Standard or Bridge.";
 const VERSION = "20261104T060000Z";
 const quiet = () => {};
 
@@ -24,19 +28,20 @@ const STALE_NOTE =
 const STALE_TRUST =
   "Last reconciled 4 Nov 2026, 05:30 UTC. Nothing newer has reached this page, so it may be out of date.";
 
-// What a build of the release-grade copy writes, long past its 36 hours.
+// What a build of the release-grade copy writes, long past its 36 hours, so it didn't pass: the
+// trust row is at the top, and the footer never says "Reconciled".
 function realPage(body: string) {
   return `<!doctype html><html data-dataset-kind="real" data-dataset-version="${VERSION}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
-    <header><p>${LINE}</p></header><p data-stale-note>${STALE_NOTE}</p>${plantedFlight([])}${body}
-    <footer><p>${LINE}</p><p>Not financial advice.</p></footer></body></html>`;
+    <header><a href="/">Open USD Monitor</a></header><p data-stale-note>${STALE_NOTE}</p>${plantedFlight([])}${body}
+    ${plantedFooter(false, { fresh: null, stale: STALE_TRUST })}</body></html>`;
 }
 
-const realMain = () =>
-  plantedRealMain(expectedFromDataset(at(releaseGrade())), STALE_NOTE, STALE_TRUST);
+const realMain = () => plantedRealMain(expectedFromDataset(at(releaseGrade())), STALE_TRUST);
 
 function goodRealBuild(_webRoot: string, target: string) {
   plantFile(target, "index.html", realPage(realMain()));
   plantFile(target, "methodology/index.html", realPage("<main>Fine</main>"));
+  plantFile(target, "reconciliation/index.html", realPage(plantedReconciliationMain(STALE_TRUST)));
 }
 
 function badRealBuild(_webRoot: string, target: string) {

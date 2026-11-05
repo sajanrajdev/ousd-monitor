@@ -36,14 +36,8 @@ export function verdictSentence({ state, scope }: Pick<Verdict, "state" | "scope
   return `On ${chainList(scope)}: ${sentence.charAt(0).toLowerCase()}${sentence.slice(1)}`;
 }
 
-// The supporting line states rule-based numbers. At partial scope it also states an estimated share
-// of OUSD on the chains covered, so it carries the weaker chip.
-export function supportingChip({ scope }: Pick<Verdict, "scope">): "inferred" | "estimate" {
-  return isFullScope(scope) ? "inferred" : "estimate";
-}
-
 // On a preview, a sample or a partial scope, verdict.text carries "Local preview, not a finding." or
-// the estimated share, so it stays on screen. It moves to the popover only on real, four-chain data.
+// the estimated share, so it stays on screen. It moves to the tooltip only on real, four-chain data.
 export function verdictTextVisible(
   { scope }: Pick<Verdict, "scope">,
   { kind }: Pick<DatasetState, "kind">,
@@ -58,7 +52,7 @@ export type VerdictGroup = {
 };
 
 // Empty groups are left out. The first title avoids the word "fact", because `facts` includes
-// rule-based figures that the page chips as Inferred. On sample or preview data an opinion isn't
+// rule-based figures, which the methodology page calls inferred. On sample or preview data an opinion isn't
 // one, so its title says that instead of "Our reading".
 export function verdictGroups(verdict: Verdict, frameWord: FrameWord | null): VerdictGroup[] {
   const groups: VerdictGroup[] = [

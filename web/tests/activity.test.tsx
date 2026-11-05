@@ -39,7 +39,7 @@ describe("the real activity view", () => {
     for (const card of cards) {
       expect(card.querySelector("h2")!.textContent!.length).toBeGreaterThan(10);
       expect(card.querySelector(".chart-card__meta")!.textContent).toContain("As of");
-      const panel = card.querySelector(".info-popover__panel")!;
+      const panel = card.querySelector(".tip__panel")!;
       expect(panel.textContent).toContain("Source:");
       expect(panel.querySelector('a[href^="/methodology/#"]')).not.toBeNull();
     }
@@ -185,7 +185,7 @@ describe("the real activity view", () => {
     }
   });
 
-  it("says the Day 0 scope as a Fact when the rows add up to supply, and leaves it out when not", () => {
+  it("says the Day 0 scope when the rows add up to supply, and leaves it out when not", () => {
     const exact = mount((props) => {
       const [first] = props.activity;
       props.activity.push({
@@ -206,15 +206,16 @@ describe("the real activity view", () => {
       `#${CARD_ANCHORS.waterfall} > [data-chain-panel="all"]`,
     )!;
     const note = card.querySelector('[data-pinned-notes] [data-note="day-0-scope"]')!;
-    expect(note.textContent).toContain("Fact");
+    // No marker: the page reads as inferred throughout, and a fact needs no chip of its own.
+    expect(note.querySelector(".status-chip")).toBeNull();
     expect(note.textContent).toContain("from Day 0, 30 Sept 2026 UTC");
-    expect(note.textContent).toContain("total supply predates it");
+    expect(note.textContent).toContain("supply predates it");
     expect(note.closest("details, noscript")).toBeNull();
     // Pinned on the headline row, and whole in the popover.
     expect(card.querySelector('[data-step="headline_value"] .pin')!.textContent).toBe("1");
-    expect(
-      card.querySelector('.info-popover__panel [data-full-note="day-0-scope"]')!.textContent,
-    ).toContain("Supply also includes mints from before it");
+    expect(card.querySelector('.tip__panel [data-full-note="day-0-scope"]')!.textContent).toContain(
+      "Supply also includes mints from before it",
+    );
     exact.unmount();
     // Mismatched by one base unit, so the figure isn't exact and nothing is claimed.
     const off = mount((props) => {
@@ -228,7 +229,7 @@ describe("the real activity view", () => {
     for (const value of ["all", "tempo", "ethereum", "base", "solana"]) {
       const card = panel(container, CARD_ANCHORS.waterfall, value);
       const note = card.querySelector('[data-pinned-notes] [data-note="small-ticket"]');
-      const full = card.querySelector('.info-popover__panel [data-full-note="small-ticket"]');
+      const full = card.querySelector('.tip__panel [data-full-note="small-ticket"]');
       if (value === "all" || value === "tempo") {
         expect(note!.textContent).toContain("26 Oct 2026");
         expect(note!.textContent).toContain("unproven");
@@ -304,9 +305,9 @@ describe("the real activity view", () => {
   it("says Weeks end on the date shown in the popover, and pins the history", () => {
     const { container } = mount();
     const card = panel(container, CARD_ANCHORS.weekly, "all");
-    expect(
-      card.querySelector('.info-popover__panel [data-full-note="history"]')!.textContent,
-    ).toMatch(/^Weeks end on the date shown, in UTC\. \d+ days of history/);
+    expect(card.querySelector('.tip__panel [data-full-note="history"]')!.textContent).toMatch(
+      /^Weeks end on the date shown, in UTC\. \d+ days of history/,
+    );
     expect(card.querySelector('[data-pinned-notes] [data-note="history"]')!.textContent).toMatch(
       /\d+ days of history: a direction, not a trend\./,
     );
@@ -361,6 +362,6 @@ describe("the real activity view", () => {
     expect(panel.waterfall).toBeNull();
     expect(panel.notes.map((note) => note.kind)).toEqual(["day-0-scope"]);
     expect(panel.notes[0].step).toBeUndefined();
-    expect(panel.notes[0].text).toContain("of Base's $5 total supply predates it");
+    expect(panel.notes[0].text).toContain("of Base's $5 supply predates it");
   });
 });

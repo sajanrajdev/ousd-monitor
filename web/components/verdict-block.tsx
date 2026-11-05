@@ -1,9 +1,8 @@
 import type { DatasetState, KpiRow, Verdict } from "@/lib/dataset";
 import { definitionHref } from "@/lib/definitions";
-import { supportingChip, verdictGroups, verdictSentence, verdictTextVisible } from "@/lib/verdict";
+import { verdictGroups, verdictSentence, verdictTextVisible } from "@/lib/verdict";
 import { FreshnessText } from "./freshness";
-import { InfoPopover } from "./info-popover";
-import { StatusChip } from "./status-chip";
+import { TextTip } from "./tooltip";
 
 export type VerdictBlockProps = {
   verdict: Verdict;
@@ -12,50 +11,70 @@ export type VerdictBlockProps = {
 };
 
 function VerdictText({ verdict }: { verdict: Verdict }) {
+  return <span data-verdict-text>{verdict.text}</span>;
+}
+
+// Phrasing content only, as the tooltip's panel is a span.
+function Reading({ verdict, state }: { verdict: Verdict; state: DatasetState }) {
+  const groups = verdictGroups(verdict, state.frameWord);
   return (
-    <p data-verdict-text>
-      <StatusChip kind={supportingChip(verdict)} /> {verdict.text}
-    </p>
+    <>
+      {verdictTextVisible(verdict, state) ? null : (
+        <span className="block">
+          <VerdictText verdict={verdict} />
+        </span>
+      )}
+      {groups.map((group) => (
+        <span key={group.key} className="block" data-verdict-group={group.key}>
+          <span className="block font-semibold">{group.title}</span>
+          {group.items.map((item) => (
+            <span key={item} className="block">
+              {item}
+            </span>
+          ))}
+        </span>
+      ))}
+      <a href={definitionHref("verdict")} className="target-link underline underline-offset-4">
+        How the reading is made
+      </a>
+    </>
   );
 }
 
+// No marker on the headline: the page reads as a reading throughout. A sample or preview still says
+// it isn't a finding, in plain words beside the headline, as that's a guard and not a marker. The
+// as-of line is the page's state line on a dataset that passed at build, so it carries the
+// reconciled time too once the reader's clock says it's old.
 export function VerdictBlock({ verdict, state }: VerdictBlockProps) {
-  const groups = verdictGroups(verdict, state.frameWord);
   const textVisible = verdictTextVisible(verdict, state);
-  const howWeRead = (
-    <a href={definitionHref("verdict")} className="target-link underline underline-offset-4">
-      How we read this
-    </a>
-  );
   return (
     <section className="verdict-block" data-section="verdict">
-      <p data-section="question">
-        Open USD (OUSD) pays partners to distribute it. Is that turning into money that moves?
-      </p>
-      <div className="verdict-block__head explain-head">
+      <p data-section="question">Is Open USD (OUSD) supply turning into money that moves?</p>
+      <div className="verdict-block__head">
         <h1>{verdictSentence(verdict)}</h1>
-        <StatusChip kind="opinion" frameWord={state.frameWord} />
-        <InfoPopover label="About this reading">
-          <p>{howWeRead}</p>
-          {textVisible ? null : <VerdictText verdict={verdict} />}
-          {groups.map((group) => (
-            <div key={group.key} data-verdict-group={group.key}>
-              <p className="font-semibold">{group.title}</p>
-              <ul className="list-disc pl-5">
-                {group.items.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </InfoPopover>
+        <TextTip text="How we read this" interactive>
+          <Reading verdict={verdict} state={state} />
+        </TextTip>
+        {state.frameWord ? (
+          <p className="verdict-block__frame" data-verdict-frame>
+            {`${state.frameWord}, not a finding.`}
+          </p>
+        ) : null}
       </div>
-      {textVisible ? <VerdictText verdict={verdict} /> : null}
+      {textVisible ? (
+        <p>
+          <VerdictText verdict={verdict} />
+        </p>
+      ) : null}
       <p className="verdict-block__as-of">
-        <FreshnessText fresh={state.asOfLine.fresh} stale={state.asOfLine.stale} />
+        <FreshnessText fresh={state.asOfLine.fresh} stale={state.headStale} />
       </p>
       <noscript>
-        <p className="verdict-block__as-of">{howWeRead}</p>
+        <p className="verdict-block__as-of">
+          <a href={definitionHref("verdict")} className="target-link underline underline-offset-4">
+            How we read this
+          </a>
+        </p>
       </noscript>
     </section>
   );

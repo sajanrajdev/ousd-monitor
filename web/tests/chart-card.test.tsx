@@ -26,7 +26,6 @@ const table: ChartCardProps["table"] = {
 
 const props: ChartCardProps = {
   takeaway: "Most sample supply sits on two chains",
-  chip: "fact",
   source: "Sample data",
   asOf: "2026-11-04T14:05:00Z",
   definitionHref: "/methodology#supply",
@@ -42,7 +41,7 @@ function parsed(card: ReactElement): Document {
 }
 
 describe("chart card", () => {
-  it("renders the takeaway as a heading, the marker and a visible as-of, and the rest on demand", () => {
+  it("renders the takeaway as a heading and a visible as-of, and the rest on demand", () => {
     const { container } = render(
       <main>
         <ChartCard {...props} />
@@ -51,7 +50,6 @@ describe("chart card", () => {
 
     const heading = screen.getByRole("heading", { level: 2 });
     expect(heading.textContent).toBe(props.takeaway);
-    expect(screen.getByText("Fact")).toBeTruthy();
 
     const meta = container.querySelector(".chart-card__meta")!;
     expect(meta.closest("details")).toBeNull();
@@ -59,7 +57,7 @@ describe("chart card", () => {
     expect(meta.querySelector("time")!.getAttribute("datetime")).toBe(props.asOf);
     expect(meta.textContent).not.toContain("Source:");
 
-    const panel = container.querySelector(".info-popover__panel")!;
+    const panel = container.querySelector(".tip__panel")!;
     expect(panel.textContent).toContain("Source: Sample data");
     expect(panel.textContent).toContain("As of 4 Nov 2026, 14:05 UTC");
     expect(panel.textContent).toContain(props.summary);
@@ -69,7 +67,7 @@ describe("chart card", () => {
     expect(within(toggle).getByRole("table", { name: table.caption, hidden: true })).toBeTruthy();
   });
 
-  it("keeps the takeaway and marker in the card's head, outside its popover", () => {
+  it("keeps the takeaway in the card's head, outside its tooltip, with no marker", () => {
     const { container } = render(
       <main>
         <ChartCard {...props} />
@@ -80,14 +78,11 @@ describe("chart card", () => {
     expect(heads).toHaveLength(2);
     for (const head of heads) {
       const heading = head.querySelector(":scope > h2")!;
-      const chip = head.querySelector(":scope > .status-chip")!;
       expect(heading.textContent).toBe(props.takeaway);
-      expect(heading.closest("details")).toBeNull();
-      expect(chip.getAttribute("data-kind")).toBe("fact");
-      expect(chip.closest("details")).toBeNull();
+      expect(heading.closest("details, .tip__panel")).toBeNull();
     }
-    expect(container.querySelector(".info-popover__panel .status-chip")).toBeNull();
-    expect(container.querySelector(".info-popover__panel h2")).toBeNull();
+    expect(container.querySelector(".status-chip")).toBeNull();
+    expect(container.querySelector(".tip__panel h2")).toBeNull();
   });
 
   it("keeps the summary for assistive tech, visually hidden", () => {
@@ -96,9 +91,9 @@ describe("chart card", () => {
     expect(hidden.textContent).toBe(props.summary);
   });
 
-  it("names the card on its popover's trigger and its toggle", () => {
+  it("names the card on its tooltip's trigger and its toggle", () => {
     const { container } = render(<ChartCard {...props} />);
-    expect(container.querySelector(".info-popover > summary")!.getAttribute("aria-label")).toBe(
+    expect(container.querySelector(".tip__icon")!.getAttribute("aria-label")).toBe(
       `About: ${props.takeaway}`,
     );
     expect(container.querySelector(".data-toggle > summary")!.textContent).toContain(
@@ -176,9 +171,7 @@ describe("chart card", () => {
       />,
     );
     expect(container.querySelector(".chart-card")!.id).toBe("where-supply-sits");
-    expect(container.querySelector(".info-popover__panel")!.textContent).toContain(
-      "The long takeaway.",
-    );
+    expect(container.querySelector(".tip__panel")!.textContent).toContain("The long takeaway.");
     expect(screen.getByTestId("more").closest(".data-toggle")).not.toBeNull();
   });
 
@@ -220,12 +213,10 @@ describe("chart card", () => {
       { ...props, summary: undefined },
       // @ts-expect-error the definition link is required
       { ...props, definitionHref: undefined },
-      // @ts-expect-error the chip is required
-      { ...props, chip: undefined },
       // @ts-expect-error the takeaway is required
       { ...props, takeaway: undefined },
     ];
-    expect(missing).toHaveLength(7);
+    expect(missing).toHaveLength(6);
   });
 });
 

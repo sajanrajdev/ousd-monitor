@@ -37,6 +37,12 @@ export type DatasetState = {
   // Fresh text is null when a dataset is stale at build, as it can never become fresh again.
   asOfLine: { fresh: string | null; stale: string };
   trustLine: { fresh: string | null; stale: string };
+  // Reconciled, and fresh when built. Only then does the footer say "Reconciled", and the trust row
+  // leave the top of the main page.
+  passing: boolean;
+  // The main page's as-of line once it's stale. When the build passed, the trust row isn't at the
+  // top to swap, so this line says when supply was last reconciled as well.
+  headStale: string;
   // Why this isn't release grade, for a refusal. Empty only for a dataset fit to release.
   releaseProblems: string[];
 };
@@ -214,6 +220,11 @@ export function deriveState(
   const reconciledAt = manifest.reconciliation?.finished_at;
   const reconciledTime = reconciledAt ? formatUtcDateTime(reconciledAt) : null;
 
+  const passing = kind === "real" && isFresh;
+  const asOfStale = manifest.stale
+    ? `${reason} Data from ${dataTime}.`
+    : `Data from ${dataTime}. Nothing newer has reached this page, so it may be out of date.`;
+
   return {
     kind,
     frameWord: kind === "sample" ? "Sample" : kind === "preview" ? "Preview" : null,
@@ -223,9 +234,7 @@ export function deriveState(
     dataAsOf,
     asOfLine: {
       fresh: isFresh ? (dataAsOf ? `Data as of ${formatAsOf(dataAsOf)}.` : UNKNOWN_TEXT) : null,
-      stale: manifest.stale
-        ? `${reason} Data from ${dataTime}.`
-        : `Data from ${dataTime}. Nothing newer has reached this page, so it may be out of date.`,
+      stale: asOfStale,
     },
     // Never the reconciled sentence on sample or preview numbers, at any age.
     trustLine:
@@ -237,6 +246,10 @@ export function deriveState(
             stale: `Last reconciled ${reconciledTime}. ${reason}`,
           }
         : { fresh: "Not reconciled", stale: "Not reconciled" },
+    passing,
+    headStale: passing
+      ? `Data from ${dataTime}. Last reconciled ${reconciledTime}. ${reason}`
+      : asOfStale,
     releaseProblems: problems,
   };
 }

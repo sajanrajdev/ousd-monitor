@@ -58,11 +58,14 @@ describe("the headline's text rule", () => {
     const { container } = renderBlock(real(), () => {});
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading.textContent).toBe(TODAY.mostly_placed);
-    expect(heading.closest("details")).toBeNull();
+    expect(heading.closest("details, .tip__panel")).toBeNull();
     expect(heading.hasAttribute("style")).toBe(false);
-    expect(
-      container.querySelector(".status-chip[data-kind='opinion']")!.closest("details"),
-    ).toBeNull();
+    // No "Our reading" tag, and on real data no frame words either.
+    expect(container.querySelector(".status-chip")).toBeNull();
+    expect(container.querySelector("[data-verdict-frame]")).toBeNull();
+    const shown = container.querySelector('[data-section="verdict"]')!.cloneNode(true) as Element;
+    for (const panel of shown.querySelectorAll(".tip__panel")) panel.remove();
+    expect(shown.textContent).not.toContain("Our reading");
     expect(readFileSync("app/globals.css", "utf8")).toMatch(
       /\.verdict-block__head h1 \{[^}]*font-size: var\(--text-headline\)/,
     );
@@ -84,32 +87,34 @@ describe("the headline's text rule", () => {
     const dataset = sample(name);
     const { container } = renderBlock(dataset, () => {});
     const text = container.querySelector("[data-verdict-text]")!;
-    expect(text.closest("details")).toBeNull();
+    expect(text.closest("details, .tip__panel")).toBeNull();
     expect(text.textContent).toContain(dataset.summary.verdict.text);
-    expect(container.querySelector(".info-popover__panel [data-verdict-text]")).toBeNull();
+    expect(container.querySelector(".tip__panel [data-verdict-text]")).toBeNull();
   });
 
-  it("preview: its prefix is on screen, and so is the estimate chip", () => {
+  it("preview: its prefix is on screen, and so is the frame's warning, in plain words", () => {
     const dataset = preview();
     expect(dataset.state.kind).toBe("preview");
     const { container } = renderBlock(dataset, () => {});
     const text = container.querySelector("[data-verdict-text]")!;
-    expect(text.closest("details")).toBeNull();
+    expect(text.closest("details, .tip__panel")).toBeNull();
+    const frame = container.querySelector("[data-verdict-frame]")!;
+    expect(frame.textContent).toBe("Preview, not a finding.");
+    expect(frame.closest(".tip__panel")).toBeNull();
+    expect(frame.classList.contains("status-chip")).toBe(false);
     expect(text.textContent).toContain("Local preview, not a finding.");
   });
 
-  it("real, four chains: verdict.text is verbatim in the popover, with the groups and the link", () => {
+  it("real, four chains: verdict.text is verbatim in the tooltip, with the groups and the link", () => {
     const dataset = real();
     expect(dataset.state.kind).toBe("real");
     const { container } = renderBlock(dataset, () => {});
-    const panel = container.querySelector(".info-popover__panel")!;
+    const panel = container.querySelector(".tip__panel")!;
     expect(panel.querySelector("[data-verdict-text]")!.textContent).toContain(
       dataset.summary.verdict.text,
     );
     expect(container.querySelectorAll("[data-verdict-text]")).toHaveLength(1);
-    expect(panel.querySelector('a[href="/methodology/#verdict"]')!.textContent).toBe(
-      "How we read this",
-    );
+    expect(panel.querySelector('a[href="/methodology/#verdict"]')).not.toBeNull();
     for (const item of [
       ...dataset.summary.verdict.facts,
       ...dataset.summary.verdict.estimates,
@@ -119,20 +124,32 @@ describe("the headline's text rule", () => {
     }
   });
 
-  it("the as-of line stays out of the popover, and so do both its texts", () => {
+  it("the as-of line stays out of the tooltip, and so do both its texts", () => {
     const dataset = real();
+    expect(dataset.state.passing).toBe(true);
     const { container } = renderBlock(dataset, () => {});
     const line = container.querySelector(".verdict-block__as-of")!;
-    expect(line.closest("details")).toBeNull();
-    expect(line.textContent).toContain(dataset.state.asOfLine.stale);
+    expect(line.closest("details, .tip__panel")).toBeNull();
+    // A passing build has no trust row at the top, so its stale text says when it was reconciled.
+    expect(dataset.state.headStale).toContain("Last reconciled");
+    expect(line.textContent).toContain(dataset.state.headStale);
     expect(line.textContent).toContain(dataset.state.asOfLine.fresh);
   });
 
-  it("the popover has a name, and joins the page's one-open-at-a-time group", () => {
+  it("keeps the as-of line's plain stale text when the trust row is at the top", () => {
+    const dataset = sample();
+    expect(dataset.state.passing).toBe(false);
+    expect(dataset.state.headStale).toBe(dataset.state.asOfLine.stale);
+  });
+
+  it("'How we read this' is a disclosure tooltip, with the reading inside it", () => {
     const { container } = renderBlock(real(), () => {});
-    const summary = container.querySelector("summary")!;
-    expect(summary.getAttribute("aria-label")).toBe("About this reading");
-    expect(summary.parentElement!.getAttribute("name")).toBe("info");
+    const trigger = screen.getByRole("button", { name: "How we read this" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    const panel = document.getElementById(trigger.getAttribute("aria-controls")!)!;
+    expect(panel.classList.contains("tip__panel")).toBe(true);
+    expect(panel.querySelector("[data-verdict-group]")).not.toBeNull();
+    expect(container.querySelector("details")).toBeNull();
   });
 });
 
@@ -202,16 +219,13 @@ describe("the verdict block", () => {
     );
   });
 
-  it("chips the supporting line Inferred at full scope and Estimate at partial", () => {
-    const full = renderBlock(sample(), () => {});
-    expect(
-      full.container.querySelector("[data-verdict-text] .status-chip .sr-only")!.textContent,
-    ).toBe("Inferred");
-    full.unmount();
-    const partial = renderBlock(sample("partial"), () => {});
-    expect(
-      partial.container.querySelector("[data-verdict-text] .status-chip .sr-only")!.textContent,
-    ).toBe("Estimate");
+  it("puts no marker on the supporting line, at full scope or partial", () => {
+    for (const name of ["complete", "partial"] as const) {
+      const { container, unmount } = renderBlock(sample(name), () => {});
+      expect(container.querySelector("[data-verdict-text]")).not.toBeNull();
+      expect(container.querySelector(".status-chip")).toBeNull();
+      unmount();
+    }
   });
 
   it("keeps facts, estimates and opinions apart, and hides an empty group", () => {
@@ -235,7 +249,7 @@ describe("the verdict block", () => {
       verdict.opinions = [];
     });
     expect(container.querySelector("[data-verdict-group]")).toBeNull();
-    expect(container.querySelector('.info-popover__panel a[href$="#verdict"]')).not.toBeNull();
+    expect(container.querySelector('.tip__panel a[href$="#verdict"]')).not.toBeNull();
   });
 
   it("titles the opinion group Our reading on real data", () => {
@@ -244,10 +258,10 @@ describe("the verdict block", () => {
     const { container } = render(
       <VerdictBlock verdict={dataset.summary.verdict} kpis={[]} state={state} />,
     );
-    expect(
-      within(container).getByText("Our reading", { selector: "p.font-semibold" }),
-    ).toBeTruthy();
-    expect(screen.getAllByText("Our reading").length).toBe(2);
+    // Only the group's title, in the tooltip: the headline no longer carries the tag.
+    const title = within(container).getByText("Our reading");
+    expect(title.closest(".tip__panel")).not.toBeNull();
+    expect(screen.getAllByText("Our reading").length).toBe(1);
   });
 
   it("links #verdict", () => {
@@ -256,10 +270,12 @@ describe("the verdict block", () => {
     expect(link).not.toBeNull();
   });
 
-  it("carries the as-of text and the frame chip", () => {
+  it("carries the as-of text and the frame's warning, as plain text beside the headline", () => {
     const dataset = sample();
     const { container } = renderBlock(dataset, () => {});
     expect(container.textContent).toContain(dataset.state.asOfLine.stale);
-    expect(screen.getByText("Sample, not a finding")).toBeTruthy();
+    const frame = screen.getByText("Sample, not a finding.");
+    expect(frame.closest(".verdict-block__head")).not.toBeNull();
+    expect(frame.closest(".status-chip, .tip__panel")).toBeNull();
   });
 });

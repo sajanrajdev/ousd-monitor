@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { ChainName } from "@/lib/dataset/rows";
-import { StatusChip, type ChipKind } from "./status-chip";
+import { TextTip } from "./tooltip";
 
 export type PinnedNote = {
   // What the note is, on `data-note`, so a check can find a caveat wherever it is pinned.
@@ -8,8 +8,10 @@ export type PinnedNote = {
   // Names its chain or part in words, so it reads without the pin.
   text: ReactNode;
   chain?: ChainName;
-  // Only when the note differs from its card's marker.
-  chip?: ChipKind;
+  // The caveat explained in full, in a tooltip on the note's own words. The words stay the caveat, so
+  // nothing a reader needs is only in the tooltip. `interactive` when it holds a link.
+  tip?: ReactNode;
+  interactive?: boolean;
 };
 
 // A note's number is its place in the list, so it's worked out and never written by hand. Null if a
@@ -47,7 +49,8 @@ export function Pin({
   return number === null ? null : <PinMark number={number} />;
 }
 
-// Always visible, and outside the graphic. Never in a details or noscript, which verify-output fails.
+// Always visible, and outside the graphic. Never in a details, a noscript or a tooltip, which
+// verify-output fails.
 export function PinnedNotes({ notes }: { notes: PinnedNote[] }) {
   if (notes.length === 0) return null;
   return (
@@ -56,12 +59,13 @@ export function PinnedNotes({ notes }: { notes: PinnedNote[] }) {
         <li key={`${note.kind}:${note.chain ?? ""}`} data-note={note.kind} data-chain={note.chain}>
           <PinMark number={index + 1} />
           <p>
-            {note.chip ? (
-              <>
-                <StatusChip kind={note.chip} />{" "}
-              </>
-            ) : null}
-            {note.text}
+            {note.tip ? (
+              <TextTip text={note.text} interactive={note.interactive}>
+                {note.tip}
+              </TextTip>
+            ) : (
+              note.text
+            )}
           </p>
         </li>
       ))}

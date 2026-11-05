@@ -95,7 +95,7 @@ describe("NamedLabelsCard", () => {
     const card = container.querySelector(".chart-card")!;
     expect(card.getAttribute("data-frame")).toBe("Sample");
     expect(card.querySelector(".chart-card__meta time[datetime]")).not.toBeNull();
-    const panel = card.querySelector(".info-popover__panel")!;
+    const panel = card.querySelector(".tip__panel")!;
     expect(panel.textContent).toContain("Source:");
     expect(panel.querySelector('a[href*="#named-labels"]')).not.toBeNull();
     expect(screen.getByRole("heading", { level: 3 })).toBeTruthy();

@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { CARD_ANCHORS } from "@/lib/definitions";
 import { expectedFromDataset, verifyOutput } from "@/scripts/verify-output.mjs";
 import { at, plantFile, releaseGrade, tempDir } from "./dataset-helpers";
-import { plantedFlight, plantedRealMain } from "./planted-first-screen";
+import {
+  plantedFlight,
+  plantedFooter,
+  plantedRealMain,
+  plantedReconciliationMain,
+} from "./planted-first-screen";
 
 // Each whole-page group is a file of its own, and so a worker of its own, as one worker running
 // them all ran out of memory in CI.
@@ -10,12 +15,19 @@ import { plantedFlight, plantedRealMain } from "./planted-first-screen";
 // times, which the heap of a file with hundreds of tests can't also hold. For the same reason they get
 // longer than the default, as a slower machine takes seconds over a test with several such pages.
 const WHOLE_PAGE_TIMEOUT_MS = 30_000;
-const LINE = "Independent. Not affiliated with Open Standard or Bridge.";
+// The release-grade copy, long past its 36 hours, so its detail page states it as stale.
+const RECONCILED_TRUST =
+  "Last reconciled 4 Nov 2026, 05:30 UTC. Nothing newer has reached this page, so it may be out of date.";
 
 function site({ main, methodology }: { main: string; methodology: string }) {
   const dir = tempDir();
   plantFile(dir, "index.html", main);
   plantFile(dir, "methodology/index.html", methodology);
+  plantFile(
+    dir,
+    "reconciliation/index.html",
+    methodology.replace("<main>Fine</main>", plantedReconciliationMain(RECONCILED_TRUST)),
+  );
   return dir;
 }
 
@@ -25,11 +37,11 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
   const TRUST =
     "Last reconciled 4 Nov 2026, 05:30 UTC. Nothing newer has reached this page, so it may be out of date.";
   const expected = expectedFromDataset(at(releaseGrade()));
-  const main = plantedRealMain(expected, STALE, TRUST);
+  const main = plantedRealMain(expected, TRUST);
   const page = (body: string) =>
     `<!doctype html><html data-dataset-kind="real" data-dataset-version="${expected.version}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
-    <header><p>${LINE}</p></header><p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
-    <footer><p>${LINE}</p><p>Not financial advice.</p></footer></body></html>`;
+    <header><a href="/">Open USD Monitor</a></header><p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
+    ${plantedFooter(false, { fresh: null, stale: TRUST })}</body></html>`;
   const check = (body: string) =>
     verifyOutput(site({ main: page(body), methodology: page("<main>Fine</main>") }), expected);
   const inPanel = (id: string, value: string, change: (panel: string) => string) => {
@@ -131,9 +143,8 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
         '$1<span class="status-chip" data-kind="fact">F</span> ',
       ),
     );
-    expect(faults(marker, K, "solana")).toEqual(
-      expect.arrayContaining([expect.stringContaining("history note's marker isn't absent")]),
-    );
+    // A marker is gone from the page, so planting one back fails the page, wherever it is.
+    expect(check(marker)).toContain("index.html: a marker is back on the main page");
     const hidden = inPanel(K, "solana", (html) =>
       html.replace(
         /<ol data-pinned-notes>/,

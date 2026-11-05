@@ -3,9 +3,8 @@ import type { FrameWord } from "@/lib/dataset/state";
 import { formatAsOf, type AsOfRange } from "@/lib/format";
 import { DataToggle } from "./data-toggle";
 import { HairlineTable, type HairlineTableProps } from "./hairline-table";
-import { InfoPopover } from "./info-popover";
 import { PinnedNotes, type PinnedNote } from "./pinned-notes";
-import { StatusChip, type ChipKind } from "./status-chip";
+import { InfoTip } from "./tooltip";
 
 // Every prop from `takeaway` to `children` is required, so a chart missing its source, time,
 // definition, summary or table doesn't compile. `frameWord` comes from the dataset's state and is
@@ -13,7 +12,6 @@ import { StatusChip, type ChipKind } from "./status-chip";
 // summary and table are server-rendered; Recharts is not.
 export type ChartCardProps = {
   takeaway: string;
-  chip: ChipKind;
   source: string;
   asOf: string | AsOfRange;
   definitionHref: string;
@@ -25,7 +23,7 @@ export type ChartCardProps = {
   id?: string;
   // Short caveats, always visible, numbered to their pins in the chart.
   notes?: PinnedNote[];
-  // More for the popover, under the summary: the long takeaway or a note in full. Nothing essential.
+  // More for the tooltip, under the summary: the long takeaway or a note in full. Nothing essential.
   detail?: ReactNode;
   // Further tables under the data toggle, after the chart's own.
   moreTables?: ReactNode;
@@ -50,7 +48,6 @@ export type TableCardProps = Omit<
 type CardFrameProps = Pick<
   ChartCardProps,
   | "takeaway"
-  | "chip"
   | "source"
   | "asOf"
   | "definitionHref"
@@ -71,10 +68,9 @@ function CardNote({ note }: { note: ReactNode }) {
 }
 
 // The parts every card has. The as-of time and frame word stay visible, so a cropped card still says
-// them. Source and definition sit in the popover, and in a plain note with JavaScript off.
+// them. A clock says the time is an as-of time, and the words are there for assistive tech. Source and definition sit in the tooltip, and in a plain note with JavaScript off.
 function CardFrame({
   takeaway,
-  chip,
   source,
   asOf,
   definitionHref,
@@ -97,8 +93,7 @@ function CardFrame({
     >
       <div className="chart-card__head explain-head">
         <Heading id={headingId}>{takeaway}</Heading>
-        <StatusChip kind={chip} frameWord={frameWord} />
-        <InfoPopover label={`About: ${takeaway}`}>
+        <InfoTip label={`About: ${takeaway}`}>
           <p>{summary}</p>
           {detail}
           <p>Source: {source}</p>
@@ -108,12 +103,24 @@ function CardFrame({
               Definition
             </a>
           </p>
-        </InfoPopover>
+        </InfoTip>
       </div>
       <p className="sr-only">{summary}</p>
       {children}
       <p className="chart-card__meta mt-3">
-        As of <time dateTime={when.dateTime}>{when.text}</time>
+        <svg
+          className="chart-card__clock"
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" />
+          <path d="M6 3v3h2.5" fill="none" stroke="currentColor" />
+        </svg>
+        <span className="sr-only">As of </span>
+        <time dateTime={when.dateTime}>{when.text}</time>
         {frameWord ? (
           <>
             {" "}

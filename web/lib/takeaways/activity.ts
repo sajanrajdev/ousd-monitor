@@ -253,7 +253,7 @@ export function velocityHeading(kpis: KpiRow[]): string {
   return `${takeaway.split(". ")[0].replace(/\.$/, "")}.`;
 }
 
-// `pin` is the short form kept in view beside the chain; `text` stays whole in the popover.
+// `pin` is the short form kept in view beside the chain; `text` stays whole in the tooltip.
 export type VelocityWarning = { chain: ChainName; day: string; text: string; pin: string };
 
 // One dated sentence pair per manifest warning on circulating supply, the denominator of velocity.
@@ -269,7 +269,7 @@ export function velocityWarnings(warnings: ManifestWarning[]): VelocityWarning[]
         chain: warning.chain,
         day: warning.day,
         text: `On ${formatUtcDate(warning.day)}, ${name}'s circulating supply, which its velocity divides by, moved sharply: from ${formatCompact(warning.previous)} to ${formatCompact(warning.current)}. Its velocity is unusually ${fell ? "high" : "low"} that day and shouldn't be read as a trend.`,
-        pin: `${name}, ${formatUtcDate(warning.day)}: circulating supply moved from ${formatCompact(warning.previous)} to ${formatCompact(warning.current)}, so velocity is unusually ${fell ? "high" : "low"} that day and shouldn't be read as a trend.`,
+        pin: `${name}, ${formatUtcDate(warning.day)}: circulating supply moved from ${formatCompact(warning.previous)} to ${formatCompact(warning.current)}, so velocity is unusually ${fell ? "high" : "low"}, not a trend.`,
       },
     ];
   });

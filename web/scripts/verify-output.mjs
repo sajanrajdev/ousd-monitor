@@ -12,16 +12,13 @@ import { CARD_ANCHORS, CHAIN_NAMES, TOKEN_CONTRACTS } from "../lib/definitions.t
 import { exchangeRows } from "../lib/exchange-rows.ts";
 import { formatBps, formatCompact, formatExact, UNKNOWN_TEXT } from "../lib/format.ts";
 import {
-  activityChains,
   day0Scope,
   historyLabel,
   stepFigure,
   velocityHeading,
   velocityWarnings,
   waterfall,
-  waterfallHeading,
   weeklyEveryday,
-  weeklyHeading,
 } from "../lib/takeaways/activity.ts";
 import {
   PERIOD_COLUMNS,
@@ -33,9 +30,8 @@ import {
 import {
   day0Pin,
   everydayNote,
-  EXCHANGE_FLOOR_LINK,
-  EXCHANGE_FLOOR_NOTE,
-  exchangeCoverageNote,
+  EXCHANGE_FLOOR_PIN,
+  exchangeCoveragePin,
   historyPin,
   HOPS_NOTE,
   issuerUnlabeledNote,
@@ -58,9 +54,8 @@ import {
   seriesPanel,
   supplyPanel,
 } from "../lib/supply-segments.ts";
-import { chainRolesHeading } from "../lib/takeaways/chain-roles.ts";
 import { velocityChart } from "../lib/chain-views.ts";
-import { exchangeLinkedBands, journeyHeading } from "../lib/takeaways/journey.ts";
+import { exchangeLinkedBands } from "../lib/takeaways/journey.ts";
 import { verdictSentence, verdictTextVisible } from "../lib/verdict.ts";
 
 const INDEPENDENCE_LINE = "Independent. Not affiliated with Open Standard or Bridge.";
@@ -100,6 +95,8 @@ const OUT_OF_VIEW = [
   "style",
   "[hidden]",
   ".sr-only",
+  // A tooltip's panel shows only on hover or focus, so nothing in it is in view.
+  ".tip__panel",
   '[style*="display:none"]',
   '[style*="display: none"]',
   '[style*="visibility:hidden"]',
@@ -176,16 +173,61 @@ function escapedNameMatcher(name) {
   return new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`);
 }
 
+// The header keeps only the name, so the independence line is the footer's, in view with nothing
+// opened, on every page.
 function checkEveryPage(page, document, problems) {
-  const header = viewText(document.querySelector("header"));
   const footer = viewText(document.querySelector("footer"));
-  if (!header.includes(INDEPENDENCE_LINE)) {
-    problems.push(`${page}: no independence line in the header`);
-  }
   if (!footer.includes(INDEPENDENCE_LINE)) {
     problems.push(`${page}: no independence line in the footer`);
   }
   if (!/not financial advice/i.test(footer)) problems.push(`${page}: no "not financial advice"`);
+  if (!document.querySelector('footer a[href^="/methodology"]')) {
+    problems.push(`${page}: no methodology link in the footer`);
+  }
+}
+
+const RECONCILED = /\bReconciled\b/;
+
+// "Reconciled", in green, is for a build that passed. On any other it's nowhere in the footer, seen
+// or swapped out, so a reader's clock can't reveal it either. On a passing build it's the fresh text,
+// links to the detail page, and its tooltip holds the dated sentence, with the stale text beside it.
+function checkFooterStatus(page, document, expected, problems) {
+  const status = document.querySelector("footer [data-footer-status]");
+  if (!status) {
+    problems.push(`${page}: no reconciliation status in the footer`);
+    return;
+  }
+  const marked = status.querySelectorAll("[data-reconciled]");
+  if (!expected.passing) {
+    if (marked.length > 0 || RECONCILED.test(status.textContent)) {
+      problems.push(`${page}: the footer says "Reconciled" on a build that didn't pass`);
+    }
+    if (!viewText(status).includes(expected.trustLine.stale)) {
+      problems.push(`${page}: the footer's status doesn't say "${expected.trustLine.stale}"`);
+    }
+  } else {
+    const word = marked[0];
+    const link = word?.querySelector('a[href="/reconciliation/"]');
+    if (marked.length !== 1 || !word.closest(".freshness-text__fresh")) {
+      problems.push(`${page}: the footer's "Reconciled" isn't its fresh text, once`);
+    } else if (!RECONCILED.test(viewText(word)) || !viewText(word).includes("✓")) {
+      problems.push(`${page}: the footer's "Reconciled" lost its tick or its word`);
+    }
+    const tip = link && document.getElementById(link.getAttribute("aria-describedby") ?? "");
+    if (!tip?.textContent.includes(expected.trustLine.fresh)) {
+      problems.push(`${page}: the footer's "Reconciled" has no tooltip with the dated sentence`);
+    }
+    const stale = status.querySelector(".freshness-text__stale");
+    if (
+      !stale?.textContent.includes(expected.trustLine.stale) ||
+      RECONCILED.test(stale.textContent)
+    ) {
+      problems.push(`${page}: the footer's status has no stale text to swap to`);
+    }
+  }
+  if (!status.querySelector('a[href="/reconciliation/"]')) {
+    problems.push(`${page}: the footer's status doesn't link to the reconciliation page`);
+  }
 }
 
 function checkStateOnPage(page, document, expected, problems) {
@@ -231,16 +273,24 @@ function checkFreshnessOnPage(page, document, expected, problems) {
   if (!note.includes(expected.asOfLine.stale)) problems.push(`${page}: no stale note`);
 }
 
+// A build that passed has no trust row at the top: its as-of line carries the reconciled time once
+// the reader's clock finds it old. Any other keeps the trust row, as before.
 function checkMainFreshness(page, document, expected, problems) {
   const shownFresh = document.documentElement.dataset.freshness === "fresh";
   const verdict = viewText(document.querySelector('[data-section="verdict"]'));
-  const trust = viewText(document.querySelector('[data-section="trust-strip"]'));
-  if (!verdict.includes(expected.asOfLine.stale)) {
+  const strip = document.querySelector('[data-section="trust-strip"]');
+  const trust = viewText(strip);
+  if (!verdict.includes(expected.headStale)) {
     problems.push(`${page}: the verdict block has no stale text`);
   }
   if (shownFresh && expected.asOfLine.fresh && !verdict.includes(expected.asOfLine.fresh)) {
     problems.push(`${page}: the verdict block has no fresh text`);
   }
+  if (expected.passing) {
+    if (strip) problems.push(`${page}: a build that passed still has the trust row at the top`);
+    return;
+  }
+  if (!strip) problems.push(`${page}: the trust row isn't at the top on a build that didn't pass`);
   // On sample or preview data the strip's own check, below, covers both.
   if (expected.frameWord) return;
   if (!trust.includes(expected.trustLine.stale)) {
@@ -251,14 +301,20 @@ function checkMainFreshness(page, document, expected, problems) {
   }
 }
 
-// Only the verdict's chip. The words "Our reading" are fine in an accordion's heading, or in the
-// methodology page's table of what each chip means.
+// The page has no markers. A sample or preview still says, in plain words in view beside the
+// headline, that it isn't a finding.
 function checkMainFrame(page, document, expected, problems) {
+  if (document.querySelector("main .status-chip, main [data-section='marker-legend']")) {
+    problems.push(`${page}: a marker is back on the main page`);
+  }
+  const frame = document.querySelector('[data-section="verdict"] [data-verdict-frame]');
   const word = expected.frameWord;
-  if (!word) return;
-  const chip = document.querySelector('[data-section="verdict"] .status-chip[data-kind="opinion"]');
-  if (viewText(chip).trim() !== `${word}, not a finding`) {
-    problems.push(`${page}: the verdict chip doesn't say "${word}, not a finding"`);
+  if (!word) {
+    if (frame) problems.push(`${page}: real data says it isn't a finding`);
+    return;
+  }
+  if (viewText(frame).trim() !== `${word}, not a finding.`) {
+    problems.push(`${page}: the verdict doesn't say "${word}, not a finding." in view`);
   }
   if (!viewText(document.querySelector('[data-section="kpi-row"]')).includes(word)) {
     problems.push(`${page}: no "${word}" in the KPI row`);
@@ -270,9 +326,7 @@ function checkMainFrame(page, document, expected, problems) {
   }
 }
 
-const FINDINGS = 4;
 const KPIS = 4;
-const LEGEND_WORDS = ["Fact", "Inferred", "Estimate"];
 const TRUST_CAVEAT = "It doesn't verify placed share or velocity.";
 
 const definitionLink = (block) =>
@@ -281,7 +335,7 @@ const definitionLink = (block) =>
   );
 
 // The headline is the verdict's own sentence. verdict.text is verbatim, in view unless the dataset
-// allows the popover, and everything else moved there keeps its words.
+// allows the tooltip, and everything else moved there keeps its words.
 function checkHeadline(page, document, { verdict }, problems) {
   const block = document.querySelector('[data-section="verdict"]');
   if (viewText(block?.querySelector("h1")).trim() !== verdict.sentence) {
@@ -290,19 +344,19 @@ function checkHeadline(page, document, { verdict }, problems) {
   if (!viewText(block?.querySelector('[data-section="question"]')).trim()) {
     problems.push(`${page}: no question line in view`);
   }
-  const panel = block?.querySelector(".info-popover__panel");
+  const panel = block?.querySelector(".tip__panel");
   if (verdict.textVisible) {
     if (!viewText(block).includes(verdict.text)) {
       problems.push(`${page}: verdict.text isn't in view on this dataset`);
     }
   } else if (!panel?.textContent.includes(verdict.text)) {
-    problems.push(`${page}: verdict.text is neither in view nor in its popover`);
+    problems.push(`${page}: verdict.text is neither in view nor in its tooltip`);
   }
   if (verdict.items.some((item) => !panel?.textContent.includes(item))) {
-    problems.push(`${page}: the headline's popover has lost a verdict item`);
+    problems.push(`${page}: the headline's tooltip has lost a verdict item`);
   }
   if (!definitionLink(panel))
-    problems.push(`${page}: the headline's popover has no definition link`);
+    problems.push(`${page}: the headline's tooltip has no definition link`);
 }
 
 function checkKpiRow(page, document, expected, problems) {
@@ -318,14 +372,11 @@ function checkKpiRow(page, document, expected, problems) {
     } else if (value !== expected.kpiValues[index]) {
       problems.push(`${page}: ${label} isn't the dataset's figure`);
     }
-    if (!viewText(cell.querySelector(".status-chip")).trim()) {
-      problems.push(`${page}: a KPI has no marker in view`);
-    }
-    const panel = cell.querySelector(".info-popover__panel");
+    const panel = cell.querySelector(".tip__panel");
     if (!panel?.querySelector("[data-kpi-note]")?.textContent.trim()) {
-      problems.push(`${page}: a KPI's popover has no note`);
+      problems.push(`${page}: a KPI's tooltip has no note`);
     }
-    if (!definitionLink(panel)) problems.push(`${page}: a KPI's popover has no definition link`);
+    if (!definitionLink(panel)) problems.push(`${page}: a KPI's tooltip has no definition link`);
     if (!definitionLink(cell.querySelector("noscript"))) {
       problems.push(`${page}: a KPI's noscript note has no definition link`);
     }
@@ -335,63 +386,80 @@ function checkKpiRow(page, document, expected, problems) {
   }
 }
 
-// A finding is its chart's heading with its marker, on a link that lands on that chart, and it says
-// what the dataset says. A finding that only agrees with its card could be wrong in both places.
-function checkFindings(page, document, expected, problems) {
-  const word = expected.frameWord;
-  const links = [...document.querySelectorAll('[data-section="findings"] a[data-finding-link]')];
-  if (links.length !== FINDINGS) problems.push(`${page}: there are ${links.length} findings`);
-  for (const link of links) {
-    const href = link.getAttribute("href") ?? "";
-    const text = viewText(link.querySelector(".finding__text")).trim();
-    const chip = link.querySelector(".status-chip");
-    if (!text) problems.push(`${page}: a finding has no text in view`);
-    if (!viewText(chip).trim()) problems.push(`${page}: a finding has no marker in view`);
-    if (word && !viewText(link).includes(word)) {
-      problems.push(`${page}: a finding has no "${word}"`);
-    }
-    const target = href.startsWith("#") ? document.getElementById(href.slice(1)) : null;
-    if (!target) {
-      problems.push(`${page}: a finding links to ${href}, which isn't on the page`);
-      continue;
-    }
-    const head = target.querySelector(".chart-card__head");
-    if (head?.querySelector("h2, h3")?.textContent.trim() !== text) {
-      problems.push(`${page}: a finding differs from the heading of ${href}`);
-    }
-    if (head?.querySelector(".status-chip")?.dataset.kind !== chip?.dataset.kind) {
-      problems.push(`${page}: a finding's marker differs from ${href}`);
-    }
-  }
-  for (const { id, text } of expected.findings) {
-    const link = links.find((candidate) => candidate.getAttribute("href") === `#${id}`);
-    if (viewText(link?.querySelector(".finding__text")).trim() !== text) {
-      problems.push(`${page}: the finding for #${id} isn't the dataset's heading`);
-    }
-  }
-}
-
-function checkLegend(page, document, problems) {
-  const legend = document.querySelector('[data-section="marker-legend"]');
-  if (LEGEND_WORDS.some((word) => !viewText(legend).includes(word))) {
-    problems.push(`${page}: the marker legend isn't in view`);
-  }
-  if (!definitionLink(legend?.querySelector(".info-popover__panel"))) {
-    problems.push(`${page}: the marker legend's popover has no definition link`);
-  }
-}
-
-function checkTrustDetail(page, document, problems) {
-  const details = document.querySelectorAll('[data-section="trust-strip"] details');
-  if (details.length !== 1) {
-    problems.push(`${page}: the trust row has ${details.length} disclosures, not one`);
+// The trust row's disclosure is its own page now, with a way back to the dashboard.
+function checkReconciliationPage(page, document, expected, problems) {
+  const detail = document.querySelectorAll('main [data-section="reconciliation"]');
+  if (detail.length !== 1) {
+    problems.push(`${page}: there are ${detail.length} reconciliation details, not one`);
     return;
   }
-  if (!details[0].textContent.includes(TRUST_CAVEAT)) {
-    problems.push(`${page}: the trust row's disclosure has lost what it says it doesn't verify`);
+  const text = viewText(detail[0]);
+  if (!text.includes(TRUST_CAVEAT)) {
+    problems.push(`${page}: the detail has lost what it says it doesn't verify`);
   }
-  if (!definitionLink(details[0])) {
-    problems.push(`${page}: the trust row's disclosure has no definition link`);
+  if (!text.includes(expected.trustLine.stale)) {
+    problems.push(`${page}: the detail doesn't state the reconciliation's state`);
+  }
+  if (!definitionLink(detail[0])) problems.push(`${page}: the detail has no definition link`);
+  if (!detail[0].querySelector("table") && !text.includes(UNKNOWN_TEXT)) {
+    problems.push(`${page}: the detail has neither its table nor "${UNKNOWN_TEXT}"`);
+  }
+  const back = [...document.querySelectorAll('main a[href="/"]')].find(
+    (link) => viewText(link).trim() === "Back to the dashboard",
+  );
+  if (!back) problems.push(`${page}: no "Back to the dashboard" link to /`);
+}
+
+// Explanations float: a details element on the main page is a data toggle and nothing else, so no
+// popover, accordion or disclosure can push the page down again.
+function checkNoPushDown(page, document, problems) {
+  for (const details of document.querySelectorAll("main details")) {
+    if (!details.classList.contains("data-toggle")) {
+      problems.push(`${page}: an explanation pushes the page down, in a details element`);
+    }
+  }
+}
+
+const FOCUSABLE = "a[href], button, input, select, textarea, [tabindex]";
+
+// Every tooltip is reached by keyboard: its trigger is a native button or link, with a name, and
+// points at its panel, which comes straight after it, so Tab moves from one into the other. A panel
+// with anything focusable is a disclosure, with aria-expanded, as role="tooltip" can't hold a link.
+function checkTooltips(page, document, problems) {
+  for (const tip of document.querySelectorAll("[data-tip]")) {
+    const trigger = tip.querySelector(":scope > .tip__trigger");
+    const panel = tip.querySelector(":scope > .tip__panel");
+    const name = trigger?.getAttribute("aria-label")?.trim() || trigger?.textContent.trim();
+    const native =
+      trigger?.tagName === "BUTTON" || (trigger?.tagName === "A" && trigger.hasAttribute("href"));
+    if (!trigger || !native || trigger.getAttribute("tabindex") === "-1" || !name) {
+      problems.push(`${page}: a tooltip's trigger can't be reached by keyboard, or has no name`);
+      continue;
+    }
+    if (!panel?.id || trigger.nextElementSibling !== panel) {
+      problems.push(`${page}: a tooltip's panel doesn't follow its trigger`);
+      continue;
+    }
+    const interactive = panel.querySelector(FOCUSABLE) !== null;
+    if (interactive) {
+      if (
+        trigger.getAttribute("aria-controls") !== panel.id ||
+        !trigger.hasAttribute("aria-expanded") ||
+        panel.getAttribute("role") === "tooltip"
+      ) {
+        problems.push(`${page}: a tooltip with a link isn't a disclosure`);
+      }
+    } else if (
+      trigger.getAttribute("aria-describedby") !== panel.id &&
+      trigger.getAttribute("aria-controls") !== panel.id
+    ) {
+      problems.push(`${page}: a tooltip's trigger doesn't point at its panel`);
+    } else if (
+      trigger.getAttribute("aria-describedby") === panel.id &&
+      panel.getAttribute("role") !== "tooltip"
+    ) {
+      problems.push(`${page}: a tooltip describing its trigger has no role="tooltip"`);
+    }
   }
 }
 
@@ -404,10 +472,6 @@ function noteWords(note) {
   for (const pin of copy.querySelectorAll(".pin")) {
     if (PIN_NUMBER.test(pin.textContent.trim())) pin.remove();
   }
-  // A marker says what kind of claim a note is, and isn't one of its words. Panels check it apart.
-  // Only a real marker, with its kind, at the head of the note's words is left out.
-  const lead = copy.querySelector(":scope > p > .status-chip[data-kind]:first-child");
-  if (lead) lead.remove();
   return viewText(copy, "");
 }
 
@@ -461,8 +525,8 @@ function drawsOnlyInBrowser(area) {
   return !area.textContent.trim() || area.querySelector(".recharts-responsive-container");
 }
 
-// A card's takeaway, marker and time stay in view. Its source and definition are one tap away in the
-// popover, and are in a plain note with JavaScript off, which the page's parser reads as elements
+// A card's takeaway and time stay in view. Its source and definition are one tap away in the
+// tooltip, and are in a plain note with JavaScript off, which the page's parser reads as elements
 // here. The table is required by type, and this says it reached the page.
 function checkCards(page, document, problems) {
   for (const card of document.querySelectorAll(".chart-card")) {
@@ -470,17 +534,13 @@ function checkCards(page, document, problems) {
     if (!headings.some((heading) => viewText(heading).trim())) {
       problems.push(`${page}: a card has no visible takeaway`);
     }
-    const chips = [...card.querySelectorAll(".chart-card__head .status-chip")];
-    if (!chips.some((chip) => viewText(chip).trim())) {
-      problems.push(`${page}: a card has no visible marker`);
-    }
     const time = visibleMeta(card)?.querySelector("time[datetime]");
     if (!time?.getAttribute("datetime").trim() || !viewText(time).trim()) {
       problems.push(`${page}: a card has no visible as-of time`);
     }
-    const panel = hasSourceAndDefinition(card.querySelector(".info-popover__panel"));
-    if (!panel.source) problems.push(`${page}: a card's popover has no source`);
-    if (!panel.definition) problems.push(`${page}: a card's popover has no definition link`);
+    const panel = hasSourceAndDefinition(card.querySelector(".chart-card__head .tip__panel"));
+    if (!panel.source) problems.push(`${page}: a card's tooltip has no source`);
+    if (!panel.definition) problems.push(`${page}: a card's tooltip has no definition link`);
     const notes = [...card.querySelectorAll("noscript")].map(hasSourceAndDefinition);
     if (!notes.some((note) => note.source)) {
       problems.push(`${page}: a card's noscript note has no source`);
@@ -497,8 +557,8 @@ function checkCards(page, document, problems) {
     }
   }
   for (const notes of document.querySelectorAll("[data-pinned-notes]")) {
-    if (notes.closest("details, noscript")) {
-      problems.push(`${page}: pinned notes inside a details or noscript`);
+    if (notes.closest("details, noscript, .tip__panel")) {
+      problems.push(`${page}: pinned notes inside a details, noscript or tooltip`);
     }
   }
 }
@@ -658,8 +718,8 @@ function flightText(node, values, seen = new Set()) {
   if (node[0] === "$" && typeof node[1] === "string") {
     // A note's pin is a number outside its words, as in noteWords.
     if (node[3]?.className === "pin" && typeof node[3].children === "number") return "";
-    // And a marker isn't one of its words either, as in noteWords.
-    if (/(^|\s)status-chip(\s|$)/.test(node[3]?.className ?? "")) return "";
+    // And a tooltip's panel is out of view, as in viewText, so it isn't one of a note's words.
+    if (node[3]?.className === "tip__panel") return "";
     return flightText(node[3]?.children, values, seen);
   }
   return node.map((child) => flightText(child, values, seen)).join("");
@@ -725,6 +785,8 @@ function checkFilter(page, document, expected, problems) {
   }
 }
 
+const SERIES_LINES = ["Total", "Circulating", "Placed"];
+
 const SERIES_COLUMNS = [
   { key: "day", label: "Day" },
   { key: "total", label: "Total" },
@@ -773,18 +835,14 @@ function checkPanelNotes(where, panel, notes, problems) {
     problems.push(`${where}: its notes are ${said.join()}, not ${want.join()}`);
     return;
   }
-  notes.forEach(({ kind, words, chip }, index) => {
+  notes.forEach(({ kind, words, tip }, index) => {
     if (noteWords(shown[index]).replace(/\s+/g, " ").trim() !== words) {
       problems.push(`${where}: its ${kind} note doesn't keep its words in view`);
     }
-    const markers = shown[index].querySelectorAll(".status-chip");
-    const marker = markers[0];
-    if (
-      markers.length > (chip ? 1 : 0) ||
-      (chip ?? null) !== (marker?.dataset.kind ?? null) ||
-      (chip && !viewText(marker).trim())
-    ) {
-      problems.push(`${where}: its ${kind} note's marker isn't ${chip ?? "absent"}`);
+    // A note in full sits in a tooltip on its words, which stay the caveat.
+    const panel = shown[index].querySelector(".tip__panel");
+    if (tip && !panel?.textContent.replace(/\s+/g, " ").includes(tip)) {
+      problems.push(`${where}: its ${kind} note has lost its words in full`);
     }
     if (plainText(shown[index].querySelector(".pin")) !== String(index + 1)) {
       problems.push(`${where}: its ${kind} note has the wrong number`);
@@ -896,10 +954,10 @@ const WALLET_TABLE_COLUMNS = [
 
 // Held to the KPI rows, which the page's own supply code doesn't read, so a fault in that code can't
 // set what this check expects. Wallets are never summed, so a panel over several chains shows no
-// wallet figure outside its popover and table, whatever the stats list says.
+// wallet figure outside its tooltip and table, whatever the stats list says.
 function checkPanelAgainstKpis(where, panel, want, problems) {
   const shown = panel.cloneNode(true);
-  for (const hidden of shown.querySelectorAll(".data-toggle, .info-popover, .sr-only, noscript")) {
+  for (const hidden of shown.querySelectorAll(".data-toggle, .tip__panel, .sr-only, noscript")) {
     hidden.remove();
   }
   if (want.chains > 1 && /active wallets/i.test(shown.textContent)) {
@@ -912,45 +970,66 @@ function checkPanelAgainstKpis(where, panel, want, problems) {
   }
 }
 
+// One card shows every chain at once, as before the filter: a bar per filter option, the first over
+// all of them. It compares chains, so it has no filter panels. Its legend, figures, notes and tables
+// are the first option's, which covers every chain.
 function checkSupplyPanels(page, document, expected, problems) {
   if (expected.supplyPanels.length === 0) return;
   const id = CARD_ANCHORS.supply;
-  const box = panelsOf(page, document, id, expected, problems);
+  const card = document.getElementById(id);
+  const where = `${page}: #${id}`;
+  if (!card?.matches(".chart-card")) {
+    problems.push(`${where}: isn't one card`);
+    return;
+  }
+  if (card.querySelector("[data-chain-panel]")) {
+    problems.push(`${where}: is split into filter panels`);
+  }
+  const rows = [...card.querySelectorAll("[data-supply-row]")];
+  const said = rows.map((row) => row.dataset.supplyRow);
+  const wanted = expected.supplyPanels.map(({ value }) => value);
+  if (said.join() !== wanted.join()) {
+    problems.push(`${where}: has bars for ${said.join()}, not ${wanted.join()}`);
+  }
   for (const want of expected.supplyPanels) {
-    const panel = panelOf(box, want.value);
-    const where = `${page}: the ${want.value} panel of #${id}`;
-    if (!panel) continue;
-    if (!inView(panel)) problems.push(`${where}: it's hidden by its markup`);
-    const heading = panel.querySelector(".chart-card__head h2, .chart-card__head h3");
-    if (viewText(heading).trim() !== want.heading) {
-      problems.push(`${where}: its heading isn't the dataset's`);
+    const row = rows.find((candidate) => candidate.dataset.supplyRow === want.value);
+    const at = `${where}, the ${want.value} bar`;
+    if (!row) continue;
+    if (!inView(row)) problems.push(`${at}: it's hidden by its markup`);
+    if (viewText(row.querySelector("[data-row-total]")).trim() !== want.rowTotal) {
+      problems.push(`${at}: its total isn't the dataset's`);
     }
-    checkPanelBar(where, panel, want, problems);
-    checkPanelLegend(where, panel, want, problems);
-    checkPanelStats(where, panel, want.stats, problems);
-    checkPanelNotes(where, panel, want.notes, problems);
-    const full = panel.querySelector('.info-popover__panel [data-full-note="placed"]');
-    if (!full?.textContent.includes(want.placedNote)) {
-      problems.push(`${where}: its popover has lost the placed note in full`);
-    }
-    checkPanelAgainstKpis(where, panel, want, problems);
-    const tables = panel.querySelectorAll(".data-toggle table");
-    checkTableRows(where, tables[0], want.table.columns, want.table.rows, problems);
-    if (
-      tables.length < 2 ||
-      !tables[1].querySelector("caption")?.textContent.includes(WALLETS_ACROSS_CHAINS_NOTE)
-    ) {
-      problems.push(`${where}: its table of wallets doesn't say what a wallet is`);
-    } else {
-      checkTableRows(where, tables[1], WALLET_TABLE_COLUMNS, want.kpiRows, problems);
-    }
-    // Rows add up across chains, so they sit under All. checkExchangeRows holds what each one says.
-    const rows = panel.querySelectorAll(".data-toggle [data-labels-table] [data-exchange-row]");
-    if (rows.length !== want.entities) {
-      problems.push(
-        `${where}: it has ${rows.length} exchange rows under its toggle, not ${want.entities}`,
-      );
-    }
+    checkPanelBar(at, row, want, problems);
+  }
+  const [all] = expected.supplyPanels;
+  const heading = card.querySelector(".chart-card__head h2, .chart-card__head h3");
+  if (viewText(heading).trim() !== all.heading) {
+    problems.push(`${where}: its heading isn't the dataset's`);
+  }
+  checkPanelLegend(where, card, all, problems);
+  checkPanelStats(where, card, all.stats, problems);
+  checkPanelNotes(where, card, all.notes, problems);
+  const full = card.querySelector('.chart-card__head .tip__panel [data-full-note="placed"]');
+  if (!full?.textContent.includes(all.placedNote)) {
+    problems.push(`${where}: its tooltip has lost the placed note in full`);
+  }
+  checkPanelAgainstKpis(where, card, all, problems);
+  const tables = card.querySelectorAll(".data-toggle table");
+  checkTableRows(where, tables[0], all.table.columns, all.table.rows, problems);
+  if (
+    tables.length < 2 ||
+    !tables[1].querySelector("caption")?.textContent.includes(WALLETS_ACROSS_CHAINS_NOTE)
+  ) {
+    problems.push(`${where}: its table of wallets doesn't say what a wallet is`);
+  } else {
+    checkTableRows(where, tables[1], WALLET_TABLE_COLUMNS, all.kpiRows, problems);
+  }
+  // Rows add up across chains, so they sit under the first option. checkExchangeRows holds each one.
+  const named = card.querySelectorAll(".data-toggle [data-labels-table] [data-exchange-row]");
+  if (named.length !== all.entities) {
+    problems.push(
+      `${where}: it has ${named.length} exchange rows under its toggle, not ${all.entities}`,
+    );
   }
 }
 
@@ -968,9 +1047,9 @@ function checkSeriesPanels(page, document, expected, problems) {
       problems.push(`${where}: its heading isn't the dataset's`);
     }
     checkPanelNotes(where, panel, want.notes, problems);
-    const full = panel.querySelector('.info-popover__panel [data-full-note="series-start"]');
+    const full = panel.querySelector('.tip__panel [data-full-note="series-start"]');
     if (!full?.textContent.includes(want.fullNote)) {
-      problems.push(`${where}: its popover has lost the series note in full`);
+      problems.push(`${where}: its tooltip has lost the series note in full`);
     }
     checkTableRows(
       where,
@@ -979,10 +1058,9 @@ function checkSeriesPanels(page, document, expected, problems) {
       want.rows,
       problems,
     );
-    const lines = [...panel.querySelectorAll("[data-series-line]")];
-    const figures = lines.map((line) => viewText(line.querySelector("[data-series-value]")).trim());
-    if (figures.join() !== want.latest.join()) {
-      problems.push(`${where}: its legend's figures aren't the newest day's`);
+    const lines = [...panel.querySelectorAll("[data-series-line]")].map(plainText);
+    if (lines.join() !== SERIES_LINES.join()) {
+      problems.push(`${where}: its legend doesn't name ${SERIES_LINES.join(", ")}`);
     }
   }
 }
@@ -1042,7 +1120,7 @@ function velocityExpected(kpis, warnings) {
                 `${row.chain}:${field}=${row[field] === null ? UNKNOWN_TEXT : formatBps(row[field])}@${width(row[field])}`,
             ),
           ),
-    notes: chart.notes.map(({ kind, chain, text }) => ({ kind, chain, words: text })),
+    notes: chart.notes.map(({ kind, chain, text, tip }) => ({ kind, chain, words: text, tip })),
     fullWarnings: chart.fullWarnings,
   };
 }
@@ -1090,7 +1168,7 @@ function gridExpected(roles) {
 }
 
 // Velocity by chain: each bar's figure and width, each warning's pin beside its own chain and
-// nowhere else, the notes in view with their words, each warning whole in the popover, and the
+// nowhere else, the notes in view with their words, each warning whole in the tooltip, and the
 // wallet counts' caveat in the caption of the table that holds them.
 function checkVelocity(page, document, expected, problems) {
   if (!expected.velocity) return;
@@ -1121,25 +1199,27 @@ function checkVelocity(page, document, expected, problems) {
     problems.push(`${where}: its chain pins are ${pinned.join()}, not ${pins.join()}`);
   }
   const denominators = want.notes.findIndex(({ kind }) => kind === "velocity-denominators") + 1;
-  const legendPin = card.querySelector('[data-legend-measure="headline_velocity_bps"] .pin');
-  if (want.bars.length > 0 && plainText(legendPin) !== String(denominators)) {
-    problems.push(`${where}: the denominators pin isn't on the headline velocity legend`);
+  const headlinePin = card.querySelector(
+    '[data-velocity-chain]:first-child [data-measure="headline_velocity_bps"] .velocity-chart__label .pin',
+  );
+  if (want.bars.length > 0 && plainText(headlinePin) !== String(denominators)) {
+    problems.push(`${where}: the denominators pin isn't on the first headline velocity row`);
   }
   for (const [kind, words] of [
     ["velocity-denominators", VELOCITY_NOTE],
     ["velocity-jumpy", JUMPY_NOTE],
   ]) {
-    const full = card.querySelector(`.info-popover__panel [data-full-note="${kind}"]`);
+    const full = card.querySelector(`.tip__panel [data-full-note="${kind}"]`);
     if (!full?.textContent.includes(words)) {
-      problems.push(`${where}: its popover has lost the ${kind} note in full`);
+      problems.push(`${where}: its tooltip has lost the ${kind} note in full`);
     }
   }
   for (const { chain, text } of want.fullWarnings) {
     const full = card.querySelector(
-      `.info-popover__panel [data-full-note="velocity-warning"][data-chain="${chain}"]`,
+      `.tip__panel [data-full-note="velocity-warning"][data-chain="${chain}"]`,
     );
     if (plainText(full) !== text)
-      problems.push(`${where}: its popover has lost ${chain}'s warning`);
+      problems.push(`${where}: its tooltip has lost ${chain}'s warning`);
   }
   const caption = card.querySelector(".data-toggle table caption");
   if (!caption?.textContent.includes(WALLETS_NOTE)) {
@@ -1175,12 +1255,12 @@ function checkGrid(page, document, expected, problems) {
   if (said.join() !== want.join()) problems.push(`${where}: its grid isn't the dataset's`);
 }
 
-// The full notes a card's popover must hold, by kind.
+// The full notes a card's tooltip must hold, by kind.
 function checkFullNotes(where, panel, fullNotes, problems) {
   for (const [kind, text] of Object.entries(fullNotes)) {
-    const full = panel.querySelector(`.info-popover__panel [data-full-note="${kind}"]`);
+    const full = panel.querySelector(`.tip__panel [data-full-note="${kind}"]`);
     if (plainText(full) !== text)
-      problems.push(`${where}: its popover has lost the ${kind} note in full`);
+      problems.push(`${where}: its tooltip has lost the ${kind} note in full`);
   }
 }
 
@@ -1332,10 +1412,11 @@ function checkPayload(place, flight, expected, problems) {
   }
 }
 
-// The band beside each bar and in the table, as the dataset gives it.
+// The band's line in the supply card's legend, which is the first option's, and each chain's in the
+// table, as the dataset gives them.
 function checkBands(page, document, expected, problems) {
   const lines = [...document.querySelectorAll("[data-exchange-linked]")];
-  const drawn = expected.bands.filter(({ amount }) => BigInt(amount) > 0n);
+  const drawn = expected.bands.filter(({ key, amount }) => key === "all" && BigInt(amount) > 0n);
   if (lines.length !== drawn.length) {
     problems.push(`${page}: there are ${lines.length} exchange-linked lines`);
   }
@@ -1416,7 +1497,7 @@ export function verifyOutput(outDir, expected) {
   const files = filesUnder(outDir);
   const pages = files.filter((path) => path.endsWith(".html"));
   const allowedAddresses = new Set(Object.values(expected.tokenContracts));
-  for (const page of ["index.html", "methodology/index.html"]) {
+  for (const page of ["index.html", "methodology/index.html", "reconciliation/index.html"]) {
     if (!files.includes(join(outDir, page))) problems.push(`${page}: missing`);
   }
   for (const path of pages) {
@@ -1426,6 +1507,8 @@ export function verifyOutput(outDir, expected) {
     const nodes = allTextNodes(document);
     const text = nodes.map((node) => node.data).join(" ");
     checkEveryPage(page, document, problems);
+    checkFooterStatus(page, document, expected, problems);
+    checkTooltips(page, document, problems);
     checkStateOnPage(page, document, expected, problems);
     checkFreshnessOnPage(page, document, expected, problems);
     checkCards(page, document, problems);
@@ -1444,14 +1527,15 @@ export function verifyOutput(outDir, expected) {
         checkNames(page, document.documentElement.outerHTML, expected, problems);
       }
     }
+    if (page === "reconciliation/index.html") {
+      checkReconciliationPage(page, document, expected, problems);
+    }
     if (page === "index.html") {
       checkMainFrame(page, document, expected, problems);
       checkMainFreshness(page, document, expected, problems);
       checkHeadline(page, document, expected, problems);
       checkKpiRow(page, document, expected, problems);
-      checkFindings(page, document, expected, problems);
-      checkLegend(page, document, problems);
-      checkTrustDetail(page, document, problems);
+      checkNoPushDown(page, document, problems);
       checkEssentialNotes(page, document, expected, problems);
       checkExchangeRows(page, document, expected, problems);
       checkBands(page, document, expected, problems);
@@ -1490,19 +1574,15 @@ function essentialNotes({ manifest, summary, journey, activity }) {
   const scope = day0Scope(rows, summary.kpis);
   return [
     { kind: "placed", text: PLACED_PIN, exact: true },
-    {
-      kind: "exchange-floor",
-      text: `${EXCHANGE_FLOOR_NOTE} ${EXCHANGE_FLOOR_LINK}.`,
-      exact: true,
-    },
+    { kind: "exchange-floor", text: EXCHANGE_FLOOR_PIN, exact: true },
     { kind: "series-start", text: seriesStartPin(definitions), exact: true },
     { kind: "small-ticket", text: SMALL_TICKET_PIN, exact: true },
     { kind: "everyday-meaning", text: everydayNote(definitions), exact: true },
     { kind: "velocity-denominators", text: VELOCITY_PIN, exact: true },
     { kind: "no-swaps", text: NO_SWAPS_NOTE },
-    // The wallet counts beside the supply bar. The velocity table's sit under its toggle, so its
-    // caption says it there, which checkVelocity holds.
-    { kind: "wallets-not-people", text: WALLETS_ACROSS_CHAINS_NOTE },
+    // On the supply card, whose wallet counts are in its tables. The velocity table's caption says it
+    // there too, which checkVelocity holds.
+    { kind: "wallets-not-people", text: WALLETS_NOTE, exact: true },
     ...(waterfall(rows) ? [{ kind: "hops", text: HOPS_NOTE, exact: true }] : []),
     ...(scope ? [{ kind: "day-0-scope", text: day0Pin(scope), exact: true }] : []),
     ...(weeklyEveryday(rows).length > 0
@@ -1523,20 +1603,9 @@ function essentialNotes({ manifest, summary, journey, activity }) {
       .map(({ chain }) => ({
         kind: "exchange-coverage",
         chain,
-        text: exchangeCoverageNote(chain),
+        text: exchangeCoveragePin(chain),
         exact: true,
       })),
-  ];
-}
-
-// The four headings, recomputed here so a finding is held to the dataset as well as to its card.
-function expectedFindings({ manifest, journey, activity, chain_roles }) {
-  const chains = activityChains(activity.data);
-  return [
-    { id: CARD_ANCHORS.supply, text: journeyHeading(journey.data, manifest.definitions) },
-    { id: CARD_ANCHORS.waterfall, text: waterfallHeading(waterfall(activity.data), chains) },
-    { id: CARD_ANCHORS.weekly, text: weeklyHeading(weeklyEveryday(activity.data), chains) },
-    { id: CARD_ANCHORS.chainRoles, text: chainRolesHeading(chain_roles.data) },
   ];
 }
 
@@ -1579,11 +1648,13 @@ function expectedPanels(files) {
     kpis: summary.kpis,
     definitions: manifest.definitions,
   };
-  const noteWordsOf = ({ kind, chain, text, link, segment }) => ({
+  // The words in view, and the note in full in its tooltip, with its link's words after it.
+  const noteWordsOf = ({ kind, chain, text, tip, link, segment }) => ({
     kind,
     chain,
     segment,
-    words: link ? `${text} ${link.text}.` : text,
+    words: text,
+    ...(tip ? { tip: link ? `${tip} ${link.text}.` : tip } : {}),
   });
   return {
     filter: options.map(({ value, label }) => ({ value, label })),
@@ -1595,6 +1666,7 @@ function expectedPanels(files) {
         heading: panel.heading,
         key: panel.bar?.key ?? null,
         total: panel.bar?.journey.total_supply ?? null,
+        rowTotal: panel.bar ? formatCompact(panel.bar.journey.total_supply) : UNKNOWN_TEXT,
         parts: panel.segments.map((segment) => ({
           key: segment.key,
           label: segmentLabel(segment),
@@ -1631,7 +1703,7 @@ function expectedPanels(files) {
           key: step.key,
           figure: stepFigure(step),
         })),
-        notes: panel.notes.map(({ kind, text, step, chip }) => ({ kind, words: text, step, chip })),
+        notes: panel.notes.map(({ kind, text, step }) => ({ kind, words: text, step })),
         fullNotes: panel.fullNotes,
         stepRows: panel.steps.rows,
         periodRows: panel.periods.rows,
@@ -1657,13 +1729,6 @@ function expectedPanels(files) {
         notes: panel.notes.map(noteWordsOf),
         fullNote: seriesStartNote(manifest.definitions),
         rows: panel.tableRows,
-        latest: panel.latest
-          ? [
-              panel.latest.total_supply,
-              panel.latest.circulating_supply,
-              panel.latest.placed_supply,
-            ].map(formatCompact)
-          : [],
       };
     }),
   };
@@ -1688,7 +1753,7 @@ export function expectedFromDataset(location, webRoot = process.cwd(), now = Dat
 
 export function expectedFromFiles(files, placement, webRoot = process.cwd(), now = Date.now()) {
   const state = deriveState(files, placement, now);
-  const { kind, frameWord, freshness, asOfLine, trustLine } = state;
+  const { kind, frameWord, freshness, asOfLine, trustLine, passing, headStale } = state;
   const { manifest, summary } = files;
   const { verdict } = summary;
   return {
@@ -1697,6 +1762,8 @@ export function expectedFromFiles(files, placement, webRoot = process.cwd(), now
     freshness,
     asOfLine,
     trustLine,
+    passing,
+    headStale,
     version: manifest.dataset_version,
     pipelineStrings: [
       ...manifest.checks.map((check) => check.detail),
@@ -1712,7 +1779,6 @@ export function expectedFromFiles(files, placement, webRoot = process.cwd(), now
     },
     kpiScope: `Across ${summary.kpis.map((row) => CHAIN_NAMES[row.chain]).join(", ")}.`,
     kpiValues: expectedKpiValues(summary.kpis),
-    findings: expectedFindings(files),
     essentialNotes: essentialNotes(files),
     exchangeRows: exchangeRows(files.labels),
     ...expectedPanels(files),

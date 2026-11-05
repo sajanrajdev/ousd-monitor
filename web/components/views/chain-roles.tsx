@@ -48,9 +48,8 @@ function ChainGrid({ rows, pin }: { rows: ChainRoleRow[]; pin: number }) {
   return (
     <table className="chain-grid" data-chain-grid>
       <caption>
-        Each chain on its newest day. <span aria-hidden="true">{LEAD_MARK}</span>
-        <span className="sr-only">The marked chain</span> leads that measure.{" "}
-        <PinMark number={pin} />
+        <span aria-hidden="true">{LEAD_MARK}</span>
+        <span className="sr-only">The marked chain</span> leads. <PinMark number={pin} />
       </caption>
       <thead>
         <tr>
@@ -165,14 +164,7 @@ export function ChainRolesView({
   const notes: PinnedNote[] = [
     {
       kind: "no-swaps",
-      text: (
-        <>
-          {NO_SWAPS_NOTE}{" "}
-          <a href={definitionHref("chain-roles")} className="underline underline-offset-4">
-            How these are defined
-          </a>
-        </>
-      ),
+      text: NO_SWAPS_NOTE,
     },
   ];
   return (
@@ -181,8 +173,12 @@ export function ChainRolesView({
       <ChartCard
         id={CARD_ANCHORS.chainRoles}
         takeaway={chainRolesHeading(chain_roles)}
-        detail={<p>{chainRolesTakeaway(chain_roles)}</p>}
-        chip="inferred"
+        detail={
+          <>
+            <p>{chainRolesTakeaway(chain_roles)}</p>
+            <p>Each chain on its newest day.</p>
+          </>
+        }
         source="Chain data and public labels"
         asOf={dayRange(chain_roles.map((row) => row.as_of_day)) ?? DAY_ZERO}
         definitionHref={definitionHref("chain-roles")}

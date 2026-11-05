@@ -28,7 +28,6 @@ export function ExchangeHoldingsCard({
       <TableCard
         level={3}
         takeaway="What wallets a public source names as an exchange's hold, which is a floor."
-        chip="inferred"
         source="Chain data and public labels"
         asOf={newestDay(holdings) ?? fallbackAsOf}
         definitionHref="/methodology/#named-labels"
@@ -75,7 +74,6 @@ export function ExchangeListingsCard({
       <TableCard
         level={3}
         takeaway="Exchanges whose own page says they support OUSD."
-        chip="fact"
         source="Each exchange's own page, linked in each row"
         asOf={newest ?? fallbackAsOf}
         definitionHref="/methodology/#named-labels"
