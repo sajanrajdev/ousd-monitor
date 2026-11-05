@@ -64,8 +64,10 @@ export function day0Note(scope: Day0Scope): string {
 }
 
 // What stays in view on the waterfall. day0Note stays whole in the card's popover.
-export function day0Pin(scope: Day0Scope): string {
-  return `Flows count from Day 0, ${formatUtcDate(DAY_ZERO)}. ${formatCompact(scope.before)} of the ${formatCompact(scope.total)} total supply predates it.`;
+// Under one chain it names that chain, so it reads without the card's heading.
+export function day0Pin(scope: Day0Scope, chain?: string): string {
+  const supply = chain ? `${chain}'s` : "the";
+  return `Flows count from Day 0, ${formatUtcDate(DAY_ZERO)}. ${formatCompact(scope.before)} of ${supply} ${formatCompact(scope.total)} total supply predates it.`;
 }
 
 // What stays in view on the weekly bars. historyNote stays whole in the card's popover.

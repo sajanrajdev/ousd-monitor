@@ -9,6 +9,7 @@ import {
   historyDays,
   historyLabel,
   perChain,
+  stepFigure,
   velocityTakeaway,
   waterfall,
   waterfallAmount,
@@ -358,5 +359,11 @@ describe("weekly everyday volume", () => {
         ["base"],
       ),
     ).toEqual([]);
+  });
+
+  it("prints a removal that rounds to nothing as $0, with no sign", () => {
+    expect(stepFigure({ kind: "removal", amount: "100000" })).toBe("$0");
+    expect(stepFigure({ kind: "removal", amount: "21000000" })).toBe("−$21");
+    expect(stepFigure({ kind: "clean", amount: "21000000" })).toBe("$21");
   });
 });

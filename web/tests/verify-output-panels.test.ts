@@ -509,6 +509,15 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
         expect.stringContaining("everyday-meaning note doesn't keep its words"),
       ]),
     );
+    const marker = inPanel(K, "solana", (html) =>
+      html.replace(
+        /(<li data-note="history"><span class="pin" aria-hidden="true">\d+<\/span><p>)/,
+        '$1<span class="status-chip" data-kind="fact">F</span> ',
+      ),
+    );
+    expect(faults(marker, K, "solana")).toEqual(
+      expect.arrayContaining([expect.stringContaining("history note's marker isn't absent")]),
+    );
     const hidden = inPanel(K, "solana", (html) =>
       html.replace(
         /<ol data-pinned-notes>/,

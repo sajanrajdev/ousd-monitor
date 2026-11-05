@@ -1511,6 +1511,17 @@ async function checkActivityOptions(page, where) {
         const rect = row.getBoundingClientRect();
         return rect.left < card.left || rect.right > card.right + 0.5;
       });
+      const unknown = !waterfall.querySelector(".chart-area [data-step]");
+      const removals = rows.filter(
+        (row) => !["headline_value", "clean_large", "clean_everyday"].includes(row.dataset.step),
+      );
+      const pins = [...waterfall.querySelectorAll(".chart-area .pin")];
+      const numbersWhole = [...weekly.querySelectorAll("[data-week-number]")].every((number) => {
+        const range = document.createRange();
+        range.selectNodeContents(number);
+        const tops = new Set([...range.getClientRects()].map((rect) => Math.round(rect.top)));
+        return tops.size === 1;
+      });
       const hatched = rows
         .filter(
           (row) => !["headline_value", "clean_large", "clean_everyday"].includes(row.dataset.step),
@@ -1518,7 +1529,7 @@ async function checkActivityOptions(page, where) {
         .every((row) =>
           getComputedStyle(row.querySelector("[data-bar]")).backgroundImage.includes("gradient"),
         );
-      const pinsOnRows = [...waterfall.querySelectorAll(".chart-area .pin")].every(
+      const pinsOnRows = pins.every(
         (pin) => pin.closest("[data-step]") && pin.closest("[aria-hidden='true']"),
       );
       const figures = [...weekly.querySelectorAll("[data-week]")].map((week) => {
@@ -1527,6 +1538,10 @@ async function checkActivityOptions(page, where) {
         return text.left >= own.left - 0.5 && text.right <= own.right + 0.5;
       });
       return {
+        unknown,
+        removals: removals.length,
+        pins: pins.length,
+        numbersWhole,
         rows: rows.length,
         ordered: tops.every((top, index) => index === 0 || top > tops[index - 1]),
         outside: outside.map((row) => row.dataset.step),
@@ -1536,7 +1551,18 @@ async function checkActivityOptions(page, where) {
         weeks: figures.length,
       };
     }, value);
-    check("the waterfall reads top to bottom", where, seen.rows === 0 || seen.ordered, value);
+    // Unknown data draws no rows, and then there's nothing for these checks to read.
+    if (!seen.unknown) {
+      check("the waterfall has its twelve rows", where, seen.rows === 12, `${value}: ${seen.rows}`);
+      check(
+        "the waterfall's removals and pins are there to check",
+        where,
+        seen.removals === 9 && seen.pins > 0,
+        value,
+      );
+    }
+    check("the waterfall reads top to bottom", where, seen.unknown || seen.ordered, value);
+    check("a week's number never breaks across lines", where, seen.numbersWhole, value);
     check(
       "every waterfall row fits its card",
       where,

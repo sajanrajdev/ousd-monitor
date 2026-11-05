@@ -15,6 +15,7 @@ import {
   activityChains,
   day0Scope,
   historyLabel,
+  stepFigure,
   velocityWarnings,
   waterfall,
   waterfallHeading,
@@ -400,7 +401,9 @@ function noteWords(note) {
     if (PIN_NUMBER.test(pin.textContent.trim())) pin.remove();
   }
   // A marker says what kind of claim a note is, and isn't one of its words. Panels check it apart.
-  for (const chip of copy.querySelectorAll(".status-chip")) chip.remove();
+  // Only a real marker, with its kind, at the head of the note's words is left out.
+  const lead = copy.querySelector(":scope > p > .status-chip[data-kind]:first-child");
+  if (lead) lead.remove();
   return viewText(copy, "");
 }
 
@@ -770,8 +773,13 @@ function checkPanelNotes(where, panel, notes, problems) {
     if (noteWords(shown[index]).replace(/\s+/g, " ").trim() !== words) {
       problems.push(`${where}: its ${kind} note doesn't keep its words in view`);
     }
-    const marker = shown[index].querySelector(".status-chip");
-    if ((chip ?? null) !== (marker?.dataset.kind ?? null) || (chip && !viewText(marker).trim())) {
+    const markers = shown[index].querySelectorAll(".status-chip");
+    const marker = markers[0];
+    if (
+      markers.length > (chip ? 1 : 0) ||
+      (chip ?? null) !== (marker?.dataset.kind ?? null) ||
+      (chip && !viewText(marker).trim())
+    ) {
       problems.push(`${where}: its ${kind} note's marker isn't ${chip ?? "absent"}`);
     }
     if (plainText(shown[index].querySelector(".pin")) !== String(index + 1)) {
@@ -975,6 +983,32 @@ function checkSeriesPanels(page, document, expected, problems) {
   }
 }
 
+// Each waterfall part summed straight from the rows, from Day 0, with no code the page uses, so a
+// fault in the panel code can't set what the check expects.
+const DAY_ZERO_TEXT = "2026-09-30";
+const PART_FIELDS = [
+  "headline_value",
+  "minted",
+  "burned",
+  "fees",
+  "fee_liquidity",
+  "issuer_flows",
+  "same_entity",
+  "same_tx_netting",
+  "dex_flow",
+  "lending_flow",
+  "clean_large",
+  "clean_everyday",
+];
+function sumsFromRows(rows, chains) {
+  const sums = Object.fromEntries(PART_FIELDS.map((field) => [field, 0n]));
+  for (const row of rows) {
+    if (row.day < DAY_ZERO_TEXT || !chains.includes(row.chain)) continue;
+    for (const field of PART_FIELDS) sums[field] += BigInt(row[field]);
+  }
+  return Object.fromEntries(Object.entries(sums).map(([key, sum]) => [key, sum.toString()]));
+}
+
 // The full notes a card's popover must hold, by kind.
 function checkFullNotes(where, panel, fullNotes, problems) {
   for (const [kind, text] of Object.entries(fullNotes)) {
@@ -1010,6 +1044,16 @@ function checkWaterfallPanels(page, document, expected, problems) {
     if (said.join() !== wanted.join()) {
       problems.push(`${where}: its rows aren't the dataset's`);
     }
+    // The same figures from the rows themselves. The amount sits after the sign, if any.
+    for (const row of rows) {
+      const sum = want.sums[row.dataset.step];
+      const shown = viewText(row.querySelector(".tabular-nums"), "")
+        .trim()
+        .replace(/^\u2212/, "");
+      if (sum !== undefined && shown !== formatCompact(sum)) {
+        problems.push(`${where}: its ${row.dataset.step} isn't the rows' own sum`);
+      }
+    }
     const pinned = rows.flatMap((row) =>
       [...row.querySelectorAll(".pin")].map((pin) => `${row.dataset.step}=${plainText(pin)}`),
     );
@@ -1029,6 +1073,20 @@ function checkWaterfallPanels(page, document, expected, problems) {
 // under every option, its notes and its table.
 function checkWeeklyPanels(page, document, expected, problems) {
   if (expected.weeklyPanels.length === 0) return;
+  // A chain's weeks are All's weeks, and on a complete dataset they add up to All's, whatever code
+  // drew them.
+  const [all, ...chains] = expected.weeklyPanels;
+  if (all && chains.length > 0) {
+    all.amounts.forEach((amount, index) => {
+      const sum = chains.reduce((total, chain) => total + BigInt(chain.amounts[index] ?? "0"), 0n);
+      if (
+        chains.some((chain) => chain.amounts.length !== all.amounts.length) ||
+        sum !== BigInt(amount)
+      ) {
+        problems.push(`${page}: the chains' weeks don't add up to All's`);
+      }
+    });
+  }
   const id = CARD_ANCHORS.weekly;
   const box = panelsOf(page, document, id, expected, problems);
   for (const want of expected.weeklyPanels) {
@@ -1038,7 +1096,7 @@ function checkWeeklyPanels(page, document, expected, problems) {
     if (!inView(panel)) problems.push(`${where}: it's hidden by its markup`);
     checkHeadingOf(where, panel, want.heading, problems);
     const bars = [...panel.querySelectorAll(".chart-area [data-week]")].map(
-      (bar) => `${bar.dataset.week}=${viewText(bar.querySelector("[data-week-value]")).trim()}`,
+      (bar) => `${bar.dataset.week}=${viewText(bar.querySelector("[data-week-value]"), "").trim()}`,
     );
     if (bars.join() !== want.bars.join()) problems.push(`${where}: its bars aren't the dataset's`);
     const pins = [...panel.querySelectorAll(".chart-area [data-chart-pins] .pin")].map(plainText);
@@ -1398,10 +1456,11 @@ function expectedPanels(files) {
       const panel = waterfallPanel(option, activityInputs);
       return {
         value: option.value,
+        sums: sumsFromRows(activity.data, option.chains),
         heading: panel.heading,
         steps: (panel.waterfall?.steps ?? []).map((step) => ({
           key: step.key,
-          figure: `${step.kind === "removal" ? "\u2212" : ""}${formatCompact(step.amount)}`,
+          figure: stepFigure(step),
         })),
         notes: panel.notes.map(({ kind, text, step, chip }) => ({ kind, words: text, step, chip })),
         fullNotes: panel.fullNotes,
@@ -1415,6 +1474,7 @@ function expectedPanels(files) {
         value: option.value,
         heading: panel.heading,
         bars: panel.weeks.map((week) => `${week.to}=${formatCompact(week.everyday)}`),
+        amounts: panel.weeks.map((week) => week.everyday),
         notes: panel.notes.map(({ kind, text }) => ({ kind, words: text })),
         fullNotes: panel.fullNotes,
         rows: panel.table.rows,

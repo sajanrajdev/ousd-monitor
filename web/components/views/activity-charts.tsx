@@ -1,5 +1,6 @@
 import {
   barPosition,
+  stepFigure,
   type Waterfall,
   type WaterfallStep,
   type Week,
@@ -60,8 +61,7 @@ export function WaterfallChart({
                   ) : null}
                 </span>
                 <span className="tabular-nums" style={{ fontWeight: 550 }}>
-                  {step.kind === "removal" ? "−" : ""}
-                  {formatCompact(step.amount)}
+                  {stepFigure(step)}
                 </span>
               </span>
               <span className="relative block h-4" style={{ background: "var(--color-secondary)" }}>
@@ -75,6 +75,24 @@ export function WaterfallChart({
           );
         })}
       </ol>
+    </>
+  );
+}
+
+// A narrow panel's figure may break before its unit, "$516.1" then "K", and never inside the number.
+function WeekFigure({ amount }: { amount: string }) {
+  const [, number, unit] = /^(.*?)([KMB]?)$/.exec(formatCompact(amount))!;
+  return (
+    <>
+      <span className="whitespace-nowrap" data-week-number>
+        {number}
+      </span>
+      {unit ? (
+        <>
+          <wbr />
+          {unit}
+        </>
+      ) : null}
     </>
   );
 }
@@ -94,7 +112,7 @@ export function WeeklyBars({ weeks, pins = [] }: { weeks: Week[]; pins?: number[
             ))}
           </div>
         ) : null}
-        <div className="flex items-end gap-2" style={{ height: "10rem" }}>
+        <div className="flex items-end gap-1" style={{ height: "10rem" }}>
           {weeks.map((week, index) => (
             <div
               key={week.from}
@@ -103,11 +121,10 @@ export function WeeklyBars({ weeks, pins = [] }: { weeks: Week[]; pins?: number[
             >
               <span
                 className="text-center tabular-nums"
-                // A narrow panel's figure wraps inside its own column, not over its neighbour's.
-                style={{ fontSize: "var(--text-meta)", overflowWrap: "anywhere" }}
+                style={{ fontSize: "var(--text-meta)" }}
                 data-week-value
               >
-                {formatCompact(week.everyday)}
+                <WeekFigure amount={week.everyday} />
               </span>
               <span
                 className="block w-full"
@@ -119,7 +136,7 @@ export function WeeklyBars({ weeks, pins = [] }: { weeks: Week[]; pins?: number[
             </div>
           ))}
         </div>
-        <div className="mt-1 flex gap-2" style={{ fontSize: "var(--text-meta)" }}>
+        <div className="mt-1 flex gap-1" style={{ fontSize: "var(--text-meta)" }}>
           {weeks.map((week) => (
             <span key={week.from} className="min-w-0 flex-1 text-center">
               {formatUtcDate(week.to).replace(/ UTC$/, "")}

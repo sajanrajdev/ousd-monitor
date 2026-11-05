@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ActivityView } from "@/components/views/activity";
+import { waterfallPanel } from "@/lib/activity-panels";
 import { chainOptions } from "@/lib/chain-scope";
 import { getDataset } from "@/lib/dataset";
 import { CARD_ANCHORS } from "@/lib/definitions";
@@ -393,5 +394,49 @@ describe("the real activity view", () => {
     const text = container.textContent!;
     expect(text).not.toMatch(/trading volume/i);
     expect(text).not.toMatch(/\b(commerce|payments?|spending|purchases?)\b/i);
+  });
+
+  it("keeps notes but no pins when a chain's waterfall is unknown", () => {
+    vi.stubEnv("OUSD_DATASET_DIR", "fixtures/dataset/complete");
+    const { activity, summary, manifest } = getDataset();
+    const rows = structuredClone(activity);
+    // Base mints before Day 0 that add up to its supply, and nothing moves from Day 0.
+    for (const row of rows.filter((r) => r.chain === "base")) {
+      for (const key of [
+        "headline_value",
+        "minted",
+        "burned",
+        "fees",
+        "fee_liquidity",
+        "issuer_flows",
+        "same_entity",
+        "same_tx_netting",
+        "dex_flow",
+        "lending_flow",
+        "clean_large",
+        "clean_everyday",
+      ] as const) {
+        row[key] = "0";
+      }
+    }
+    rows.push({
+      ...rows.find((r) => r.chain === "base")!,
+      day: "2026-09-01",
+      minted: "5000000",
+      headline_value: "5000000",
+    });
+    const kpis = structuredClone(summary.kpis).map((row) =>
+      row.chain === "base" ? { ...row, total_supply: "5000000" } : row,
+    );
+    const option = chainOptions(manifest.coverage.chains_included).find((o) => o.value === "base")!;
+    const panel = waterfallPanel(option, {
+      activity: rows,
+      kpis,
+      definitions: manifest.definitions,
+    });
+    expect(panel.waterfall).toBeNull();
+    expect(panel.notes.map((note) => note.kind)).toEqual(["day-0-scope"]);
+    expect(panel.notes[0].step).toBeUndefined();
+    expect(panel.notes[0].text).toContain("of Base's $5 total supply predates it");
   });
 });

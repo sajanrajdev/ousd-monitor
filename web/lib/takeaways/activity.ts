@@ -92,6 +92,13 @@ export function waterfall(allRows: ActivityRow[]): Waterfall | null {
   return left === filled ? { steps, headline: headline.toString() } : null;
 }
 
+// What a row prints: a removal as minus its amount, except one that rounds to $0, which has no sign,
+// as formatCompact gives none.
+export function stepFigure(step: Pick<WaterfallStep, "kind" | "amount">): string {
+  const figure = formatCompact(step.amount);
+  return step.kind === "removal" && figure !== "$0" ? `−${figure}` : figure;
+}
+
 export function waterfallAmount(waterfall: Waterfall, key: AmountField): string {
   return waterfall.steps.find((step) => step.key === key)!.amount;
 }

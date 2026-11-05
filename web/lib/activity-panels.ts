@@ -115,19 +115,22 @@ export function waterfallPanel(
     rows,
     kpis.filter((row) => option.chains.includes(row.chain)),
   );
+  // A pin sits on a drawn row, so with no waterfall the notes stay in the list with no pin.
+  const on = (step: WaterfallStep["key"]) => (wf ? { step } : {});
+  const chainName = option.value === "all" ? undefined : CHAIN_NAMES[option.value];
   const notes: ActivityNote[] = [
     ...(scope
       ? [
           {
             kind: "day-0-scope",
-            text: day0Pin(scope),
-            step: "headline_value" as const,
+            text: day0Pin(scope, chainName),
+            ...on("headline_value"),
             chip: "fact" as const,
           },
         ]
       : []),
     ...(showsSmallTicket(option)
-      ? [{ kind: "small-ticket", text: SMALL_TICKET_PIN, step: "issuer_flows" as const }]
+      ? [{ kind: "small-ticket", text: SMALL_TICKET_PIN, ...on("issuer_flows") }]
       : []),
     ...(wf ? [{ kind: "hops", text: HOPS_NOTE, step: "clean_large" as const }] : []),
   ];
