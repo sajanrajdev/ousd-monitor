@@ -23,6 +23,7 @@ import { PinMark } from "@/components/pinned-notes";
 import { formatCompact, toChartNumber, UNKNOWN_TEXT } from "@/lib/format";
 import {
   directLabel,
+  legendAmount,
   segmentLabel,
   type BarRow,
   type DrawnSegment,
@@ -70,7 +71,7 @@ export function SupplyBar({
               className="supply-bar__part"
               data-part={segment.key}
               data-amount={segment.amount}
-              title={`${segmentLabel(segment)}: ${formatCompact(segment.amount)}`}
+              title={`${segmentLabel(segment)}: ${legendAmount(segment)}`}
               style={{
                 flexBasis: widthOf(segment.shareBps),
                 background: style.image ? `${style.image}, ${style.background}` : style.background,

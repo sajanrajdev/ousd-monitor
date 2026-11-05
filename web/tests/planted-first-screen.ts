@@ -207,6 +207,7 @@ export type PlantedSupplyPanel = {
   stats: { key: string; label: string; value: string }[];
   notes: PlantedPanelNote[];
   table: PlantedTable;
+  kpiRows: Record<string, string>[];
   placedNote: string;
   entities: number;
 };
@@ -223,6 +224,11 @@ const SERIES_TABLE = [
   ["total", "Total"],
   ["placed", "Placed"],
   ["circulating", "Circulating"],
+].map(([key, label]) => ({ key, label }));
+const WALLET_TABLE = [
+  ["chain", "Chain"],
+  ["clean", "Clean volume, 7 days"],
+  ["wallets", "Active wallets, 7 days"],
 ].map(([key, label]) => ({ key, label }));
 export const PLANTED_WALLETS_CAPTION = "Wallets, not people, and never added across chains.";
 
@@ -289,7 +295,10 @@ export function plantedSupplyPanels(
       )
       .join("");
     const entities = panel.entities > 0 ? `<div data-labels-table><ul>${rowsHtml}</ul></div>` : "";
-    const walletsTable = `<table><caption>Last 7 days. ${PLANTED_WALLETS_CAPTION}</caption></table>`;
+    const walletsTable = plantedTable(
+      { columns: WALLET_TABLE, rows: panel.kpiRows },
+      `Last 7 days. ${PLANTED_WALLETS_CAPTION}`,
+    );
     return `<div data-chain-panel="${panel.value}">${plantedPanelCard(
       panel.heading,
       `${plantedSupplyBar(panel)}${plantedLegend(panel)}<dl>${stats}</dl>${plantedPanelNotes(panel.notes)}`,

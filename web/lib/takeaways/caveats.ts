@@ -13,7 +13,7 @@ export const PLACED_PIN =
   "Placed measures dollars that stayed, not why. A venue with no published label can count as placed, exchange custody included.";
 
 export const EXCHANGE_FLOOR_NOTE =
-  "Exchange venues are a floor: they count only wallets a public source names. Exchange-linked wallets took their OUSD from such wallets, and could be an exchange's, its clients' or someone else's. No source says who holds them, and the rows below don't count them. The part counted as placed has stayed on the chain, and use inside an exchange, if any, can't be seen.";
+  "Exchange venues are a floor: they count only wallets a public source names. Exchange-linked wallets took their OUSD from such wallets, and could be an exchange's, its clients' or someone else's. No source says who holds them, and the named exchange rows don't count them. The part counted as placed has stayed on the chain, and use inside an exchange, if any, can't be seen.";
 
 export const EXCHANGE_FLOOR_LINK = "How exchange-linked wallets are found";
 

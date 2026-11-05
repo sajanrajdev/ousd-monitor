@@ -240,6 +240,31 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     );
   });
 
+  it("holds the figures and wallet table to the KPI rows, and refuses wallets across chains", () => {
+    const loose = inPanel("all", (html) =>
+      html.replace("</dl>", "</dl><p>Active wallets, 7 days: 1,740</p>"),
+    );
+    expect(faults(loose, "all")).toContain(
+      "index.html: the all panel of #where-supply-sits: it shows a wallet figure across chains",
+    );
+    const figure = inPanel("all", (html) =>
+      html.replace(/(data-stat="circulating"><dt>[^<]*<\/dt><dd data-stat-value>)[^<]*/, "$1$9"),
+    );
+    expect(faults(figure, "all")).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("its circulating disagrees with the KPI rows"),
+      ]),
+    );
+    const wallets = inPanel("tempo", (html) =>
+      html.replace(/(<td data-label="Active wallets, 7 days">)[^<]*/, "$1999999"),
+    );
+    expect(faults(wallets, "tempo")).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("its table's Active wallets, 7 days isn't the dataset's"),
+      ]),
+    );
+  });
+
   it("refuses a caveat lost from one panel, hidden, reworded or for another chain", () => {
     const lost = inPanel("tempo", (html) =>
       html.replace(/<li data-note="exchange-floor">.*?<\/li>/, ""),

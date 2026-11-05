@@ -862,6 +862,30 @@ function checkPanelStats(where, panel, stats, problems) {
 
 // Each filter option's supply card holds what the dataset gives that chain, in view. The checks above
 // read the whole page, so a panel with a wrong figure or a lost caveat would pass them.
+const WALLET_TABLE_COLUMNS = [
+  { key: "chain", label: "Chain" },
+  { key: "clean", label: "Clean volume, 7 days" },
+  { key: "wallets", label: "Active wallets, 7 days" },
+];
+
+// Held to the KPI rows, which the page's own supply code doesn't read, so a fault in that code can't
+// set what this check expects. Wallets are never summed, so a panel over several chains shows no
+// wallet figure outside its popover and table, whatever the stats list says.
+function checkPanelAgainstKpis(where, panel, want, problems) {
+  const shown = panel.cloneNode(true);
+  for (const hidden of shown.querySelectorAll(".data-toggle, .info-popover, .sr-only, noscript")) {
+    hidden.remove();
+  }
+  if (want.chains > 1 && /active wallets/i.test(shown.textContent)) {
+    problems.push(`${where}: it shows a wallet figure across chains`);
+  }
+  const stat = (key) =>
+    viewText(panel.querySelector(`[data-stat="${key}"] [data-stat-value]`)).trim();
+  for (const [key, value] of Object.entries(want.fromKpis)) {
+    if (stat(key) !== value) problems.push(`${where}: its ${key} disagrees with the KPI rows`);
+  }
+}
+
 function checkSupplyPanels(page, document, expected, problems) {
   if (expected.supplyPanels.length === 0) return;
   const id = CARD_ANCHORS.supply;
@@ -883,6 +907,7 @@ function checkSupplyPanels(page, document, expected, problems) {
     if (!full?.textContent.includes(want.placedNote)) {
       problems.push(`${where}: its popover has lost the placed note in full`);
     }
+    checkPanelAgainstKpis(where, panel, want, problems);
     const tables = panel.querySelectorAll(".data-toggle table");
     checkTableRows(where, tables[0], want.table.columns, want.table.rows, problems);
     if (
@@ -890,6 +915,8 @@ function checkSupplyPanels(page, document, expected, problems) {
       !tables[1].querySelector("caption")?.textContent.includes(WALLETS_ACROSS_CHAINS_NOTE)
     ) {
       problems.push(`${where}: its table of wallets doesn't say what a wallet is`);
+    } else {
+      checkTableRows(where, tables[1], WALLET_TABLE_COLUMNS, want.kpiRows, problems);
     }
     // Rows add up across chains, so they sit under All. checkExchangeRows holds what each one says.
     const rows = panel.querySelectorAll(".data-toggle [data-labels-table] [data-exchange-row]");
@@ -1194,6 +1221,29 @@ function expectedFindings({ manifest, journey, activity, chain_roles }) {
   ];
 }
 
+// What the supply card's figures and wallet table must be, read straight from the KPI rows. Circulating
+// is compared only when each chain's KPI row is from its newest journey day, as the card reads that day.
+function kpiFigures(option, kpis, journey) {
+  const own = newestByChain(kpis).filter((row) => option.chains.includes(row.chain));
+  const days = new Map(newestByChain(journey).map((row) => [row.chain, row.day]));
+  const sameDays = own.every((row) => days.get(row.chain) === row.day);
+  const all = own.length > 0 ? allChainKpis(own) : null;
+  return {
+    fromKpis: {
+      "clean-7d": formatCompact(all?.clean_7d),
+      ...(sameDays ? { circulating: formatCompact(all?.circulating_supply) } : {}),
+      ...(option.chains.length === 1
+        ? { "active-wallets": own[0]?.active_wallets_7d.toLocaleString("en-US") ?? UNKNOWN_TEXT }
+        : {}),
+    },
+    kpiRows: own.map((row) => ({
+      chain: CHAIN_NAMES[row.chain],
+      clean: `${formatCompact(row.clean_7d)} (${formatExact(row.clean_7d)})`,
+      wallets: row.active_wallets_7d.toLocaleString("en-US"),
+    })),
+  };
+}
+
 // What each filter option's supply card and step line must say, from the same functions the view uses.
 function expectedPanels(files) {
   const { manifest, summary, journey, activity, labels } = files;
@@ -1239,6 +1289,8 @@ function expectedPanels(files) {
         stats: panel.stats,
         notes,
         table: panel.table,
+        chains: option.chains.length,
+        ...kpiFigures(option, summary.kpis, journey.data),
         placedNote: PLACED_NOTE,
         entities: panel.segments.flatMap((segment) => segment.entities ?? []).length,
       };

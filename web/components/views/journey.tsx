@@ -187,6 +187,14 @@ function SupplyDetail({ panel, definitions }: { panel: SupplyPanel; definitions:
             </a>
           </li>
         ))}
+        <li>
+          <a
+            href={definitionHref("active-wallets")}
+            className="target-link underline underline-offset-4"
+          >
+            Active wallets
+          </a>
+        </li>
       </ul>
     </>
   );
