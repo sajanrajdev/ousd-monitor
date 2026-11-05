@@ -7,6 +7,7 @@ import { JSDOM } from "jsdom";
 import { loadDatasetFiles, locateDataset } from "../lib/dataset/load.ts";
 import { deriveState } from "../lib/dataset/state.ts";
 import { allChainKpis, newestByChain } from "../lib/aggregate.ts";
+import { chainOptions } from "../lib/chain-scope.ts";
 import { CARD_ANCHORS, CHAIN_NAMES, TOKEN_CONTRACTS } from "../lib/definitions.ts";
 import { exchangeRows } from "../lib/exchange-rows.ts";
 import { formatBps, formatCompact, formatExact, UNKNOWN_TEXT } from "../lib/format.ts";
@@ -31,13 +32,22 @@ import {
   issuerUnlabeledNote,
   NO_SWAPS_NOTE,
   PLACED_NOTE,
+  PLACED_PIN,
   seriesStartNote,
+  seriesStartPin,
   SMALL_TICKET_LEAD,
   SMALL_TICKET_NOTE,
   VELOCITY_NOTE,
   WALLETS_ACROSS_CHAINS_NOTE,
   WALLETS_NOTE,
 } from "../lib/takeaways/caveats.ts";
+import {
+  directLabel,
+  legendAmount,
+  segmentLabel,
+  seriesPanel,
+  supplyPanel,
+} from "../lib/supply-segments.ts";
 import { chainRolesHeading } from "../lib/takeaways/chain-roles.ts";
 import { exchangeLinkedBands, journeyHeading } from "../lib/takeaways/journey.ts";
 import { verdictSentence, verdictTextVisible } from "../lib/verdict.ts";
@@ -374,13 +384,25 @@ function checkTrustDetail(page, document, problems) {
   }
 }
 
+const PIN_NUMBER = /^\d+$/;
+
+// A note's own words. Its pin is a number outside them, and anything else in a pin still counts.
+function noteWords(note) {
+  if (!inView(note)) return "";
+  const copy = note.cloneNode(true);
+  for (const pin of copy.querySelectorAll(".pin")) {
+    if (PIN_NUMBER.test(pin.textContent.trim())) pin.remove();
+  }
+  return viewText(copy, "");
+}
+
 // The caveats needed to read a number, wherever a unit pins them. Each required instance is in view
 // with nothing opened and keeps its words, read whole so a date or a link can't split a sentence.
 function checkEssentialNotes(page, document, expected, problems) {
   for (const { kind, chain, text, exact } of expected.essentialNotes) {
     const selector = `[data-note="${kind}"]${chain ? `[data-chain="${chain}"]` : ""}`;
     const shown = [...document.querySelectorAll(selector)]
-      .map((note) => viewText(note, "").replace(/\s+/g, " "))
+      .map((note) => noteWords(note).replace(/\s+/g, " "))
       .filter((words) => words.trim());
     const name = `the ${kind} note${chain ? ` for ${chain}` : ""}`;
     if (shown.length === 0) {
@@ -619,6 +641,8 @@ function flightText(node, values, seen = new Set()) {
   }
   if (!Array.isArray(node)) return "";
   if (node[0] === "$" && typeof node[1] === "string") {
+    // A note's pin is a number outside its words, as in noteWords.
+    if (node[3]?.className === "pin" && typeof node[3].children === "number") return "";
     return flightText(node[3]?.children, values, seen);
   }
   return node.map((child) => flightText(child, values, seen)).join("");
@@ -660,6 +684,281 @@ function flightBandAmounts(values) {
   };
   values.forEach(walk);
   return found;
+}
+
+// The filter lists the dataset's chains in order, with the first chosen and nothing hiding it.
+function checkFilter(page, document, expected, problems) {
+  if (expected.filter.length === 0) return;
+  const filter = document.querySelector('.dashboard [data-section="chain-filter"]');
+  if (!filter || !inView(filter)) {
+    problems.push(`${page}: the chain filter isn't in view`);
+    return;
+  }
+  const radios = [...filter.querySelectorAll('input[type="radio"][name="chain"]')];
+  const said = radios.map((input) => `${input.value}=${plainText(input.closest("label"))}`);
+  const want = expected.filter.map(({ value, label }) => `${value}=${label}`);
+  if (said.join() !== want.join()) {
+    problems.push(
+      `${page}: the chain filter lists ${said.join()}, not the dataset's ${want.join()}`,
+    );
+  }
+  const chosen = radios.filter((input) => input.hasAttribute("checked"));
+  if (chosen.length !== 1 || chosen[0] !== radios[0]) {
+    problems.push(`${page}: the chain filter doesn't start on its first option`);
+  }
+}
+
+const SERIES_COLUMNS = [
+  { key: "day", label: "Day" },
+  { key: "total", label: "Total" },
+  { key: "placed", label: "Placed" },
+  { key: "circulating", label: "Circulating" },
+];
+
+const panelOf = (box, value) => box?.querySelector(`:scope > [data-chain-panel="${value}"]`);
+
+// One panel per filter option and no other, each with a card of its own.
+function panelsOf(page, document, id, expected, problems) {
+  const box = document.getElementById(id);
+  const values = [...(box?.querySelectorAll(":scope > [data-chain-panel]") ?? [])].map(
+    (panel) => panel.dataset.chainPanel,
+  );
+  const want = expected.filter.map(({ value }) => value);
+  if (values.join() !== want.join()) {
+    problems.push(`${page}: #${id} has panels for ${values.join()}, not ${want.join()}`);
+  }
+  return box;
+}
+
+function checkTableRows(where, table, columns, rows, problems) {
+  const shown = [...(table?.querySelectorAll("tbody tr") ?? [])];
+  if (shown.length !== rows.length) {
+    problems.push(`${where}: its table has ${shown.length} rows, not ${rows.length}`);
+    return;
+  }
+  rows.forEach((row, index) => {
+    for (const { key, label } of columns) {
+      const cell = [...shown[index].children].find((td) => td.dataset.label === label);
+      if (plainText(cell) !== String(row[key])) {
+        problems.push(`${where}: its table's ${label} isn't the dataset's`);
+      }
+    }
+  });
+}
+
+// The notes this panel holds, in order, each whole and in view, and none for another chain. A pin's
+// number is its note's place in that order.
+function checkPanelNotes(where, panel, notes, problems) {
+  const shown = [...panel.querySelectorAll("[data-pinned-notes] > [data-note]")];
+  const said = shown.map((note) => `${note.dataset.note}:${note.dataset.chain ?? ""}`);
+  const want = notes.map(({ kind, chain }) => `${kind}:${chain ?? ""}`);
+  if (said.join() !== want.join()) {
+    problems.push(`${where}: its notes are ${said.join()}, not ${want.join()}`);
+    return;
+  }
+  notes.forEach(({ kind, words }, index) => {
+    if (noteWords(shown[index]).replace(/\s+/g, " ").trim() !== words) {
+      problems.push(`${where}: its ${kind} note doesn't keep its words in view`);
+    }
+    if (plainText(shown[index].querySelector(".pin")) !== String(index + 1)) {
+      problems.push(`${where}: its ${kind} note has the wrong number`);
+    }
+  });
+}
+
+function checkPanelBar(where, panel, { key, total, parts }, problems) {
+  const bar = panel.querySelector("[data-supply-bar]");
+  if (!parts.some(({ amount }) => BigInt(amount) > 0n)) {
+    if (bar) problems.push(`${where}: it draws a bar with no supply`);
+    if (!viewText(panel).includes(UNKNOWN_TEXT)) {
+      problems.push(`${where}: it doesn't say "${UNKNOWN_TEXT}"`);
+    }
+    return;
+  }
+  if (bar?.dataset.supplyBar !== key || !inView(bar)) {
+    problems.push(`${where}: its bar isn't ${key}'s, in view`);
+    return;
+  }
+  const drawn = [...bar.querySelectorAll("[data-part]")];
+  const sum = drawn.reduce((held, part) => held + BigInt(part.dataset.amount ?? 0), 0n);
+  if (sum.toString() !== total) {
+    problems.push(`${where}: its bar's parts add up to ${sum}, not its total of ${total}`);
+  }
+  for (const { key: part, amount, width, band, direct } of parts) {
+    const shown = drawn.find((element) => element.dataset.part === part);
+    if (BigInt(amount) === 0n) {
+      if (shown) problems.push(`${where}: its bar draws ${part} at zero`);
+      continue;
+    }
+    if (shown?.dataset.amount !== amount) {
+      problems.push(`${where}: its bar's ${part} isn't the dataset's`);
+      continue;
+    }
+    if (!(shown.getAttribute("style") ?? "").replace(/\s+/g, "").includes(`flex-basis:${width}`)) {
+      problems.push(`${where}: its bar's ${part} isn't drawn at its share`);
+    }
+    if (plainText(shown.querySelector("[data-direct-label]")) !== (direct ?? "")) {
+      problems.push(`${where}: its bar's ${part} doesn't carry the dataset's label`);
+    }
+    const marked = shown.querySelector('[data-testid="exchange-linked-band"]');
+    if (Boolean(marked) !== (band !== null && BigInt(band) > 0n)) {
+      problems.push(`${where}: its ${part} band doesn't match the dataset`);
+    }
+  }
+}
+
+// Every segment on every panel, with what the dataset gives, so the legend can't jump or disagree.
+function checkPanelLegend(where, panel, { parts }, problems) {
+  const rows = [...panel.querySelectorAll("[data-supply-legend] [data-segment]")];
+  const keys = parts.map(({ key }) => key);
+  if (rows.map((row) => row.dataset.segment).join() !== keys.join()) {
+    problems.push(`${where}: its legend doesn't list every segment`);
+    return;
+  }
+  parts.forEach(({ key, label, compact, share, floor, pins, bandLine }, index) => {
+    const row = rows[index];
+    const text = (selector) => plainText(row.querySelector(selector));
+    if (!viewText(row).trim()) problems.push(`${where}: its ${key} legend row isn't in view`);
+    if (text("[data-segment-label]") !== label) {
+      problems.push(`${where}: its ${key} legend row doesn't say "${label}"`);
+    }
+    if (text("[data-segment-amount]") !== `${floor ? "≥" : ""}${compact}`) {
+      problems.push(`${where}: its ${key} legend amount isn't the dataset's`);
+    }
+    if (text("[data-segment-share]") !== share) {
+      problems.push(`${where}: its ${key} legend share isn't the dataset's`);
+    }
+    if (Boolean(row.querySelector('[data-coverage="floor"]')) !== floor) {
+      problems.push(`${where}: its ${key} legend row has the wrong coverage mark`);
+    }
+    const numbers = [...row.querySelectorAll(".pin")].map(plainText);
+    if (numbers.join() !== pins.join()) {
+      problems.push(`${where}: its ${key} legend row points at notes ${numbers.join()}`);
+    }
+    if (bandLine !== null) {
+      const line = panel.querySelector(`[data-band="${key}"]`);
+      if (plainText(line) !== bandLine || !viewText(line).trim()) {
+        problems.push(`${where}: its ${key} band line isn't the dataset's`);
+      }
+    }
+  });
+}
+
+function checkPanelStats(where, panel, stats, problems) {
+  const shown = [...panel.querySelectorAll("[data-stat]")];
+  const said = shown.map((stat) => stat.dataset.stat);
+  const want = stats.map(({ key }) => key);
+  // Wallets are never summed, so All shows none: this is what holds a total off the page.
+  if (said.join() !== want.join()) {
+    problems.push(`${where}: it shows ${said.join()} beside the bar, not ${want.join()}`);
+    return;
+  }
+  stats.forEach(({ key, value }, index) => {
+    if (viewText(shown[index].querySelector("[data-stat-value]")).trim() !== value) {
+      problems.push(`${where}: its ${key} isn't the dataset's`);
+    }
+  });
+}
+
+// Each filter option's supply card holds what the dataset gives that chain, in view. The checks above
+// read the whole page, so a panel with a wrong figure or a lost caveat would pass them.
+const WALLET_TABLE_COLUMNS = [
+  { key: "chain", label: "Chain" },
+  { key: "clean", label: "Clean volume, 7 days" },
+  { key: "wallets", label: "Active wallets, 7 days" },
+];
+
+// Held to the KPI rows, which the page's own supply code doesn't read, so a fault in that code can't
+// set what this check expects. Wallets are never summed, so a panel over several chains shows no
+// wallet figure outside its popover and table, whatever the stats list says.
+function checkPanelAgainstKpis(where, panel, want, problems) {
+  const shown = panel.cloneNode(true);
+  for (const hidden of shown.querySelectorAll(".data-toggle, .info-popover, .sr-only, noscript")) {
+    hidden.remove();
+  }
+  if (want.chains > 1 && /active wallets/i.test(shown.textContent)) {
+    problems.push(`${where}: it shows a wallet figure across chains`);
+  }
+  const stat = (key) =>
+    viewText(panel.querySelector(`[data-stat="${key}"] [data-stat-value]`)).trim();
+  for (const [key, value] of Object.entries(want.fromKpis)) {
+    if (stat(key) !== value) problems.push(`${where}: its ${key} disagrees with the KPI rows`);
+  }
+}
+
+function checkSupplyPanels(page, document, expected, problems) {
+  if (expected.supplyPanels.length === 0) return;
+  const id = CARD_ANCHORS.supply;
+  const box = panelsOf(page, document, id, expected, problems);
+  for (const want of expected.supplyPanels) {
+    const panel = panelOf(box, want.value);
+    const where = `${page}: the ${want.value} panel of #${id}`;
+    if (!panel) continue;
+    if (!inView(panel)) problems.push(`${where}: it's hidden by its markup`);
+    const heading = panel.querySelector(".chart-card__head h2, .chart-card__head h3");
+    if (viewText(heading).trim() !== want.heading) {
+      problems.push(`${where}: its heading isn't the dataset's`);
+    }
+    checkPanelBar(where, panel, want, problems);
+    checkPanelLegend(where, panel, want, problems);
+    checkPanelStats(where, panel, want.stats, problems);
+    checkPanelNotes(where, panel, want.notes, problems);
+    const full = panel.querySelector('.info-popover__panel [data-full-note="placed"]');
+    if (!full?.textContent.includes(want.placedNote)) {
+      problems.push(`${where}: its popover has lost the placed note in full`);
+    }
+    checkPanelAgainstKpis(where, panel, want, problems);
+    const tables = panel.querySelectorAll(".data-toggle table");
+    checkTableRows(where, tables[0], want.table.columns, want.table.rows, problems);
+    if (
+      tables.length < 2 ||
+      !tables[1].querySelector("caption")?.textContent.includes(WALLETS_ACROSS_CHAINS_NOTE)
+    ) {
+      problems.push(`${where}: its table of wallets doesn't say what a wallet is`);
+    } else {
+      checkTableRows(where, tables[1], WALLET_TABLE_COLUMNS, want.kpiRows, problems);
+    }
+    // Rows add up across chains, so they sit under All. checkExchangeRows holds what each one says.
+    const rows = panel.querySelectorAll(".data-toggle [data-labels-table] [data-exchange-row]");
+    if (rows.length !== want.entities) {
+      problems.push(
+        `${where}: it has ${rows.length} exchange rows under its toggle, not ${want.entities}`,
+      );
+    }
+  }
+}
+
+function checkSeriesPanels(page, document, expected, problems) {
+  if (expected.seriesPanels.length === 0) return;
+  const id = CARD_ANCHORS.series;
+  const box = panelsOf(page, document, id, expected, problems);
+  for (const want of expected.seriesPanels) {
+    const panel = panelOf(box, want.value);
+    const where = `${page}: the ${want.value} panel of #${id}`;
+    if (!panel) continue;
+    if (!inView(panel)) problems.push(`${where}: it's hidden by its markup`);
+    const heading = panel.querySelector(".chart-card__head h2, .chart-card__head h3");
+    if (viewText(heading).trim() !== want.heading) {
+      problems.push(`${where}: its heading isn't the dataset's`);
+    }
+    checkPanelNotes(where, panel, want.notes, problems);
+    const full = panel.querySelector('.info-popover__panel [data-full-note="series-start"]');
+    if (!full?.textContent.includes(want.fullNote)) {
+      problems.push(`${where}: its popover has lost the series note in full`);
+    }
+    checkTableRows(
+      where,
+      panel.querySelector(".data-toggle table"),
+      SERIES_COLUMNS,
+      want.rows,
+      problems,
+    );
+    const lines = [...panel.querySelectorAll("[data-series-line]")];
+    const figures = lines.map((line) => viewText(line.querySelector("[data-series-value]")).trim());
+    if (figures.join() !== want.latest.join()) {
+      problems.push(`${where}: its legend's figures aren't the newest day's`);
+    }
+  }
 }
 
 // The same rows, caveats and band as the HTML, or the page changes under a reader once it loads. No
@@ -836,6 +1135,9 @@ export function verifyOutput(outDir, expected) {
       checkEssentialNotes(page, document, expected, problems);
       checkExchangeRows(page, document, expected, problems);
       checkBands(page, document, expected, problems);
+      checkFilter(page, document, expected, problems);
+      checkSupplyPanels(page, document, expected, problems);
+      checkSeriesPanels(page, document, expected, problems);
       checkPayload(page, inlineFlight(page, document, problems), expected, problems);
     }
   }
@@ -863,13 +1165,13 @@ function essentialNotes({ manifest, summary, journey, activity }) {
   const rows = activity.data;
   const scope = day0Scope(rows, summary.kpis);
   return [
-    { kind: "placed", text: PLACED_NOTE },
+    { kind: "placed", text: PLACED_PIN, exact: true },
     {
       kind: "exchange-floor",
       text: `${EXCHANGE_FLOOR_NOTE} ${EXCHANGE_FLOOR_LINK}.`,
       exact: true,
     },
-    { kind: "series-start", text: seriesStartNote(definitions) },
+    { kind: "series-start", text: seriesStartPin(definitions), exact: true },
     { kind: "small-ticket", text: `${SMALL_TICKET_LEAD} ${SMALL_TICKET_NOTE}` },
     { kind: "velocity-denominators", text: VELOCITY_NOTE },
     { kind: "no-swaps", text: NO_SWAPS_NOTE },
@@ -919,6 +1221,100 @@ function expectedFindings({ manifest, journey, activity, chain_roles }) {
   ];
 }
 
+// What the supply card's figures and wallet table must be, read straight from the KPI rows. Circulating
+// is compared only when each chain's KPI row is from its newest journey day, as the card reads that day.
+function kpiFigures(option, kpis, journey) {
+  const own = newestByChain(kpis).filter((row) => option.chains.includes(row.chain));
+  const days = new Map(newestByChain(journey).map((row) => [row.chain, row.day]));
+  const sameDays = own.every((row) => days.get(row.chain) === row.day);
+  const all = own.length > 0 ? allChainKpis(own) : null;
+  return {
+    fromKpis: {
+      "clean-7d": formatCompact(all?.clean_7d),
+      ...(sameDays ? { circulating: formatCompact(all?.circulating_supply) } : {}),
+      ...(option.chains.length === 1
+        ? { "active-wallets": own[0]?.active_wallets_7d.toLocaleString("en-US") ?? UNKNOWN_TEXT }
+        : {}),
+    },
+    kpiRows: own.map((row) => ({
+      chain: CHAIN_NAMES[row.chain],
+      clean: `${formatCompact(row.clean_7d)} (${formatExact(row.clean_7d)})`,
+      wallets: row.active_wallets_7d.toLocaleString("en-US"),
+    })),
+  };
+}
+
+// What each filter option's supply card and step line must say, from the same functions the view uses.
+function expectedPanels(files) {
+  const { manifest, summary, journey, activity, labels } = files;
+  const options = chainOptions(manifest.coverage.chains_included);
+  const inputs = {
+    journey: journey.data,
+    activity: activity.data,
+    kpis: summary.kpis,
+    definitions: manifest.definitions,
+    exchanges: exchangeRows(labels),
+  };
+  const noteWordsOf = ({ kind, chain, text, link, segment }) => ({
+    kind,
+    chain,
+    segment,
+    words: link ? `${text} ${link.text}.` : text,
+  });
+  return {
+    filter: options.map(({ value, label }) => ({ value, label })),
+    supplyPanels: options.map((option) => {
+      const panel = supplyPanel(option, inputs);
+      const notes = panel.notes.map(noteWordsOf);
+      return {
+        value: option.value,
+        heading: panel.heading,
+        key: panel.bar?.key ?? null,
+        total: panel.bar?.journey.total_supply ?? null,
+        parts: panel.segments.map((segment) => ({
+          key: segment.key,
+          label: segmentLabel(segment),
+          amount: segment.amount,
+          compact: legendAmount(segment),
+          width: `${(segment.shareBps ?? 0) / 100}%`,
+          share: formatBps(segment.shareBps),
+          direct: directLabel(segment),
+          floor: segment.coverage === "floor",
+          band: segment.band?.amount ?? null,
+          bandLine: segment.band?.line ?? null,
+          pins: notes.flatMap((note, index) =>
+            note.segment === segment.key ? [String(index + 1)] : [],
+          ),
+        })),
+        stats: panel.stats,
+        notes,
+        table: panel.table,
+        chains: option.chains.length,
+        ...kpiFigures(option, summary.kpis, journey.data),
+        placedNote: PLACED_NOTE,
+        entities: panel.segments.flatMap((segment) => segment.entities ?? []).length,
+      };
+    }),
+    seriesPanels: options.map((option) => {
+      const panel = seriesPanel(option, inputs);
+      return {
+        value: option.value,
+        heading: panel.heading,
+        notes: panel.notes.map(noteWordsOf),
+        fullNote: seriesStartNote(manifest.definitions),
+        rows: panel.tableRows,
+        latest: panel.latest
+          ? [
+              panel.latest.total_supply,
+              panel.latest.circulating_supply,
+              panel.latest.placed_supply,
+            ].map(formatCompact)
+          : [],
+      };
+    }),
+  };
+}
+
 // In the row's order, with the same formats, so a value is held to the dataset too.
 function expectedKpiValues(kpis) {
   const figures = allChainKpis(kpis);
@@ -965,6 +1361,7 @@ export function expectedFromFiles(files, placement, webRoot = process.cwd(), now
     findings: expectedFindings(files),
     essentialNotes: essentialNotes(files),
     exchangeRows: exchangeRows(files.labels),
+    ...expectedPanels(files),
     bands: exchangeLinkedBands(files.journey.data).map((band) => ({
       ...band,
       name: CHAIN_NAMES[band.key] ?? band.key,

@@ -1,292 +1,368 @@
-import { ChartCard, TableCard } from "@/components/chart-card";
+import { ChainPanels } from "@/components/chain-panels";
+import { ChartCard } from "@/components/chart-card";
 import { ExchangeRows } from "@/components/exchange-rows";
-import { allChainJourney, allChainSeries, dayRange, newestByChain } from "@/lib/aggregate";
+import { HairlineTable } from "@/components/hairline-table";
+import { PinMark, type PinnedNote } from "@/components/pinned-notes";
+import { StatusChip } from "@/components/status-chip";
+import { dayRange } from "@/lib/aggregate";
+import type { ChainOption } from "@/lib/chain-scope";
 import type { ActivityRow, Definitions, DatasetState, JourneyRow, KpiRow } from "@/lib/dataset";
-import { CARD_ANCHORS, CHAIN_NAMES, definitionHref, REQUIRED_CHAINS } from "@/lib/definitions";
+import { CARD_ANCHORS, CHAIN_NAMES, definitionHref } from "@/lib/definitions";
 import type { ExchangeRow } from "@/lib/exchange-rows";
 import { formatBps, formatCompact, formatExact, formatUtcDate, UNKNOWN_TEXT } from "@/lib/format";
 import {
-  EXCHANGE_FLOOR_LINK,
-  EXCHANGE_FLOOR_NOTE,
-  exchangeCoverageNote,
-  issuerUnlabeledNote,
-  PLACED_NOTE,
-  seriesStartNote,
-  WALLETS_ACROSS_CHAINS_NOTE,
-} from "@/lib/takeaways/caveats";
+  legendAmount,
+  segmentLabel,
+  SEGMENT_CONFIG,
+  seriesPanel,
+  supplyPanel,
+  withoutEntities,
+  type SegmentConfig,
+  type SegmentNote,
+  type SupplyPanel,
+  type SupplySegment,
+} from "@/lib/supply-segments";
+import { PLACED_NOTE, seriesStartNote, WALLETS_ACROSS_CHAINS_NOTE } from "@/lib/takeaways/caveats";
 import {
-  journeyHeading,
   journeyTakeaway,
   scopeText,
   seriesTakeaway,
-  top10ShareBps,
   volumeTakeaway,
 } from "@/lib/takeaways/journey";
-import { BarLegend, SupplyBars, SupplySeries, type BarRow } from "./journey-charts";
+import { SeriesLegend, SupplyBar, SupplySeries } from "./journey-charts";
 
 export type JourneyViewProps = {
+  options: ChainOption[];
   journey: JourneyRow[];
   activity: ActivityRow[];
   kpis: KpiRow[];
   definitions: Definitions;
   state: DatasetState;
   exchanges: ExchangeRow[];
+  // Only a test passes this, to show a segment added here reaches the bar, legend and table.
+  segmentConfig?: SegmentConfig[];
 };
 
 const SOURCE = "Chain data and public labels";
 
-function VenueNote({
-  unlabeled,
-  noExchange,
-  exchanges,
-}: {
-  unlabeled: JourneyRow["chain"][];
-  noExchange: JourneyRow["chain"][];
-  exchanges: ExchangeRow[];
-}) {
+function pinnedNote({ kind, chain, text, link }: SegmentNote): PinnedNote {
+  return {
+    kind,
+    chain,
+    text: link ? (
+      <>
+        {text}{" "}
+        <a href={link.href} className="underline underline-offset-4">
+          {link.text}
+        </a>
+        .
+      </>
+    ) : (
+      text
+    ),
+  };
+}
+
+// Each note's number, by the segment it belongs to. A number is the note's place in the list, as in
+// PinnedNotes, so the legend and bar can't point at another note.
+function pinsOf(notes: SegmentNote[]): Record<string, number[]> {
+  const pins: Record<string, number[]> = {};
+  notes.forEach(({ segment }, index) => {
+    if (segment) pins[segment] = [...(pins[segment] ?? []), index + 1];
+  });
+  return pins;
+}
+
+function LegendRow({ segment, pins }: { segment: SupplySegment; pins: number[] }) {
+  const { style } = segment;
+  return (
+    <li className="chart-legend__row" data-segment={segment.key}>
+      <span
+        aria-hidden="true"
+        className="chart-legend__swatch"
+        data-outlined={style.outlined ? "" : undefined}
+        style={{
+          background: style.image ? `${style.image}, ${style.background}` : style.background,
+        }}
+      />
+      <span className="chart-legend__label">
+        <span data-segment-label>{segmentLabel(segment)}</span> <StatusChip kind={segment.marker} />
+        {pins.map((number) => (
+          <PinMark key={number} number={number} />
+        ))}
+      </span>
+      <span className="chart-legend__values">
+        <span data-segment-amount>
+          {segment.coverage === "floor" ? (
+            <span aria-hidden="true" data-coverage="floor">
+              ≥
+            </span>
+          ) : null}
+          {legendAmount(segment)}
+        </span>{" "}
+        <span data-segment-share>{formatBps(segment.shareBps)}</span>
+      </span>
+    </li>
+  );
+}
+
+// Every segment on every panel, zero included, so the legend doesn't jump between filter options. The
+// band's line says what it marks inside its segment, and carries data-exchange-linked only when
+// there's a band to mark.
+function SupplyLegend({ panel, pins }: { panel: SupplyPanel; pins: Record<string, number[]> }) {
+  const key = panel.bar?.key;
+  return (
+    <ul className="chart-legend" data-supply-legend>
+      {panel.segments.flatMap((segment) => [
+        <LegendRow key={segment.key} segment={segment} pins={pins[segment.key] ?? []} />,
+        ...(segment.band
+          ? [
+              <li key={`${segment.key}:band`} className="chart-legend__row" data-band={segment.key}>
+                <span
+                  aria-hidden="true"
+                  className="chart-legend__swatch"
+                  data-outlined=""
+                  style={{ background: segment.band.background }}
+                />
+                <span
+                  className="chart-legend__band"
+                  data-testid="exchange-linked"
+                  data-exchange-linked={BigInt(segment.band.amount) > 0n ? key : undefined}
+                >
+                  {segment.band.line}
+                </span>
+              </li>,
+            ]
+          : []),
+      ])}
+    </ul>
+  );
+}
+
+function SupplyStats({ panel, walletPin }: { panel: SupplyPanel; walletPin: number }) {
+  return (
+    <dl className="chart-stats">
+      {panel.stats.map(({ key, label, value }) => (
+        <div key={key} data-stat={key}>
+          <dt>
+            {label}
+            {key === "active-wallets" ? <PinMark number={walletPin} /> : null}
+          </dt>
+          <dd data-stat-value>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function SupplyDetail({ panel, definitions }: { panel: SupplyPanel; definitions: Definitions }) {
+  const links = [...new Map(panel.segments.map((s) => [s.definition, s])).values()];
   return (
     <>
-      <p data-note="placed">
+      <p>{journeyTakeaway(panel.rows, definitions)}</p>
+      <p data-full-note="placed">
         {PLACED_NOTE}{" "}
-        <a href={definitionHref("venue-supply")} className="underline underline-offset-4">
+        <a
+          href={definitionHref("venue-supply")}
+          className="target-link underline underline-offset-4"
+        >
           How venues are labelled
         </a>
         .
       </p>
-      <p className="mt-2" data-note="exchange-floor">
-        {EXCHANGE_FLOOR_NOTE}{" "}
-        <a href={definitionHref("exchange-linked-placed")} className="underline underline-offset-4">
-          {EXCHANGE_FLOOR_LINK}
-        </a>
-        .
+      <p>Circulating comes from activity data.</p>
+      <p>{volumeTakeaway(panel.kpis)}</p>
+      <p>
+        Clean volume and active wallets sit beside the supply parts because they are flows, not
+        slices of a balance.
       </p>
-      <ExchangeRows rows={exchanges} />
-      {noExchange.map((chain) => (
-        <p
-          key={chain}
-          className="mt-2"
-          data-testid="exchange-coverage"
-          data-note="exchange-coverage"
-          data-chain={chain}
-        >
-          {exchangeCoverageNote(chain)}
-        </p>
-      ))}
-      {unlabeled.map((chain) => (
-        <p
-          key={chain}
-          className="mt-2"
-          data-testid="issuer-unlabeled"
-          data-note="issuer-unlabeled"
-          data-chain={chain}
-        >
-          {issuerUnlabeledNote(chain)}
-        </p>
-      ))}
+      <ul className="info-popover__links">
+        {links.map((segment) => (
+          <li key={segment.definition}>
+            <a
+              href={definitionHref(segment.definition)}
+              className="target-link underline underline-offset-4"
+            >
+              {segment.definition === "venue-supply" ? "Venues" : segment.label}
+            </a>
+          </li>
+        ))}
+        <li>
+          <a
+            href={definitionHref("active-wallets")}
+            className="target-link underline underline-offset-4"
+          >
+            Active wallets
+          </a>
+        </li>
+      </ul>
     </>
   );
 }
 
-// Circulating comes from activity, and only from the day the journey row is from, so a figure beside
-// a bar never belongs to another day.
-function circulatingByChain(
-  newest: JourneyRow[],
-  activity: ActivityRow[],
-): Map<string, string | null> {
-  const byDay = new Map(activity.map((row) => [`${row.chain}|${row.day}`, row.circulating_supply]));
-  return new Map(newest.map((row) => [row.chain, byDay.get(`${row.chain}|${row.day}`) ?? null]));
-}
-
-function barRows(newest: JourneyRow[], activity: ActivityRow[]): BarRow[] {
-  const circulating = circulatingByChain(newest, activity);
-  const all = allChainJourney(newest);
-  const circulatingValues = newest.map((row) => circulating.get(row.chain) ?? null);
-  const allCirculating = circulatingValues.some((value) => value === null)
-    ? null
-    : circulatingValues.reduce((sum, value) => sum + BigInt(value!), 0n).toString();
-  const rows: BarRow[] = newest.map((row) => ({
-    key: row.chain,
-    name: CHAIN_NAMES[row.chain],
-    day: formatUtcDate(row.day),
-    journey: row,
-    circulating: circulating.get(row.chain) ?? null,
-  }));
-  if (!all) return rows;
-  return [
-    {
-      key: "all",
-      name: `${newest.length === REQUIRED_CHAINS.length ? "All four chains" : scopeText(all.chains)}`,
-      day:
-        all.asOf.from === all.asOf.to
-          ? formatUtcDate(all.asOf.from)
-          : `${formatUtcDate(all.asOf.from)} to ${formatUtcDate(all.asOf.to)}`,
-      journey: all,
-      circulating: allCirculating,
-    },
-    ...rows,
-  ];
-}
-
-function seriesFor(
-  journey: JourneyRow[],
-  activity: ActivityRow[],
-  chains: JourneyRow["chain"][],
-  firstDay: string,
-) {
-  const base = allChainSeries(journey, chains, ["total_supply", "placed_supply"]);
-  const circulating = new Map(
-    allChainSeries(activity, chains, ["circulating_supply"]).map((p) => [
-      p.day,
-      p.circulating_supply,
-    ]),
+function SupplyCard({
+  panel,
+  definitions,
+  state,
+}: {
+  panel: SupplyPanel;
+  definitions: Definitions;
+  state: DatasetState;
+}) {
+  const { chains, rows, kpis } = panel;
+  const asOf = dayRange(rows.map((row) => row.day)) ?? definitions.journey_first_day;
+  const pins = pinsOf(panel.notes);
+  const entities = panel.segments.flatMap((segment) => segment.entities ?? []);
+  return (
+    <ChartCard
+      takeaway={panel.heading}
+      detail={<SupplyDetail panel={panel} definitions={definitions} />}
+      chip="inferred"
+      source={SOURCE}
+      asOf={asOf}
+      definitionHref={definitionHref("placed-supply")}
+      frameWord={state.frameWord}
+      summary={
+        rows.length === 0
+          ? UNKNOWN_TEXT
+          : `Where supply sits on ${scopeText(chains)}: issuer inventory, placed, DEX, lending and exchange venues, and free-floating. Circulating is everything except issuer inventory and placed.`
+      }
+      notes={panel.notes.map(pinnedNote)}
+      beside={
+        panel.bar ? (
+          <>
+            <SupplyLegend panel={panel} pins={pins} />
+            <SupplyStats panel={panel} walletPin={panel.notes.length} />
+          </>
+        ) : null
+      }
+      table={panel.table}
+      moreTables={
+        <>
+          <HairlineTable
+            caption={`Last 7 days, per chain. ${WALLETS_ACROSS_CHAINS_NOTE}`}
+            columns={[
+              { key: "chain", label: "Chain" },
+              { key: "day", label: "Day" },
+              { key: "clean", label: "Clean volume, 7 days", numeric: true },
+              { key: "wallets", label: "Active wallets, 7 days", numeric: true },
+            ]}
+            rows={kpis.map((row) => ({
+              chain: CHAIN_NAMES[row.chain],
+              day: formatUtcDate(row.day),
+              clean: `${formatCompact(row.clean_7d)} (${formatExact(row.clean_7d)})`,
+              wallets: row.active_wallets_7d.toLocaleString("en-US"),
+            }))}
+          />
+          {entities.length > 0 ? (
+            <div data-labels-table>
+              <p className="font-semibold">Named exchanges, across chains</p>
+              <ExchangeRows rows={entities} />
+            </div>
+          ) : null}
+        </>
+      }
+    >
+      {panel.bar ? (
+        <SupplyBar
+          row={panel.bar}
+          segments={panel.segments.map(withoutEntities)}
+          pins={Object.fromEntries(Object.entries(pins).map(([key, numbers]) => [key, numbers[0]]))}
+        />
+      ) : (
+        <p className="p-4">{UNKNOWN_TEXT}</p>
+      )}
+    </ChartCard>
   );
-  return base
-    .filter((point) => point.day >= firstDay && circulating.has(point.day))
-    .map((point) => ({ ...point, circulating_supply: circulating.get(point.day)! }));
+}
+
+function SeriesCard({
+  panel: { option, series, heading, notes, latest, tableRows },
+  definitions,
+  state,
+}: {
+  panel: ReturnType<typeof seriesPanel>;
+  definitions: Definitions;
+  state: DatasetState;
+}) {
+  const { chains } = option;
+  const asOf = dayRange(series.map((point) => point.day)) ?? definitions.journey_first_day;
+  const scope = option.value === "all" ? "chains summed" : CHAIN_NAMES[option.value];
+  return (
+    <ChartCard
+      takeaway={heading}
+      detail={
+        <>
+          <p>{seriesTakeaway(series, chains)}</p>
+          <p data-full-note="series-start">{seriesStartNote(definitions)}</p>
+        </>
+      }
+      chip="inferred"
+      source={SOURCE}
+      asOf={asOf}
+      definitionHref={definitionHref("placed-supply")}
+      frameWord={state.frameWord}
+      needsJs={series.length > 0}
+      summary={
+        series.length === 0
+          ? UNKNOWN_TEXT
+          : `Total, placed and circulating supply over time on ${scopeText(chains)}, from ${formatUtcDate(series[0].day)}.`
+      }
+      notes={notes}
+      beside={latest ? <SeriesLegend latest={latest} /> : null}
+      table={{
+        caption: `Supply over time, ${scope}`,
+        columns: [
+          { key: "day", label: "Day" },
+          { key: "total", label: "Total", numeric: true },
+          { key: "placed", label: "Placed", numeric: true },
+          { key: "circulating", label: "Circulating", numeric: true },
+        ],
+        rows: tableRows,
+      }}
+    >
+      <SupplySeries series={series} panel={option.value} />
+    </ChartCard>
+  );
 }
 
 export function JourneyView({
+  options,
   journey,
   activity,
   kpis,
   definitions,
   state,
   exchanges,
+  segmentConfig = SEGMENT_CONFIG,
 }: JourneyViewProps) {
-  const newest = newestByChain(journey);
-  const asOf = dayRange(newest.map((row) => row.day)) ?? definitions.journey_first_day;
-  const chains = newest.map((row) => row.chain);
-  const rows = barRows(newest, activity);
-  const kpiNewest = newestByChain(kpis);
-  const kpiAsOf = dayRange(kpiNewest.map((row) => row.day)) ?? definitions.journey_first_day;
-  const series = seriesFor(journey, activity, chains, definitions.journey_first_day);
-  const seriesAsOf = series.length > 0 ? dayRange(series.map((p) => p.day))! : asOf;
-  const unlabeled = newest
-    .filter((row) => !row.issuer_labeled && BigInt(row.issuer_inventory) === 0n)
-    .map((row) => row.chain);
-  const noExchange = newest
-    .filter((row) => BigInt(row.venue_exchange) === 0n)
-    .map((row) => row.chain);
-
-  const circulatingOf = circulatingByChain(newest, activity);
-
   return (
-    <section id="supply-journey" data-section="view-a" className="grid gap-6">
-      <ChartCard
-        id={CARD_ANCHORS.supply}
-        takeaway={journeyHeading(journey, definitions)}
-        detail={<p>{journeyTakeaway(journey, definitions)}</p>}
-        chip="inferred"
-        source={SOURCE}
-        asOf={asOf}
-        definitionHref={definitionHref("placed-supply")}
-        frameWord={state.frameWord}
-        summary={
-          newest.length === 0
-            ? UNKNOWN_TEXT
-            : `Where supply sits on ${scopeText(chains)}: issuer inventory, placed, DEX, lending and exchange venues, and free-floating. Circulating is everything except issuer inventory and placed.`
-        }
-        note={<VenueNote unlabeled={unlabeled} noExchange={noExchange} exchanges={exchanges} />}
-        table={{
-          caption: "Supply by part, newest day per chain. Holders are wallets, not people.",
-          columns: [
-            { key: "chain", label: "Chain" },
-            { key: "day", label: "Day" },
-            { key: "total", label: "Total", numeric: true },
-            { key: "issuer", label: "Issuer inventory", numeric: true },
-            { key: "placed", label: "Placed", numeric: true },
-            { key: "linked", label: "Of placed, exchange-linked", numeric: true },
-            { key: "dex", label: "DEX venues", numeric: true },
-            { key: "lending", label: "Lending venues", numeric: true },
-            { key: "exchange", label: "Exchange venues, at least", numeric: true },
-            { key: "free", label: "Free-floating", numeric: true },
-            { key: "circulating", label: "Circulating", numeric: true },
-            { key: "holders", label: "Holders", numeric: true },
-            { key: "large", label: "Holders of $1M or more", numeric: true },
-            { key: "top10", label: "Top-10 share of supply", numeric: true },
-          ],
-          rows: newest.map((row) => ({
-            chain: CHAIN_NAMES[row.chain],
-            day: formatUtcDate(row.day),
-            total: formatExact(row.total_supply),
-            issuer: formatExact(row.issuer_inventory),
-            placed: formatExact(row.placed_supply),
-            linked: formatExact(row.placed_exchange_linked),
-            dex: formatExact(row.venue_dex),
-            lending: formatExact(row.venue_lending),
-            exchange: formatExact(row.venue_exchange),
-            free: formatExact(row.free_floating),
-            circulating: formatExact(circulatingOf.get(row.chain)),
-            holders: row.holders.toLocaleString("en-US"),
-            large: row.holders_over_1m.toLocaleString("en-US"),
-            top10: formatBps(top10ShareBps(row)),
-          })),
-        }}
-      >
-        {rows.length === 0 ? <p className="p-4">{UNKNOWN_TEXT}</p> : <SupplyBars rows={rows} />}
-        {rows.length === 0 ? null : <BarLegend />}
-      </ChartCard>
-
-      <ChartCard
-        id={CARD_ANCHORS.series}
-        takeaway={seriesTakeaway(series, chains)}
-        chip="inferred"
-        source={SOURCE}
-        asOf={seriesAsOf}
-        definitionHref={definitionHref("placed-supply")}
-        frameWord={state.frameWord}
-        needsJs={series.length > 0}
-        summary={
-          series.length === 0
-            ? UNKNOWN_TEXT
-            : `Total, placed and circulating supply over time on ${scopeText(chains)}, from ${formatUtcDate(series[0].day)}.`
-        }
-        note={<p data-note="series-start">{seriesStartNote(definitions)}</p>}
-        table={{
-          caption: "Supply over time, chains summed",
-          columns: [
-            { key: "day", label: "Day" },
-            { key: "total", label: "Total", numeric: true },
-            { key: "placed", label: "Placed", numeric: true },
-            { key: "circulating", label: "Circulating", numeric: true },
-          ],
-          rows: series.map((point) => ({
-            day: formatUtcDate(point.day),
-            total: formatExact(point.total_supply),
-            placed: formatExact(point.placed_supply),
-            circulating: formatExact(point.circulating_supply),
-          })),
-        }}
-      >
-        <SupplySeries series={series} />
-      </ChartCard>
-
-      <TableCard
-        level={3}
-        takeaway={volumeTakeaway(kpiNewest)}
-        chip="inferred"
-        source={SOURCE}
-        asOf={kpiAsOf}
-        definitionHref={definitionHref("active-wallets")}
-        frameWord={state.frameWord}
-        summary={`Clean volume and active wallets sit beside the supply parts because they are flows, not slices of a balance. ${WALLETS_ACROSS_CHAINS_NOTE}`}
-        note={<p data-note="wallets-not-people">{WALLETS_ACROSS_CHAINS_NOTE}</p>}
-        table={{
-          caption: "Last 7 days, per chain",
-          columns: [
-            { key: "chain", label: "Chain" },
-            { key: "day", label: "Day" },
-            { key: "clean", label: "Clean volume, 7 days", numeric: true },
-            { key: "wallets", label: "Active wallets, 7 days", numeric: true },
-          ],
-          rows: kpiNewest.map((row) => ({
-            chain: CHAIN_NAMES[row.chain],
-            day: formatUtcDate(row.day),
-            clean: `${formatCompact(row.clean_7d)} (${formatExact(row.clean_7d)})`,
-            wallets: row.active_wallets_7d.toLocaleString("en-US"),
-          })),
-        }}
-      />
+    <section id="supply-journey" data-section="view-a" className="card-grid">
+      <ChainPanels options={options} id={CARD_ANCHORS.supply}>
+        {(option) => (
+          <SupplyCard
+            panel={supplyPanel(option, {
+              journey,
+              activity,
+              kpis,
+              definitions,
+              exchanges,
+              config: segmentConfig,
+            })}
+            definitions={definitions}
+            state={state}
+          />
+        )}
+      </ChainPanels>
+      <ChainPanels options={options} id={CARD_ANCHORS.series}>
+        {(option) => (
+          <SeriesCard
+            panel={seriesPanel(option, { journey, activity, definitions })}
+            definitions={definitions}
+            state={state}
+          />
+        )}
+      </ChainPanels>
     </section>
   );
 }

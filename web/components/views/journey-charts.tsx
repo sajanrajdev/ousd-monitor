@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import {
   CartesianGrid,
   Line,
@@ -18,254 +19,100 @@ import {
   seriesProps,
   tooltipProps,
 } from "@/components/chart-theme";
-import { floorBps, JOURNEY_PARTS } from "@/lib/aggregate";
-import type { JourneyRow } from "@/lib/dataset/rows";
-import { formatBps, formatCompact, toChartNumber, UNKNOWN_TEXT } from "@/lib/format";
-import { EXCHANGE_LINKED_LABEL, exchangeLinkedLine } from "@/lib/takeaways/journey";
+import { PinMark } from "@/components/pinned-notes";
+import { formatCompact, toChartNumber, UNKNOWN_TEXT } from "@/lib/format";
+import {
+  directLabel,
+  legendAmount,
+  segmentLabel,
+  type BarRow,
+  type DrawnSegment,
+  type SeriesPoint,
+} from "@/lib/supply-segments";
 
-// A segment under this share of its bar has no room for a label, so the list below the bar names it.
-const LABEL_MIN_BPS = 2500;
+const widthOf = (bps: number | null) => `${(bps ?? 0) / 100}%`;
 
-type Part = (typeof JOURNEY_PARTS)[number];
-
-// Meaning colours, plus a pattern where the design system asks for one, so colour is never alone.
-// Only marks in ramp steps 3 and 4 (removed, idle) get the maroon hairline outline the design
-// system asks for. The other segments differ from their neighbours by colour and are left bare.
-const HATCH =
-  "repeating-linear-gradient(45deg, transparent 0 4px, color-mix(in srgb, var(--color-maroon-dark) 45%, transparent) 4px 6px)";
-const DOTS =
-  "radial-gradient(color-mix(in srgb, var(--color-off-white) 70%, transparent) 1.5px, transparent 1.6px) 0 0 / 8px 8px";
-
-export const PART_STYLES: Record<
-  Part,
-  { label: string; background: string; image?: string; color: string; outlined?: boolean }
-> = {
-  issuer_inventory: {
-    label: "Issuer inventory",
-    background: "var(--meaning-removed)",
-    image: HATCH,
-    color: "var(--color-maroon-dark)",
-    outlined: true,
-  },
-  placed_supply: {
-    label: "Placed",
-    background: "var(--meaning-idle)",
-    color: "var(--color-maroon-dark)",
-    outlined: true,
-  },
-  venue_dex: {
-    label: "DEX venues",
-    background: "var(--meaning-circulating)",
-    color: "var(--color-off-white)",
-  },
-  venue_lending: {
-    label: "Lending venues",
-    background: "var(--meaning-circulating)",
-    image: HATCH,
-    color: "var(--color-off-white)",
-  },
-  venue_exchange: {
-    label: "Exchange venues, at least",
-    background: "var(--meaning-circulating)",
-    image: DOTS,
-    color: "var(--color-off-white)",
-  },
-  free_floating: {
-    label: "Free-floating",
-    background: "var(--meaning-active)",
-    color: "var(--color-off-white)",
-  },
-};
-
-// Inside the placed segment, because what it marks is still counted as placed. So it keeps placed's
-// colour, with a pattern no other part uses.
-const EXCHANGE_LINKED_BACKGROUND = `repeating-linear-gradient(0deg, transparent 0 3px, color-mix(in srgb, var(--color-maroon-dark) 45%, transparent) 3px 5px), ${PART_STYLES.placed_supply.background}`;
-
-export type BarRow = {
-  key: string;
-  name: string;
-  // The day this row is from, or a range label when it spans several.
-  day: string;
-  journey: Pick<JourneyRow, Part | "total_supply" | "placed_exchange_linked">;
-  // From activity, because journey has no circulating figure.
-  circulating: string | null;
-};
-
-function bpsOf(part: string, total: bigint): number {
-  return total > 0n ? (floorBps(BigInt(part), total) ?? 0) : 0;
-}
-
-function Bar({ row }: { row: BarRow }) {
-  const total = BigInt(row.journey.total_supply);
-  if (total === 0n) {
-    return (
-      <div>
-        <p className="font-semibold">
-          {row.name}{" "}
-          <span className="text-[length:var(--text-meta)] text-[color:var(--color-meta-text)]">
-            · {row.day}
-          </span>
-        </p>
-        <p className="text-[length:var(--text-meta)] text-[color:var(--color-meta-text)]">
-          {UNKNOWN_TEXT}: this chain has no supply on this day.
-        </p>
-      </div>
-    );
+// One bar, drawn from the segments, so a segment in the config needs no markup here. `row` is what
+// verify-output holds this bar's band to, in the page's serialized copy.
+export function SupplyBar({
+  row,
+  segments,
+  pins,
+}: {
+  row: BarRow;
+  segments: DrawnSegment[];
+  pins: Record<string, number>;
+}) {
+  if (BigInt(row.journey.total_supply) === 0n) {
+    return <p data-chart="supply-bar">{UNKNOWN_TEXT}: this chain has no supply on this day.</p>;
   }
-  const parts = JOURNEY_PARTS.map((part) => ({
-    part,
-    bps: bpsOf(row.journey[part], total),
-    amount: row.journey[part],
-  }));
-  // The bracket starts where the drawn issuer and placed segments end.
-  const circulatingStart = parts[0].bps + parts[1].bps;
-  const small = parts.filter((p) => p.bps < LABEL_MIN_BPS && BigInt(p.amount) > 0n);
-  const linked = BigInt(row.journey.placed_exchange_linked);
-  const placed = BigInt(row.journey.placed_supply);
-  const linkedOfPlaced = placed > 0n ? (floorBps(linked, placed) ?? 0) / 100 : 0;
-  return (
-    <div>
-      <p className="font-semibold">
-        {row.name}{" "}
-        <span className="text-[length:var(--text-meta)] text-[color:var(--color-meta-text)]">
-          · {row.day}
-        </span>
-      </p>
-      <div className="mt-1 flex min-h-10 w-full overflow-hidden rounded-[var(--radius-control)] border border-[var(--color-border)]">
-        {parts
-          .filter((p) => BigInt(p.amount) > 0n)
-          .map(({ part, bps, amount }) => {
-            const style = PART_STYLES[part];
-            return (
-              <div
-                key={part}
-                data-part={part}
-                title={`${style.label}: ${formatCompact(amount)}`}
-                className="min-w-px overflow-hidden px-1 text-[length:var(--text-meta)] leading-tight break-words"
-                style={{
-                  flexBasis: `${bps / 100}%`,
-                  flexGrow: 0,
-                  flexShrink: 0,
-                  background: style.image
-                    ? `${style.image}, ${style.background}`
-                    : style.background,
-                  color: style.color,
-                  ...(style.outlined ? { border: "1px solid var(--color-maroon)" } : {}),
-                  position: "relative",
-                }}
-              >
-                {bps >= LABEL_MIN_BPS ? (
-                  <span
-                    data-testid="part-label"
-                    className="relative z-10"
-                    style={{ background: style.image ? undefined : style.background }}
-                  >
-                    {`${style.label} ${formatBps(bps)}`}
-                  </span>
-                ) : null}
-                {part === "placed_supply" && linked > 0n ? (
-                  <span
-                    aria-hidden="true"
-                    data-testid="exchange-linked-band"
-                    className="absolute top-0 right-0 bottom-0"
-                    style={{
-                      width: `${linkedOfPlaced}%`,
-                      background: EXCHANGE_LINKED_BACKGROUND,
-                    }}
-                  />
-                ) : null}
-              </div>
-            );
-          })}
-      </div>
-      <div className="relative mt-1 h-1 w-full" aria-hidden="true">
-        <div
-          className="absolute top-0 h-full border-t-2 border-x-2 border-[var(--meaning-circulating)]"
-          style={{ left: `${circulatingStart / 100}%`, right: 0 }}
-        />
-      </div>
-      <p className="text-[length:var(--text-meta)] text-[color:var(--color-meta-text)] text-right">
-        Circulating, from activity data: {formatCompact(row.circulating)}
-      </p>
-      {linked > 0n ? (
-        <p
-          className="text-[length:var(--text-meta)] text-[color:var(--color-meta-text)] mt-1"
-          data-testid="exchange-linked"
-          data-exchange-linked={row.key}
-        >
-          {exchangeLinkedLine(row.journey)}
-        </p>
-      ) : null}
-      {small.length > 0 ? (
-        <ul
-          className="text-[length:var(--text-meta)] text-[color:var(--color-meta-text)] mt-1"
-          data-testid="small-segments"
-        >
-          {small.map(({ part, bps, amount }) => (
-            <li key={part}>
-              {PART_STYLES[part].label}: {formatCompact(amount)} ({formatBps(bps)})
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
+  const drawn = segments.filter((segment) => BigInt(segment.amount) > 0n);
+  // The bracket starts where the drawn segments it doesn't cover end.
+  const circulatingStart = segments
+    .filter((segment) => !segment.circulating)
+    .reduce((sum, segment) => sum + (segment.shareBps ?? 0), 0);
+  const hasCirculating = segments.some(
+    (segment) => segment.circulating && BigInt(segment.amount) > 0n,
   );
-}
-
-export function SupplyBars({ rows }: { rows: BarRow[] }) {
   return (
-    <div className="flex flex-col gap-4 bg-[var(--surface-card)] p-3" data-chart="supply-bars">
-      {/* One row per chain doesn't fit the card's fixed chart height, so this chart grows to its rows. */}
-      <style href="journey-bars" precedence="default">
-        {'.chart-area:has([data-chart="supply-bars"]) { height: auto; }'}
-      </style>
-      {rows.map((row) => (
-        <Bar key={row.key} row={row} />
-      ))}
-    </div>
-  );
-}
-
-export function BarLegend() {
-  return (
-    <ul
-      className="text-[length:var(--text-meta)] text-[color:var(--color-meta-text)] mt-3 flex flex-wrap gap-x-4 gap-y-1"
-      data-testid="bar-legend"
+    <div
+      className="supply-bar"
+      data-chart="supply-bar"
+      data-supply-bar={row.key}
+      data-total={row.journey.total_supply}
     >
-      {JOURNEY_PARTS.map((part) => (
-        <li key={part} className="flex items-center gap-1">
-          <span
-            aria-hidden="true"
-            className="inline-block h-3 w-3 border border-[var(--color-border)]"
-            data-outlined={PART_STYLES[part].outlined ? "" : undefined}
-            style={{
-              ...(PART_STYLES[part].outlined ? { borderColor: "var(--color-maroon)" } : {}),
-              background: PART_STYLES[part].image
-                ? `${PART_STYLES[part].image}, ${PART_STYLES[part].background}`
-                : PART_STYLES[part].background,
-            }}
-          />
-          {PART_STYLES[part].label}
-        </li>
-      ))}
-      <li className="flex items-center gap-1">
-        <span
-          aria-hidden="true"
-          className="inline-block h-3 w-3 border border-[var(--color-border)]"
-          style={{ background: EXCHANGE_LINKED_BACKGROUND }}
-        />
-        {EXCHANGE_LINKED_LABEL}
-      </li>
-    </ul>
+      <div className="supply-bar__track">
+        {drawn.map((segment) => {
+          const { style } = segment;
+          const label = directLabel(segment);
+          return (
+            <div
+              key={segment.key}
+              className="supply-bar__part"
+              data-part={segment.key}
+              data-amount={segment.amount}
+              title={`${segmentLabel(segment)}: ${legendAmount(segment)}`}
+              style={{
+                flexBasis: widthOf(segment.shareBps),
+                background: style.image ? `${style.image}, ${style.background}` : style.background,
+                color: style.color,
+                ...(style.outlined ? { border: "1px solid var(--color-maroon)" } : {}),
+              }}
+            >
+              {label ? (
+                <span
+                  data-testid="part-label"
+                  className="supply-bar__label z-10"
+                  style={{ background: style.background }}
+                >
+                  <span data-direct-label>{label}</span>
+                  {pins[segment.key] ? <PinMark number={pins[segment.key]} /> : null}
+                </span>
+              ) : null}
+              {segment.band && BigInt(segment.band.amount) > 0n ? (
+                <span
+                  aria-hidden="true"
+                  data-testid="exchange-linked-band"
+                  className="supply-bar__band"
+                  style={{
+                    width: widthOf(segment.band.shareOfSegmentBps),
+                    background: segment.band.background,
+                  }}
+                />
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+      {hasCirculating ? (
+        <div className="supply-bar__bracket">
+          <div style={{ marginLeft: widthOf(circulatingStart) }} />
+          <span>Circulating</span>
+        </div>
+      ) : null}
+    </div>
   );
 }
-
-export type SeriesDatum = {
-  day: string;
-  total_supply: string;
-  placed_supply: string;
-  circulating_supply: string;
-};
 
 const LINES = [
   {
@@ -285,9 +132,55 @@ const LINES = [
   { key: "placed_supply", label: "Placed", stroke: "var(--meaning-idle)", dash: "2 3", width: 4 },
 ] as const;
 
-// Step lines, all chains. Recharts draws floats; every label comes from the exact string.
-export function SupplySeries({ series }: { series: SeriesDatum[] }) {
+// Beside the chart, with each line's newest figure. Every one of them is in the table.
+export function SeriesLegend({ latest }: { latest: SeriesPoint }) {
+  return (
+    <ul className="chart-legend" data-testid="series-legend" data-series-legend>
+      {LINES.map((line) => (
+        <li key={line.key} className="chart-legend__row" data-series-line={line.key}>
+          <svg className="chart-legend__line" width="24" height="8" aria-hidden="true">
+            <line
+              x1="0"
+              x2="24"
+              y1="4"
+              y2="4"
+              stroke={line.stroke}
+              strokeWidth={line.width}
+              strokeDasharray={line.dash}
+            />
+          </svg>
+          <span className="chart-legend__label">{line.label}</span>
+          <span className="chart-legend__values" data-series-value>
+            {formatCompact(latest[line.key])}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const filterInput = () =>
+  document.querySelector<HTMLInputElement>(".chain-filter input:checked")?.value ?? "all";
+
+function subscribeToFilter(onChange: () => void) {
+  document.addEventListener("change", onChange);
+  return () => document.removeEventListener("change", onChange);
+}
+
+// Only the selected panel mounts Recharts. Where there's no :has(), every panel shows, so all draw.
+function usePanelShown(panel: string): boolean {
+  return useSyncExternalStore(
+    subscribeToFilter,
+    () => filterInput() === panel || globalThis.CSS?.supports?.("selector(:has(*))") === false,
+    () => false,
+  );
+}
+
+// Step lines, for one filter option. Recharts draws floats; every label comes from the exact string.
+export function SupplySeries({ series, panel }: { series: SeriesPoint[]; panel: string }) {
+  const shown = usePanelShown(panel);
   if (series.length === 0) return <p className="p-4">{UNKNOWN_TEXT}</p>;
+  if (!shown) return null;
   const data = series.map((point) => ({
     day: point.day,
     total_supply: toChartNumber(point.total_supply),
@@ -295,63 +188,40 @@ export function SupplySeries({ series }: { series: SeriesDatum[] }) {
     circulating_supply: toChartNumber(point.circulating_supply),
   }));
   return (
-    <div className="flex h-full flex-col">
-      <ul
-        className="text-[length:var(--text-meta)] text-[color:var(--color-meta-text)] flex flex-wrap gap-x-4"
-        data-testid="series-legend"
-      >
+    <ResponsiveContainer width="100%" height="100%">
+      <LineChart data={data} {...chartProps} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+        <CartesianGrid {...gridProps} />
+        <XAxis
+          dataKey="day"
+          {...axisProps}
+          minTickGap={64}
+          tickFormatter={(day: string) => formatUtcDate(day).replace(/ \d{4} UTC$/, "")}
+        />
+        <YAxis
+          {...axisProps}
+          width={56}
+          tickCount={3}
+          tickFormatter={(value: number) => formatCompactUsd(value)}
+        />
+        <Tooltip
+          {...tooltipProps}
+          labelFormatter={(day) => formatUtcDate(String(day))}
+          formatter={(value) => formatCompactUsd(Number(value))}
+        />
         {LINES.map((line) => (
-          <li key={line.key} className="flex items-center gap-1">
-            <svg width="24" height="8" aria-hidden="true">
-              <line
-                x1="0"
-                x2="24"
-                y1="4"
-                y2="4"
-                stroke={line.stroke}
-                strokeWidth={line.width}
-                strokeDasharray={line.dash}
-              />
-            </svg>
-            {line.label}
-          </li>
+          <Line
+            key={line.key}
+            type="stepAfter"
+            dataKey={line.key}
+            name={line.label}
+            stroke={line.stroke}
+            strokeWidth={line.width}
+            strokeDasharray={line.dash}
+            dot={false}
+            {...seriesProps}
+          />
         ))}
-      </ul>
-      <div className="min-h-0 flex-1">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} {...chartProps} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-            <CartesianGrid {...gridProps} />
-            <XAxis
-              dataKey="day"
-              {...axisProps}
-              tickFormatter={(day: string) => formatUtcDate(day).replace(/ UTC$/, "")}
-            />
-            <YAxis
-              {...axisProps}
-              width={56}
-              tickFormatter={(value: number) => formatCompactUsd(value)}
-            />
-            <Tooltip
-              {...tooltipProps}
-              labelFormatter={(day) => formatUtcDate(String(day))}
-              formatter={(value) => formatCompactUsd(Number(value))}
-            />
-            {LINES.map((line) => (
-              <Line
-                key={line.key}
-                type="stepAfter"
-                dataKey={line.key}
-                name={line.label}
-                stroke={line.stroke}
-                strokeWidth={line.width}
-                strokeDasharray={line.dash}
-                dot={false}
-                {...seriesProps}
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+      </LineChart>
+    </ResponsiveContainer>
   );
 }

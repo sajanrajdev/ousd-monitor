@@ -318,4 +318,19 @@ describe("a card's note", () => {
     const results = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(results.violations).toEqual([]);
   });
+
+  it("puts what goes beside the chart outside the hidden graphic, and the notes under both", () => {
+    const { container } = render(
+      <ChartCard
+        {...props}
+        beside={<ul data-testid="a-legend" />}
+        notes={[{ kind: "a-note", text: "A note." }]}
+      />,
+    );
+    const legend = screen.getByTestId("a-legend");
+    expect(legend.closest("[aria-hidden]")).toBeNull();
+    expect(legend.closest(".chart-card__plot")!.hasAttribute("data-beside")).toBe(true);
+    expect(container.querySelector(".chart-card__body")!.hasAttribute("data-notes")).toBe(false);
+    expect(container.querySelector(".chart-card__plot [data-pinned-notes]")).toBeNull();
+  });
 });

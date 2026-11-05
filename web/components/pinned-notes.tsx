@@ -23,7 +23,7 @@ export function pinNumber(
   return index === -1 ? null : index + 1;
 }
 
-function PinMark({ number }: { number: number }) {
+export function PinMark({ number }: { number: number }) {
   return (
     <span className="pin" aria-hidden="true">
       {number}

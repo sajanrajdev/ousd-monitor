@@ -19,7 +19,7 @@ The numbers don't change. The dataset, its schemas, the metrics, the labels and 
 - One scrolling page. No tabs, because tabs hide findings.
 - Move words, don't delete them.
 - No fun facts and no new facts. Only what the page says now.
-- Start now, and stay flexible enough for exchange holdings to be added later.
+- Start now, and stay flexible enough for exchange holdings to be added later. The holdings have since arrived, and U3 shows them. See [Exchange flexibility](#exchange-flexibility).
 
 **Rule:** if a target and a limit disagree, the limit wins. A caveat stays on the page even if the word target is missed.
 
@@ -38,7 +38,7 @@ The numbers don't change. The dataset, its schemas, the metrics, the labels and 
 | About 450 visible words, under half the current height, nothing out of reach | Maintainer review | U6 |
 | Takeaway, source, as-of time and definition link on every chart | R10 | U1, U6 |
 | Not-affiliated line, stale state, sample and preview marks, refused and partial states stay visible | R8, R13, 001 plan | U1 to U6 |
-| Exchange holdings can be added later without per-segment markup | Maintainer review | U3 |
+| Exchange holdings shown without per-segment markup | Maintainer review | U3 |
 
 ## What was checked while planning
 
@@ -249,43 +249,48 @@ A later change to wording touches `VERDICT_SENTENCES` and `web/tests/verdict.tes
 
 ## Exchange flexibility
 
-A separate research task may add exchange holdings. This work adds no dataset field and changes no metric, label or pipeline code. It only makes sure the page won't need rework.
+**The data now exists, and U3 uses it.** The maintainer accepted exchange option B, and exchanges may be named on the main page. `web/lib/supply-segments.ts` is the one mapping from a row to the bar, legend and table:
 
-**Decided:** the maintainer accepted exchange option B, and exchanges may be named on the main page. PR #51 does this: `exchangeRows` in `web/lib/exchange-rows.ts` reads the rows from `labels.json`, and the supply card shows them. A row with wallets, such as "Coinbase, 7 wallets, at least $346,579", needs a public source tying the name to those wallets. Its source link goes to the named labels table, as the main page holds no address. A listed exchange with no such source, such as "Kraken, no wallet labeled", links to its own listing and claims no wallet. No wallet in the unnamed exchange-linked band is named. U3 rebuilds this card and passes these rows to `supplySegments` as `entities`.
+- **The exchange venues segment is a floor on every filter option.** `exchangeExtras` gives it `coverage: "floor"`, which reads "at least" in words and `≥` as the mark. Its amount prints as whole dollars rounded down, as a compact figure can round up past what "at least" allows.
+- **`exchangeRows` from `web/lib/exchange-rows.ts` supplies its `entities`,** such as a row with its wallet count and floor, and a listed exchange with no wallet labeled. A row with wallets needs a public source tying the name to those wallets, so its source link goes to the named labels table. A listed exchange with no such source links to its own listing and claims no wallet.
+- **The rows sit under All's data toggle,** in a `data-labels-table` block. They add up across chains, so a single chain's segment can be smaller than them, and `verify-output` allows each name once, as a row. A single chain's panel keeps the floor and no rows.
+- **Exchange-linked is a band inside placed.** It reads `journey.placed_exchange_linked`, draws with its own pattern on placed's colour, isn't a venue and doesn't change placed. Its line keeps `data-exchange-linked` on each panel with a band, and each bar's client props keep `key` and `journey.placed_exchange_linked`, which `verify-output` reads in the page's payload. No wallet in the unnamed band is named.
+- **The `exchange-floor` and `exchange-coverage` notes stay in view with their exact words.**
 
-**Design requirement.** Supply segments, their legend and their notes come from one config and one mapping function, with no per-segment markup. A segment has room for a coverage marker showing that a labeled total is a floor, and for optional per-entity rows.
-
-Directional, not a specification:
+**Design requirement, as built.** Segments, their legend and their notes come from one config, with no per-segment markup. A segment has room for a coverage marker and for per-entity rows.
 
 ```ts
 // web/lib/supply-segments.ts
 type SegmentConfig = {
-  key: (typeof JOURNEY_PARTS)[number];
+  key: string;
   label: string;
   style: SegmentStyle;
   marker: ChipKind;
   definition: DefinitionAnchor;
-  note?: (context: SegmentContext) => PinnedNote | null;
+  circulating: boolean;
+  band?: { key: keyof JourneyAmounts; label: string; image: string };
+  notes?: (context: SegmentContext) => SegmentNote[];
 };
 
-// What the bar, legend and table read. Today's mapping never sets the last two.
-type SupplySegment = SegmentConfig & {
+// What the bar, legend and table read. Plain data, so it can reach a client component.
+type SupplySegment = Omit<SegmentConfig, "band" | "notes"> & {
   amount: string;
   shareBps: number | null;
   coverage?: "floor";
   entities?: ExchangeRow[];
+  band?: SegmentBand;
 };
 
-function supplySegments(row: JourneyAmounts, extras?: SegmentExtras): SupplySegment[];
+function supplySegments(row, extras?: SegmentExtras, config?: SegmentConfig[]): SupplySegment[];
 ```
 
-**Fixture test,** named `web/tests/supply-segments.test.tsx`, using `web/tests/supply-exchange-fixture.ts`. It raises `venue_exchange` to about 40% of a `complete` row, lowers `placed_supply` by the same amount so the sums still hold, and passes `extras` with `coverage: "floor"` and rows for "Exchange A", "Exchange B" and "Exchange C". These are invented names. The fixture lives in the test folder, because the dataset schema rejects extra fields and `web/fixtures/dataset` has to keep passing it. See [U3](#u3-supply-views) for what it asserts.
+**Fixture test,** named `web/tests/supply-segments.test.tsx`, using `web/tests/supply-exchange-fixture.ts`. It raises `venue_exchange` to about 40% of a `complete` row, lowers `placed_supply` by the same amount so the sums still hold, and passes rows for "Exchange A", "Exchange B" and "Exchange C". These are invented names. The fixture lives in the test folder and works on rows in memory, because the dataset's checks refuse rows that don't match its labels. See [U3](#u3-supply-views) for what it asserts.
 
-**What the research task would still need to decide,** recorded so it isn't a surprise:
+**Still true of any later change:**
 
-- `verify-output` allows a labelled entity's name on the main page only as the name of an exchange row. PR #51 made that change: each row must match the dataset's name, figure and source, and every other labelled name stays blocked. The rows may move under the data toggle in U3, as the check reads `data-exchange-row` inside a closed disclosure too, but it refuses a hidden row.
+- `verify-output` allows a labelled entity's name on the main page only as the name of an exchange row. Each row must match the dataset's name, figure and source, and every other labelled name stays blocked. The check reads `data-exchange-row` inside a closed disclosure too, but it refuses a hidden row, and from U3 it requires the rows under All's toggle.
 - A larger exchange segment lowers placed. That can change `verdict.state`, and so the headline, by design.
-- Fields would arrive through a schema change and generated types. `supplySegments` is the one function that then changes.
+- New fields arrive through a schema change and generated types. `supplySegments` is the one function that then changes.
 
 ## Key decisions
 
@@ -489,6 +494,17 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 
 **Verification:** `## Evidence` at 390 and 1440, every filter option at 1440, and the fixture's bar from a test render on the sample.
 
+**As built, where it differs from the above:**
+
+- **Notes on the two supply cards sit under the chart, not beside it.** These two cards have a legend beside the chart, so the notes take the card's width, in two columns from 560. The floor note is too long for a narrow column. `ChartCard` gains one optional prop, `beside`, for the legend and figures, which sit outside the hidden graphic, so assistive tech reads them. The rule stays as written for a card with no `beside`.
+- **The chart on these two cards is `--chart-height-phone` at every width,** so a half-width card stays compact. It is still reserved before it draws.
+- **The placed and step-line notes in view are short forms,** `PLACED_PIN` and `seriesStartPin`, as [Where the words go](#where-the-words-go) says. `verify-output` holds each short form to its exact words and requires the full note in that card's popover, on every panel. "Per-chain values are in the first card's table" is gone, as the filter does what it described.
+- **The "Clean volume and active wallets" card is gone,** replaced by the figures beside the bar and its table under the toggle, as the words table says. Under All there's no wallet figure, and its caveat stays in view.
+- **The view sections take `card-grid`,** a one-word change in `views/activity.tsx` and `views/chain-roles.tsx`. A card left alone on its row takes the row, so velocity and chain roles leave no hole until U4 and U5.
+- **The waterfall's period table still stacks in its half-width card until U4** moves it under the toggle, so that row is tall for now.
+- **The whole-page `verify-output` tests are in `web/tests/verify-output-panels.test.ts`,** not `verify-output.test.ts`. That file's heap grows by about 5 MB a test, and 20 tests that each parse a whole main page several times ran its worker out of memory in CI.
+- **A finding with JavaScript off** lands on its card's All panel, by `:target` inside `@media (scripting: none)`. That card then stays on All until another link is followed, and its heading says what it covers.
+
 ---
 
 - [ ] <a id="u4-activity-views"></a>**Unit U4: Activity views**
@@ -639,7 +655,7 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 | Filtered panels make the number check miss states | `compare-numbers.mjs` walks each filter option and has a floor per option |
 | A push-down popover feels jumpy on hover | The maintainer judges this at the whole-page review after U5. Floating is one CSS block, though it would then cover data |
 | The word target is missed | Expected, at about 501. The cuts and their costs are [above](#word-and-height-budget), and limits win |
-| A test-only fixture drifts from a later schema | The research task's schema change replaces it with real fields, and the test stays |
+| A test-only fixture drifts from a later schema | The fixture works on the dataset's own rows in memory, so a schema change reaches it through the types |
 | A reader on a filtered panel clicks a finding | The link resets the filter with JavaScript. Without it, the link can land on a hidden card, which [U3](#u3-supply-views) must make safe when it mounts the filter |
 | `verdict.text` hidden on a state where it matters | `verdictTextVisible` is tested per state, and defaults to visible |
 

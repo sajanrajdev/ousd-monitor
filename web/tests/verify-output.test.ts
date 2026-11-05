@@ -14,6 +14,8 @@ import {
   PLANTED_VERDICT,
   type PlantedBand,
   type PlantedRow,
+  type PlantedSeriesPanel,
+  type PlantedSupplyPanel,
   plantedBands,
   plantedCard,
   plantedExchangeRows,
@@ -54,6 +56,9 @@ const sampleExpected = {
   essentialNotes: [] as { kind: string; chain?: string; text: string }[],
   exchangeRows: [] as PlantedRow[],
   bands: [] as PlantedBand[],
+  filter: [] as { value: string; label: string }[],
+  supplyPanels: [] as PlantedSupplyPanel[],
+  seriesPanels: [] as PlantedSeriesPanel[],
 };
 
 const realExpected = {
@@ -1877,6 +1882,19 @@ describe("exchange names on the main page", () => {
     const kinds = expected.essentialNotes.map((note: { kind: string }) => note.kind);
     expect(kinds).toContain("exchange-floor");
     expect(kinds).toContain("exchange-coverage");
+  });
+});
+
+describe("a pinned note", () => {
+  it("reads a note's words without its pin's number, and only a number", () => {
+    const floor = { kind: "exchange-floor", text: "A floor.", exact: true };
+    const against = { ...sampleExpected, essentialNotes: [floor] };
+    const note = (pin: string) =>
+      `<ol data-pinned-notes><li data-note="exchange-floor"><span class="pin">${pin}</span><p>A floor.</p></li></ol>${plantedNotesFlight([floor])}`;
+    expect(verifyOutput(mainWith(note("2")), against)).toEqual([]);
+    expect(verifyOutput(mainWith(note("Added")), against)).toContain(
+      'index.html: the exchange-floor note doesn\'t say "A floor."',
+    );
   });
 });
 
