@@ -1204,7 +1204,8 @@ async function checkLegendsBeside(page, where) {
     },
     [BOX_SLACK_PX, NOTES_BESIDE_FROM],
   );
-  check("the page has legends to check", where, found.length === FILTERED_CARDS.length);
+  // The supply cards have a legend beside their chart. The activity cards have none.
+  check("the page has legends to check", where, found.length === 2);
   for (const { wide, beside, below } of found) {
     if (wide) check("a legend sits beside its chart from 560", where, beside);
     else check("a narrower card has its legend under the chart", where, below);

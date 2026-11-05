@@ -440,7 +440,7 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
   it("pins the small-ticket note under All and Tempo, and no other chain", () => {
     const kinds = (value: string) =>
       expected.waterfallPanels
-        .find((panel: { value: string }) => panel.value === value)
+        .find((panel: { value: string }) => panel.value === value)!
         .notes.map((note: { kind: string }) => note.kind);
     expect(kinds("all")).toContain("small-ticket");
     expect(kinds("tempo")).toContain("small-ticket");
