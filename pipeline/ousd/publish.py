@@ -771,16 +771,38 @@ def _validate(filename: str, payload: Mapping[str, Any]) -> None:
         raise PublishRefused(f"{filename} fails its schema at {place or 'top'}: {error.validator}")
 
 
+# A full or abbreviated commit hash, and nothing else, so the variable can't carry other text into
+# the manifest.
+_COMMIT_HASH = re.compile(r"[0-9a-f]{12,40}")
+# What git rev-parse --short prints: at least 12 here, longer only when 12 would be ambiguous.
+_GIT_OUTPUT = re.compile(r"[0-9a-f]{12,40}")
+COMMIT_ENV = "OUSD_GIT_COMMIT"
+
+
 def _git_commit() -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "--short=12", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
+    """The checkout's commit, or else OUSD_GIT_COMMIT where there is no checkout, as in an image."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short=12", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        result = None
+    if result is not None and result.returncode == 0:
+        commit = result.stdout.strip()
+        if not _GIT_OUTPUT.fullmatch(commit):
+            raise PublishRefused("git printed something other than a commit hash")
+        return commit
+    supplied = os.environ.get(COMMIT_ENV, "")
+    if not supplied:
         raise PublishRefused("cannot read the git commit, so this dataset couldn't be traced")
-    return result.stdout.strip()
+    if not _COMMIT_HASH.fullmatch(supplied):
+        # The rule, never the value.
+        raise PublishRefused(f"{COMMIT_ENV} isn't a lowercase commit hash of 12 to 40 characters")
+    return supplied[:12]
 
 
 def _refuse_unless_checked(
