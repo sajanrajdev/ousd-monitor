@@ -63,18 +63,50 @@ export function buildSite({
   );
 }
 
-export function refuseUnlessReleasable(dataset, env) {
+const WARNING_KEY = /^[a-z0-9_]+:[a-z0-9_]+$/;
+
+// OUSD_ACK_WARNING_KEYS lists warnings known for review by chain and metric, so an unattended
+// run can pass a known one on any day. Anything malformed is refused, never skipped.
+export function acknowledgedKeys(env) {
+  const raw = env.OUSD_ACK_WARNING_KEYS ?? "";
+  const keys = raw
+    .split(",")
+    .map((key) => key.trim())
+    .filter((key) => key !== "");
+  const malformed = keys.filter((key) => !WARNING_KEY.test(key));
+  if (malformed.length > 0) {
+    throw new Refused(
+      `Refused: OUSD_ACK_WARNING_KEYS has entries that aren't chain:metric: ${malformed.join(", ")}.`,
+    );
+  }
+  return new Set(keys);
+}
+
+export function refuseUnlessReleasable(dataset, env, log = () => {}) {
   const { state, manifest } = dataset;
   if (state.kind === "sample") throw new Refused("Refused: this is sample data, never a release.");
   if (state.kind === "preview") {
     throw new Refused(`Refused: this isn't release grade.\n${state.releaseProblems.join("\n")}`);
   }
-  if (manifest.warnings.length > 0 && env.OUSD_ACK_WARNINGS !== manifest.dataset_version) {
+  const keys = acknowledgedKeys(env);
+  // Every run says what it lets through, so an acknowledgement can't sit there unseen.
+  if (keys.size > 0) log(`Acknowledged warning keys: ${[...keys].join(", ")}.`);
+  if (manifest.warnings.length === 0) return;
+  if (env.OUSD_ACK_WARNINGS === manifest.dataset_version) {
+    log(`Every warning is acknowledged by OUSD_ACK_WARNINGS=${manifest.dataset_version}.`);
+    return;
+  }
+  const unacknowledged = manifest.warnings.filter(
+    ({ chain, metric }) => !keys.has(`${chain}:${metric}`),
+  );
+  if (unacknowledged.length > 0) {
+    const named = [...new Set(unacknowledged.map(({ chain, metric }) => `${chain}:${metric}`))];
     throw new Refused(
-      "Refused: this dataset has warnings for review. Read them above, then set " +
-        `OUSD_ACK_WARNINGS=${manifest.dataset_version} to go ahead.`,
+      `Refused: this dataset has warnings for review that aren't acknowledged: ${named.join(", ")}. ` +
+        `Read them above, then set OUSD_ACK_WARNINGS=${manifest.dataset_version} to go ahead.`,
     );
   }
+  log(`Every warning is acknowledged by OUSD_ACK_WARNING_KEYS.`);
 }
 
 export function buildRelease({
@@ -92,7 +124,7 @@ export function buildRelease({
   const dataset = datasetFrom(files, placement, now());
   const expected = expectedFromFiles(files, placement, webRoot, now());
   logWarnings(dataset, log);
-  refuseUnlessReleasable(dataset, env);
+  refuseUnlessReleasable(dataset, env, log);
   mkdirSync(releaseRoot, { recursive: true });
   const folder = `${dataset.manifest.dataset_version}-${now()}`;
   const building = join(releaseRoot, `${folder}.tmp`);

@@ -1,4 +1,4 @@
-.PHONY: check lint types test build models sync reconcile publish preview run dagster-dev \
+.PHONY: check lint types test build models sync reconcile publish preview run daily dagster-dev \
 	py-lint py-types py-test py-build \
 	web-tools web-install web-lint web-types web-test web-samples web-build web-release web-browser \
 	web-shots web-acceptance
@@ -67,6 +67,11 @@ DAGSTER_FILE := pipeline/dagster/definitions.py
 run:
 	mkdir -p "$(DAGSTER_HOME)"
 	DAGSTER_HOME="$(DAGSTER_HOME)" uv run --locked $(ENV_FILE) dagster job execute -f $(DAGSTER_FILE) -j ousd_daily
+
+# The hosted daily run: make run, then the release, then a Vercel preview. See docs/deploy.md.
+# OUSD_DEPLOY=0, or no VERCEL_TOKEN, builds and verifies the release without deploying.
+daily:
+	scripts/daily.sh
 
 # The UI, and the schedule and failure sensor once they are switched on there.
 dagster-dev:
