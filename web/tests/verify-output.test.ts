@@ -973,19 +973,25 @@ describe("verifyOutput", () => {
       });
     });
 
+    const FOOTNOTES =
+      '<details class="footnotes" data-footnotes><summary>Footnotes</summary><ol class="footnotes__list"><li>A caveat</li></ol></details>';
     it.each([
-      ["a details", "<details><ol data-note-badges><li>A caveat</li></ol></details>"],
-      ["a noscript", "<noscript><ol data-note-badges><li>A caveat</li></ol></noscript>"],
-      ["a tooltip", plantedTip("Notes", "<ol data-note-badges><li>A caveat</li></ol>")],
-    ])("fails on pinned notes inside %s", (_name, html) => {
+      ["a details", `<details><summary>More</summary>${FOOTNOTES}</details>`],
+      ["a noscript", `<noscript>${FOOTNOTES}</noscript>`],
+      ["a tooltip", plantedTip("Notes", FOOTNOTES)],
+    ])("fails on footnotes inside %s", (_name, html) => {
       expect(verifyOutput(mainWith(html), sampleExpected)).toContain(
-        "index.html: pinned notes inside a details, noscript or tooltip",
+        "index.html: footnotes inside a details, noscript or tooltip",
       );
     });
 
-    it("passes pinned notes in the open", () => {
-      const html = "<ol data-note-badges><li>A caveat</li></ol>";
-      expect(verifyOutput(mainWith(html), sampleExpected)).toEqual([]);
+    it("passes footnotes on their card, and fails them open by default", () => {
+      const card = plantedNotes([{ kind: "placed", text: "A caveat." }]);
+      expect(verifyOutput(mainWith(card), sampleExpected)).toEqual([]);
+      const open = card.replace('<details class="footnotes"', '<details open class="footnotes"');
+      expect(verifyOutput(mainWith(open), sampleExpected)).toContain(
+        "index.html: a card's footnotes are open by default",
+      );
     });
   });
 });
@@ -1205,7 +1211,7 @@ describe("the first screen", () => {
     ];
     const expected = { ...sampleExpected, essentialNotes: notes };
 
-    it("passes with each one's badge in view, and its words in the badge's tooltip", () => {
+    it("passes with each one's marker in view, and its words in the card's footnotes", () => {
       expect(verifyOutput(mainWith(plantedNotes(notes)), expected)).toEqual([]);
     });
 
@@ -1213,21 +1219,28 @@ describe("the first screen", () => {
       ["gone", () => ""],
       ["in a popover", (note: string) => inDetails(note)],
       ["in a noscript", (note: string) => `<noscript>${note}</noscript>`],
-      ["hidden", (note: string) => note.replace("<li ", "<li hidden ")],
-      ["visually hidden", (note: string) => note.replace("<li ", '<li class="sr-only" ')],
-      ["with its badge hidden", (note: string) => note.replace("<button ", "<button hidden ")],
-      ["with no badge", (note: string) => note.replace(/<button[^>]*>\d+<\/button>/, "")],
+      ["with its marker hidden", (note: string) => note.replace("<a href=", "<a hidden href=")],
       [
-        "with its words outside the badge's tooltip",
-        (note: string) => note.replace(/(<span data-note-text>.*?<\/span>)(.*?<\/span>)/, "$2$1"),
+        "with its marker visually hidden",
+        (note: string) => note.replace('class="fn-ref"', 'class="fn-ref sr-only"'),
+      ],
+      ["with its markers hidden", (note: string) => note.replace("<sup ", "<sup hidden ")],
+      ["with no marker", (note: string) => note.replace(/<a [^>]*data-fn-ref[^>]*>\d+<\/a>/, "")],
+      [
+        "with its words outside its footnote",
+        (note: string) =>
+          note.replace(
+            /(<span data-note-text>.*?<\/span>)(.*?<\/details>)/,
+            "<span data-note-text></span>$2$1",
+          ),
       ],
       ["empty", (note: string) => note.replace("A dated warning.", "")],
     ])("fails on a note %s", (_name, hide) => {
       const body =
         plantedNotes([notes[0]]) + hide(plantedNotes([notes[1]])) + plantedNotesFlight(notes);
-      // A badge in a details or a noscript, or a trigger gone, fails other checks as well.
+      // A card in a details or a noscript, or a marker gone, fails other checks as well.
       expect(verifyOutput(mainWith(body), expected)).toContain(
-        "index.html: the velocity-warning note for ethereum has no badge in view with its words",
+        "index.html: the velocity-warning note for ethereum has no marker in view and footnote with its words",
       );
     });
 
@@ -1239,7 +1252,7 @@ describe("the first screen", () => {
         essentialNotes: moved,
       });
       expect(problems).toEqual([
-        "index.html: the velocity-warning note for base has no badge in view with its words",
+        "index.html: the velocity-warning note for base has no marker in view and footnote with its words",
       ]);
     });
 
@@ -1253,8 +1266,13 @@ describe("the first screen", () => {
 
     it("reads a note whole, across its date and its link", () => {
       const text = "Flows count from 3 Nov 2026 UTC, here.";
-      const split = `<ol data-pinned-notes><li data-note="day-0-scope"><span class="tip" data-tip><button class="tip__trigger tip__badge" aria-expanded="false" aria-controls="split">1</button><span class="tip__panel" id="split"><span data-note-text>
-        Flows count from <!-- -->3 Nov 2026 UTC<!-- -->, <em>here</em>.</span> <a href="/methodology/#x">How</a></span></span></li></ol>`;
+      const split = plantedNotes([
+        {
+          kind: "day-0-scope",
+          text: "\n        Flows count from <!-- -->3 Nov 2026 UTC<!-- -->, <em>here</em>.",
+          tip: '<a href="/methodology/#x">How</a>',
+        },
+      ]).replace(/<script>.*?<\/script>/, "");
       expect(
         verifyOutput(mainWith(split + plantedNotesFlight([{ kind: "day-0-scope", text }])), {
           ...sampleExpected,
@@ -2361,15 +2379,15 @@ describe("exchange names on the main page", () => {
   });
 });
 
-describe("a note's badge", () => {
-  it("reads a note's words from its badge's tooltip, and takes only a number for the badge", () => {
+describe("a footnote marker", () => {
+  it("reads a note's words from the footnote its marker links to, and takes only a number for the marker", () => {
     const floor = { kind: "exchange-floor", text: "A floor.", exact: true };
     const against = { ...sampleExpected, essentialNotes: [floor] };
-    const note = (badge: string) =>
-      plantedNotes([floor]).replace(/(tip__badge"[^>]*>)1</, `$1${badge}<`);
+    const note = (marker: string) =>
+      plantedNotes([floor]).replace(/(data-fn-ref="1"[^>]*>)1</, `$1${marker}<`);
     expect(verifyOutput(mainWith(note("2")), against)).toEqual([]);
     expect(verifyOutput(mainWith(note("Added")), against)).toContain(
-      "index.html: the exchange-floor note has no badge in view with its words",
+      "index.html: the exchange-floor note has no marker in view and footnote with its words",
     );
   });
 });

@@ -673,11 +673,6 @@ html:not([data-tips]) .tip:is(:hover, :focus-within) > .tip__panel,
   margin-top: 0.25rem;
 }
 
-/* A note's short words lead its tooltip, and the note in full follows as its own paragraph. */
-.tip__panel > [data-note-text]:has(+ [data-note-full]) {
-  font-weight: 600;
-}
-
 html:not([data-tips]) .tip--info:is(:hover, :focus-within) > .tip__icon,
 .tip__icon[aria-expanded="true"] {
   background: var(--color-maroon);
@@ -699,18 +694,31 @@ html:not([data-tips]) .tip--info:is(:hover, :focus-within) > .tip__icon,
   list-style: none;
 }
 
-/* A card's notes: numbered badges inline at the end of the title, legend row or label they qualify.
-   Each is a tooltip trigger, at least 24 px. */
-.note-badges {
-  display: inline-flex;
-  gap: 0.25rem;
-  margin-block: -0.25rem;
-  margin-left: 0.375rem;
-  vertical-align: middle;
-  white-space: nowrap;
+/* A note's footnote marker: a quiet superscript number in the body text's style, at the end of the
+   title, legend row or label it qualifies, linking to its footnote. */
+.fn-refs {
+  margin-left: 0.125em;
+  font-family: var(--font-sans);
+  font-size: 0.7em;
+  font-style: normal;
+  font-weight: 450;
+  line-height: 0;
+  letter-spacing: normal;
+  vertical-align: super;
 }
 
-/* A card's title runs as text, so its badges follow its last word, wrapped or not. */
+.fn-ref {
+  padding: 0 0.0625em;
+  color: inherit;
+  text-decoration: none;
+}
+
+.fn-ref:hover,
+.fn-ref:focus-visible {
+  text-decoration: underline;
+}
+
+/* A card's title runs as text, so its marker follows its last word. */
 .chart-card__head.explain-head {
   display: block;
 }
@@ -720,42 +728,75 @@ html:not([data-tips]) .tip--info:is(:hover, :focus-within) > .tip__icon,
   display: inline;
 }
 
-.chart-card__head > .note-badges {
-  margin-left: 0.5rem;
+/* The card's footnotes: a toggle at the right of its last row, beside Table and the as-of date,
+   opening a numbered list below the card's content. */
+.chart-card > .chart-card__meta:has(+ .footnotes) {
+  flex: 1 1 0;
 }
 
-/* While the table shows, the chart is gone, so its badges come up by the title. */
-.chart-card__head > .note-badges--table {
-  display: none;
+.chart-card > .footnotes {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
-.chart-card:has(> .data-toggle[open]) > .chart-card__head > .note-badges--table {
-  display: inline-flex;
+/* Level with Table, which sits 0.75rem under the card's content. */
+.chart-card > .footnotes > summary {
+  margin-top: 0.75rem;
 }
 
-.tip__badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  padding: 0;
-  background: var(--color-maroon);
-  border: 0;
-  border-radius: 50%;
-  color: var(--color-off-white);
-  cursor: pointer;
-  font-family: var(--font-sans);
-  font-size: var(--text-meta);
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
+.chart-card > .footnotes[open] {
+  flex: 0 0 100%;
+  text-align: right;
 }
 
-html:not([data-tips]) .tip:is(:hover, :focus-within) > .tip__badge,
-.tip[data-open] > .tip__badge {
-  background: var(--color-maroon-dark);
-  outline: 2px solid var(--color-maroon);
-  outline-offset: 1px;
+/* Where the browser can style a details element's content, the toggle keeps its place on the last
+   row and the list takes a row of its own under it. */
+@supports selector(::details-content) {
+  .chart-card > .footnotes,
+  .chart-card > .footnotes[open] {
+    display: contents;
+  }
+
+  .chart-card > .footnotes > summary {
+    flex: 0 0 auto;
+    margin-left: auto;
+  }
+
+  .chart-card > .footnotes::details-content {
+    flex: 0 0 100%;
+    text-align: left;
+  }
+
+  .chart-card > .footnotes:not([open])::details-content {
+    display: none;
+  }
+}
+
+.footnotes__list {
+  margin: 0.75rem 0 0;
+  padding: 0.75rem 0 0 1.5rem;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-small);
+  line-height: 1.45;
+  list-style: decimal;
+  text-align: left;
+}
+
+.footnotes__list > li {
+  scroll-margin-top: calc(var(--header-height) + var(--filter-height) + 2rem);
+}
+
+.footnotes__list > li + li {
+  margin-top: 0.375rem;
+}
+
+/* A footnote's short words lead it, and the note in full follows. */
+.footnotes__list [data-note-text]:has(+ [data-note-full]) {
+  font-weight: 600;
+}
+
+.footnotes__list > li:target {
+  background: var(--color-secondary-strong);
 }
 
 .data-toggle {
@@ -769,7 +810,8 @@ html:not([data-tips]) .tip:is(:hover, :focus-within) > .tip__badge,
   gap: var(--grid-gap);
 }
 
-.data-toggle > summary {
+.data-toggle > summary,
+.footnotes > summary {
   display: inline-flex;
   align-items: center;
   min-height: 1.75rem;
@@ -782,11 +824,13 @@ html:not([data-tips]) .tip:is(:hover, :focus-within) > .tip__badge,
   list-style: none;
 }
 
-.data-toggle > summary::-webkit-details-marker {
+.data-toggle > summary::-webkit-details-marker,
+.footnotes > summary::-webkit-details-marker {
   display: none;
 }
 
-.data-toggle > summary:hover {
+.data-toggle > summary:hover,
+.footnotes > summary:hover {
   background: var(--color-secondary-strong);
 }
 

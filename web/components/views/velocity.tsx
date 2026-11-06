@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { ChartCard } from "@/components/chart-card";
 import type { PinnedNote } from "@/components/pinned-notes";
 import { velocityChart } from "@/lib/chain-views";
@@ -20,7 +21,8 @@ export type VelocityViewProps = {
 // option highlights its chain rather than dropping the others.
 export function VelocityCard({ kpis, definitions, warnings, state }: VelocityViewProps) {
   const chart = velocityChart(kpis, warnings);
-  // A chain's note has its badge by the chain's name in the chart; the rest are about the card.
+  // A chain's note has its marker on the chain's name in the chart; the rest are about the card.
+  const footnotes = useId();
   const notes: PinnedNote[] = chart.notes.map(({ kind, chain, text, tip }) => ({
     kind,
     chain,
@@ -60,6 +62,7 @@ export function VelocityCard({ kpis, definitions, warnings, state }: VelocityVie
       frameWord={state.frameWord}
       summary="Velocity, everyday velocity and headline velocity per chain, on one scale from zero. The table has each beside the supply it divides by, and the wallets active in the last 7 days. Wallets, not people."
       notes={notes}
+      footnotes={footnotes}
       plotIsContent
       table={{
         caption: `Velocity, denominators and active wallets, newest day per chain. ${WALLETS_NOTE}`,
@@ -85,7 +88,7 @@ export function VelocityCard({ kpis, definitions, warnings, state }: VelocityVie
         })),
       }}
     >
-      <VelocityChart chart={chart} notes={notes} />
+      <VelocityChart chart={chart} notes={notes} footnotes={footnotes} />
     </ChartCard>
   );
 }

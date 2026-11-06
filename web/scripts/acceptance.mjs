@@ -384,10 +384,11 @@ async function checkInView(page, where) {
       const scope = document.querySelector('[data-section="kpi-row"] > p');
       if (scope) need("the KPI row's line", scope);
     }
-    // Every caveat, wherever a unit pins it. A note in a filter panel counts while its panel shows.
-    for (const caveat of document.querySelectorAll("main :not([data-note-copy]) > [data-note]")) {
-      const panel = caveat.closest("[data-chain-panel]");
-      if (!panel || panel.checkVisibility()) need(`the ${caveat.dataset.note} note`, caveat);
+    // Every caveat's footnote marker, wherever a unit pins it. A marker in a filter panel counts
+    // while its panel shows. Its words are in the card's footnotes, which the footnote check opens.
+    for (const marker of document.querySelectorAll("main a[data-fn-ref]")) {
+      const panel = marker.closest("[data-chain-panel]");
+      if (!panel || panel.checkVisibility()) need(`the ${marker.dataset.note} marker`, marker);
     }
     // An exchange's name and its source. A closed disclosure may hold them, and no stylesheet may hide them.
     for (const row of document.querySelectorAll("main [data-exchange-row]")) {
@@ -422,15 +423,15 @@ async function checkInView(page, where) {
       if (root.dataset.frame) {
         need("a card's frame word", card.querySelector(".chart-card__frame-word"));
       }
-      // A note is its numbered badge, by the title or on what it qualifies. Its words are the
-      // badge's tooltip, which the floating check opens.
-      for (const item of card.querySelectorAll(
-        "[data-note-badges]:not([data-note-copy]) > [data-note]",
-      )) {
-        need("a note's badge", item.querySelector(".tip__badge"));
+      // Each footnote has its marker in the card, and the card its Footnotes toggle.
+      const items = card.querySelectorAll(".footnotes__list > li");
+      if (items.length > 0)
+        need("a card's Footnotes toggle", card.querySelector(".footnotes > summary"));
+      for (const item of items) {
+        need("a footnote's marker", card.querySelector(`a[data-fn-ref][href="#${item.id}"]`));
       }
-      if (card.querySelector(".chart-card > .note-badges, .pin")) {
-        lacking.push("one set of markers, by what they qualify: a badge cluster is at the foot");
+      if (card.querySelector(".tip__badge, .note-badges, .pin")) {
+        lacking.push("one set of markers: a badge is back on a card");
       }
     }
     window.scrollTo({ left: startX, top: startY, behavior: "instant" });
@@ -449,7 +450,8 @@ async function checkFocusRings(page, where) {
   await page.keyboard.press("Shift");
   for (const selector of [
     ".tip__icon",
-    ".tip__badge",
+    ".footnotes > summary",
+    "a[data-fn-ref]",
     ".data-toggle > summary",
     ".chain-filter input:checked",
     "header a",
@@ -567,7 +569,7 @@ async function checkOneAtATime(page, where, js) {
 async function checkFloating(page, where, js) {
   const results = await page.evaluate(() => {
     const WATCHED =
-      ".chart-area, .hairline-table, .note-badges > [data-note], .chart-card__meta, .chart-card h2, .chart-card h3, .data-toggle > summary, h1, .freshness-text, [data-verdict-text], [data-kpi-value], [data-section='kpi-row'] dt, [data-section='kpi-row'] > p, footer";
+      ".chart-area, .hairline-table, .fn-refs, .footnotes > summary, .chart-card__meta, .chart-card h2, .chart-card h3, .data-toggle > summary, h1, .freshness-text, [data-verdict-text], [data-kpi-value], [data-section='kpi-row'] dt, [data-section='kpi-row'] > p, footer";
     // What a hidden filter panel holds has no box, so it can't move, whatever the scroll does.
     const layout = () =>
       [...document.querySelectorAll(WATCHED)].map((element) => {
@@ -718,12 +720,14 @@ async function checkToggle(page, where) {
       (await summary.innerText()).trim().startsWith("Chart"),
     );
     check("focus stays on the toggle", where, await focusIsOn(summary));
-    // The chart's badges come up by the title while the table shows, so every note stays in view.
-    const kinds = await card
-      .locator("[data-note-badges]:not([data-note-copy]) > [data-note]")
-      .count();
-    const shown = await card.locator(".chart-card__head [data-note]:visible").count();
-    check("notes stay visible", where, shown === kinds, `${shown} of ${kinds}`);
+    // The footnotes stay one tap away while the table shows.
+    if ((await card.locator(".footnotes").count()) > 0) {
+      check(
+        "the Footnotes toggle stays in view",
+        where,
+        await card.locator(".footnotes > summary").isVisible(),
+      );
+    }
     const openWidth = (await page.locator(name).boundingBox()).width;
     check("an open toggle's card keeps its width", where, Math.abs(openWidth - closedWidth) <= 1);
 
@@ -746,7 +750,7 @@ async function checkTargets(page, where) {
           .map((element) => element.getBoundingClientRect());
       return [
         ...boxes(
-          ".tip__icon, .tip__badge, .data-toggle > summary, .trust-strip a, footer [data-footer-status] a, footer nav a, header nav a",
+          ".tip__icon, .footnotes > summary, .data-toggle > summary, .trust-strip a, footer [data-footer-status] a, footer nav a, header nav a",
         ).filter((box) => box.width < minimum || box.height < minimum),
         ...boxes(".chain-filter label").filter((box) => box.height < filterMinimum),
       ].length;
@@ -778,7 +782,7 @@ async function checkNoSidewaysScroll(page, where) {
       `${value}: ${over}px`,
     );
     const outside = await page.evaluate((slack) => {
-      const PARTS = ".hairline-table, .data-toggle__panel, .note-badges, .chart-area";
+      const PARTS = ".hairline-table, .data-toggle__panel, .footnotes__list, .chart-area";
       return [...document.querySelectorAll(".chart-card")]
         .filter((card) => card.checkVisibility())
         .flatMap((card) => {
@@ -1540,8 +1544,7 @@ async function checkSupplyOptions(page, where) {
           rows: card.querySelectorAll("[data-supply-legend] [data-segment]").length,
           bandRows: card.querySelectorAll("[data-supply-legend] [data-band]").length,
           wallets: [...card.querySelectorAll('[data-stat="active-wallets"]')].filter(seen).length,
-          floor: card.querySelectorAll(':not([data-note-copy]) > [data-note="exchange-floor"]')
-            .length,
+          floor: card.querySelectorAll('.footnotes__list > [data-note="exchange-floor"]').length,
         };
       },
       [SUPPLY, value, BOX_SLACK_PX],
@@ -1635,6 +1638,57 @@ async function checkTableWords(page, where) {
   await toggle.locator("> summary").click();
 }
 
+// A card's footnotes: closed at first, opened by keyboard on its toggle, with or without a script,
+// as a list whose numbers match the markers, which a marker also opens, landing on its footnote.
+async function checkFootnotes(page, where) {
+  const card = page.locator(SUPPLY);
+  const details = card.locator(".footnotes");
+  const summary = details.locator("> summary");
+  const list = details.locator(".footnotes__list");
+  await summary.scrollIntoViewIfNeeded();
+  check("a card's footnotes start closed", where, !(await list.isVisible()));
+  const [summaryBox, tableBox] = await Promise.all([
+    summary.boundingBox(),
+    card.locator(".data-toggle > summary").boundingBox(),
+  ]);
+  check(
+    "its Footnotes toggle is on the row with Table, at the right",
+    where,
+    Math.abs(summaryBox.y - tableBox.y) < 8 && summaryBox.x > tableBox.x,
+  );
+  await summary.focus();
+  await page.keyboard.press("Enter");
+  check("Enter on Footnotes opens the list", where, await list.isVisible());
+  const [listBox, openSummary] = await Promise.all([list.boundingBox(), summary.boundingBox()]);
+  check("which opens below the card's content", where, listBox.y > openSummary.y);
+  const numbers = await card.evaluate((element) => {
+    const items = [...element.querySelectorAll(".footnotes__list > li")];
+    return items.map((item, index) => {
+      const marker = element.querySelector(`a[data-fn-ref][href="#${item.id}"]`);
+      return marker?.textContent.trim() === String(index + 1);
+    });
+  });
+  check(
+    "every footnote's number matches its marker",
+    where,
+    numbers.length > 0 && numbers.every(Boolean),
+  );
+  await page.keyboard.press("Enter");
+  check("Enter again closes it", where, !(await list.isVisible()));
+  const marker = card.locator("a[data-fn-ref]").last();
+  const target = (await marker.getAttribute("href")).slice(1);
+  await marker.click();
+  await page.waitForTimeout(300);
+  const landed = await page.evaluate((id) => {
+    const item = document.getElementById(id);
+    const box = item.getBoundingClientRect();
+    return item.checkVisibility() && box.top >= 0 && box.bottom <= window.innerHeight;
+  }, target);
+  check("a marker opens the list at its footnote", where, landed);
+  if (await list.isVisible()) await summary.click();
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+}
+
 // A row may sit under the toggle, so opening it has to show every one of them, whole.
 async function checkExchangeRowsOpen(page, where) {
   const toggle = page.locator(`${SUPPLY} .data-toggle`);
@@ -1649,11 +1703,9 @@ async function checkExchangeRowsOpen(page, where) {
     check("an open toggle shows each exchange row whole", where, seen.every(Boolean), `${index}`);
   }
   const notes =
-    (await page
-      .locator(`${SUPPLY} [data-note="exchange-floor"]`)
-      .filter({ visible: true })
-      .count()) > 0;
-  check("and the floor note stays in view beside them", where, notes);
+    (await page.locator(`${SUPPLY} .footnotes > summary`).isVisible()) &&
+    (await page.locator(`${SUPPLY} .footnotes__list > [data-note="exchange-floor"]`).count()) === 1;
+  check("and the floor note is in the footnotes, a tap away beside them", where, notes);
   await toggle.locator("> summary").click();
 }
 
@@ -1685,8 +1737,8 @@ async function checkActivityOptions(page, where) {
         (row) => !["headline_value", "clean_large", "clean_everyday"].includes(row.dataset.step),
       );
       // A badge sits on the row it qualifies, or by the title.
-      const pins = [...waterfall.querySelectorAll(".tip__badge")].filter(
-        (badge) => !badge.closest("[data-step], .chart-card__head"),
+      const pins = [...waterfall.querySelectorAll("a[data-fn-ref]")].filter(
+        (marker) => !marker.closest("[data-step], .chart-card__head"),
       );
       const numbersWhole = [...weekly.querySelectorAll("[data-week-number]")].every((number) => {
         const range = document.createRange();
@@ -1710,7 +1762,7 @@ async function checkActivityOptions(page, where) {
         unknown,
         removals: removals.length,
         pins: pins.length,
-        notes: waterfall.querySelectorAll(".note-badges .tip__badge").length,
+        notes: waterfall.querySelectorAll("a[data-fn-ref]").length,
         numbersWhole,
         rows: rows.length,
         ordered: tops.every((top, index) => index === 0 || top > tops[index - 1]),
@@ -1724,7 +1776,7 @@ async function checkActivityOptions(page, where) {
     if (!seen.unknown) {
       check("the waterfall has its twelve rows", where, seen.rows === 12, `${value}: ${seen.rows}`);
       check(
-        "the waterfall's removals and note badges are there to check",
+        "the waterfall's removals and footnote markers are there to check",
         where,
         seen.removals === 9 && seen.notes > 0,
         value,
@@ -1739,7 +1791,7 @@ async function checkActivityOptions(page, where) {
       `${value}: ${seen.outside}`,
     );
     check("the removals are hatched", where, seen.hatched, value);
-    check("each waterfall badge sits on its row or by the title", where, seen.pins === 0, value);
+    check("each waterfall marker sits on its row or the title", where, seen.pins === 0, value);
     check("each week's figure stays over its own bar", where, seen.figuresInside, value);
   }
   await page.locator(`.chain-filter input[value="${values[0]}"]`).check({ force: true });
@@ -1839,6 +1891,7 @@ async function checkFolder(browser, folder, harness, widths) {
       if (js) await group("Escape", () => checkEscapeStaysPut(page, where));
       if (!js) await group("no script", () => checkWithoutJavaScript(page, where));
       await group("the toggle", () => checkToggle(page, where));
+      await group("footnotes", () => checkFootnotes(page, where));
       await group("targets", () => checkTargets(page, where));
       await group("sideways scroll", () => checkNoSidewaysScroll(page, where));
       if (js && AXE_WIDTHS.has(width)) await group("axe", () => checkAxe(page, where));

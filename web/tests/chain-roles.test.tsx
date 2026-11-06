@@ -136,7 +136,7 @@ describe("the chain roles view", () => {
 
   it("uses 'trading' only in the plain note, never 'settlement'", () => {
     const { container } = mount();
-    const note = container.querySelector('[data-note="no-swaps"]')!;
+    const note = container.querySelector('.footnotes__list > [data-note="no-swaps"]')!;
     expect(note.textContent).toContain("We don’t ingest swaps, so this view can’t show trading.");
     // The definition link is the card's tooltip's, so the note keeps only its caveat.
     expect(note.querySelector("a")).toBeNull();
@@ -146,7 +146,7 @@ describe("the chain roles view", () => {
       ),
     ).not.toBeNull();
     const rest = container.cloneNode(true) as HTMLElement;
-    rest.querySelector('[data-note="no-swaps"]')!.remove();
+    rest.querySelector('.footnotes__list > [data-note="no-swaps"]')!.remove();
     expect(rest.textContent).not.toMatch(/trading|settlement/i);
   });
 
@@ -246,15 +246,16 @@ describe("the chain roles view", () => {
       expect(grid(same.container).querySelector('[data-grid-measure="as-of"]')).toBeNull();
     });
 
-    it("gives the no-swaps note a badge with its words in the tooltip, and no pin in the grid", () => {
+    it("marks the no-swaps note on the title, with its words in the footnotes, and no pin in the grid", () => {
       const { container } = mount();
-      expect(grid(container).querySelector(".pin")).toBeNull();
-      const note = container.querySelector(
-        '[data-note-badges]:not([data-note-copy]) [data-note="no-swaps"]',
+      expect(grid(container).querySelector(".pin, a[data-fn-ref]")).toBeNull();
+      const marker = container.querySelector(
+        '.chart-card__head a[data-fn-ref][data-note="no-swaps"]',
       )!;
-      expect(note.closest("details, noscript")).toBeNull();
-      expect(note.querySelector(".tip__badge")!.textContent).toBe("1");
-      expect(note.querySelector(".tip__panel [data-note-text]")!.textContent).toBe(NO_SWAPS_NOTE);
+      expect(marker.textContent).toBe("1");
+      const item = container.querySelector(marker.getAttribute("href")!.replace(/:/g, "\\:"))!;
+      expect(item.closest("details.footnotes")).not.toBeNull();
+      expect(item.querySelector("[data-note-text]")!.textContent).toBe(NO_SWAPS_NOTE);
     });
 
     it("never calls a chain's role settlement", () => {

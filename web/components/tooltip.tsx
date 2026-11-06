@@ -48,29 +48,27 @@ export function InfoTip({
   );
 }
 
-// Visible words that open their own explanation, inside running text, or a note's numbered badge.
-// Phrasing content only, as it sits inside a paragraph. `interactive` when the explanation holds a
-// link. `label` names a trigger whose words alone don't say what it opens.
+// Visible words that open their own explanation, inside running text. Phrasing content only, as it
+// sits inside a paragraph. `interactive` when the explanation holds a link. `label` names a trigger
+// whose words alone don't say what it opens.
 export function TextTip({
   text,
   children,
   interactive = false,
   label,
-  badge = false,
   ...place
 }: {
   text: ReactNode;
   children: ReactNode;
   interactive?: boolean;
   label?: string;
-  badge?: boolean;
 } & Place) {
   const id = useId();
   return (
     <span className="tip tip--text" data-tip {...placeProps(place)}>
       <button
         type="button"
-        className={`tip__trigger ${badge ? "tip__badge" : "tip__words"}`}
+        className="tip__trigger tip__words"
         aria-label={label}
         {...triggerProps(id, interactive)}
       >

@@ -90,26 +90,26 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     expect(faults(figure, W, "base")).toEqual(
       expect.arrayContaining([expect.stringContaining("its rows aren't the dataset's")]),
     );
-    // A badge moved to the next row keeps its order, but points at another row.
+    // A marker moved to the next row keeps its order, but points at another row.
     const moved = inPanel(W, "tempo", (html) =>
       html.replace(
-        /(<li data-step="clean_large"><span>S)(<ol data-note-badges>.*?<\/ol>)(<\/span>.*?<li data-step="[^"]+"><span>S)/,
+        /(<li data-step="clean_large"><span>S)(<sup class="fn-refs" data-fn-refs>.*?<\/sup>)(<\/span>.*?<li data-step="[^"]+"><span>S)/,
         "$1$3$2",
       ),
     );
     expect(faults(moved, W, "tempo")).toContain(
-      `index.html: the tempo panel of #${W}: its hops note's badge isn't on clean_large`,
+      `index.html: the tempo panel of #${W}: its hops marker isn't on clean_large`,
     );
-    // Past the title's copy, on the row itself.
+    // The row's marker gone, though its footnote stays.
     const lost = inPanel(W, "tempo", (html) =>
       html.replace(
-        /(data-step="issuer_flows"><span>S)<ol data-note-badges><li data-note="small-ticket">.*?<\/li><\/ol>/,
+        /(data-step="issuer_flows"><span>S)<sup class="fn-refs" data-fn-refs><a [^>]*data-note="small-ticket"[^>]*>\d+<\/a><\/sup>/,
         "$1",
       ),
     );
     expect(lost).not.toBe(main);
     expect(faults(lost, W, "tempo")).toEqual(
-      expect.arrayContaining([expect.stringContaining("its notes are")]),
+      expect.arrayContaining([expect.stringContaining("small-ticket footnote hasn't one marker")]),
     );
     const full = inPanel(W, "all", (html) =>
       html.replace(/<p data-full-note="small-ticket">.*?<\/p>/, ""),
@@ -134,25 +134,25 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     expect(faults(bar, K, "solana")).toEqual(
       expect.arrayContaining([expect.stringContaining("its bars aren't the dataset's")]),
     );
-    // Its notes are about the whole card, so badges moved into the chart fail.
+    // Its notes are about the whole card, so markers moved into the chart fail.
     const moved = inPanel(K, "solana", (html) => {
-      const badges = /<ol data-note-badges>.*?<\/ol>/.exec(html)![0];
+      const marks = /<sup class="fn-refs" data-fn-refs>.*?<\/sup>/.exec(html)![0];
       return html
-        .replace(badges, "")
-        .replace('<div class="chart-area" aria-hidden="true">', `$&${badges}`);
+        .replace(marks, "")
+        .replace('<div class="chart-area" aria-hidden="true">', `$&<p>${marks}</p>`);
     });
     expect(faults(moved, K, "solana")).toContain(
-      `index.html: the solana panel of #${K}: its everyday-meaning note's badge isn't on the card's title`,
+      `index.html: the solana panel of #${K}: its everyday-meaning marker isn't on the card's title`,
     );
     const note = inPanel(K, "solana", (html) => html.replace("nothing more.", "or so."));
     expect(faults(note, K, "solana")).toEqual(
       expect.arrayContaining([
-        expect.stringContaining("everyday-meaning note doesn't keep its words"),
+        expect.stringContaining("everyday-meaning footnote doesn't keep its words"),
       ]),
     );
     const marker = inPanel(K, "solana", (html) =>
       html.replace(
-        /(<li data-note="history">)/,
+        /(<li id="[^"]*" data-note="history">)/,
         '$1<span class="status-chip" data-kind="fact">F</span> ',
       ),
     );
@@ -160,13 +160,15 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     expect(check(marker)).toContain("index.html: a marker is back on the main page");
     const hidden = inPanel(K, "solana", (html) =>
       html.replace(
-        /<ol data-note-badges>/,
-        "<details><summary>More</summary><ol data-note-badges>",
+        /<details class="footnotes".*?<\/details>/,
+        "<details><summary>More</summary>$&</details>",
       ),
     );
     expect(hidden).not.toBe(main);
-    expect(check(hidden)).toContain(
-      "index.html: pinned notes inside a details, noscript or tooltip",
+    expect(check(hidden)).toContain("index.html: footnotes inside a details, noscript or tooltip");
+    const opened = inPanel(K, "solana", (html) =>
+      html.replace('<details class="footnotes"', '<details open class="footnotes"'),
     );
+    expect(check(opened)).toContain("index.html: a card's footnotes are open by default");
   });
 });

@@ -56,33 +56,34 @@ describe("the velocity chart and the chain grid", { timeout: WHOLE_PAGE_TIMEOUT_
   const check = (body: string) =>
     verifyOutput(site({ main: page(body), methodology: page("<main>Fine</main>") }), expected);
 
-  it("passes the page the dataset calls for, with the warning's badge first", () => {
+  it("passes the page the dataset calls for, with the warning's marker on its chain", () => {
     expect(expected.velocity.notes[0]).toMatchObject({ kind: "velocity-warning", chain: "base" });
     expect(check(main)).toEqual([]);
   });
 
-  it("fails with the warning's badge gone, or moved off its chain", () => {
+  it("fails with the warning's marker gone, or moved off its chain", () => {
     const gone = main.replace(
-      /(<p class="velocity-chart__name">base)<ol data-note-badges><li data-note="velocity-warning".*?<\/li><\/ol>/,
+      /(<p class="velocity-chart__name">base)<sup class="fn-refs" data-fn-refs>.*?<\/sup>/,
       "$1",
     );
     expect(gone).not.toBe(main);
     expect(check(gone)).toEqual(
       expect.arrayContaining([
         expect.stringContaining(
-          "#velocity-by-chain: its notes are velocity-denominators:, not velocity-denominators:,velocity-warning:base",
+          "#velocity-by-chain: its velocity-warning footnote hasn't one marker numbered 2",
         ),
       ]),
     );
-    // Beside another chain's name, its badge points at the wrong chain.
-    const badge = /(<p class="velocity-chart__name">base)(<ol data-note-badges>.*?<\/ol>)/.exec(
-      main,
-    )!;
+    // Beside another chain's name, its marker points at the wrong chain.
+    const marker =
+      /(<p class="velocity-chart__name">base)(<sup class="fn-refs" data-fn-refs>.*?<\/sup>)/.exec(
+        main,
+      )!;
     const moved = main
-      .replace(badge[0], badge[1])
-      .replace(/(<p class="velocity-chart__name">solana)/, `$1${badge[2]}`);
+      .replace(marker[0], marker[1])
+      .replace(/(<p class="velocity-chart__name">solana)/, `$1${marker[2]}`);
     expect(check(moved)).toContain(
-      "index.html: #velocity-by-chain: its velocity-warning note's badge isn't on base",
+      "index.html: #velocity-by-chain: its velocity-warning marker isn't on base",
     );
   });
 
@@ -97,15 +98,16 @@ describe("the velocity chart and the chain grid", { timeout: WHOLE_PAGE_TIMEOUT_
     );
   });
 
-  it("fails when the tooltip loses a full note, or a pin is put on a headline row", () => {
+  it("fails when the tooltip loses a full note, or a marker is put on a headline row", () => {
     const full = main.replace(/<p data-full-note="velocity-denominators">.*?<\/p>/, "");
     expect(check(full)).toEqual(
       expect.arrayContaining([
         expect.stringContaining("lost the velocity-denominators note in full"),
       ]),
     );
-    // The denominators note is about the whole card, so its badge on a headline row fails.
-    const head = /<div class="chart-card__head"><h2>[^<]*<\/h2>(<ol data-note-badges>.*?<\/ol>)/;
+    // The denominators note is about the whole card, so its marker on a headline row fails.
+    const head =
+      /<div class="chart-card__head"><h2>[^<]*<\/h2>(<sup class="fn-refs" data-fn-refs>.*?<\/sup>)/;
     const own = head.exec(main.slice(main.indexOf('id="velocity-by-chain"')))![1];
     const start = main.indexOf('id="velocity-by-chain"');
     const card = main.slice(start);
@@ -117,7 +119,7 @@ describe("the velocity chart and the chain grid", { timeout: WHOLE_PAGE_TIMEOUT_
       )}`;
     expect(moved).not.toBe(main);
     expect(check(moved)).toContain(
-      "index.html: #velocity-by-chain: its velocity-denominators note's badge isn't on the card's title",
+      "index.html: #velocity-by-chain: its velocity-denominators marker isn't on the card's title",
     );
     expect(main).not.toContain("data-velocity-legend");
   });

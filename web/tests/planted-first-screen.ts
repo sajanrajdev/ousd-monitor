@@ -159,35 +159,58 @@ export function plantedFlight(tree: unknown): string {
 
 const flightElement = (type: string, props: object) => ["$", type, null, props];
 
-// A note as components/pinned-notes.tsx writes it: a numbered badge in view, and its words, then the
-// note in full where it has one, in the badge's tooltip. A test's `<li data-note=` finds one, as the
-// checks read a badge by its attributes, whatever its element.
-export function plantedBadge(
-  number: number,
-  words: string,
-  {
-    tip,
-    kind,
-    chain,
-    essential = false,
-  }: { tip?: string; kind: string; chain?: string; essential?: boolean },
-): string {
-  const full = tip ? `<span data-note-full>${tip}</span>` : "";
-  const panel = `<span data-note-text>${words}</span>${full}`;
-  const id = tipId();
-  const points = /<a\s/.test(panel)
-    ? `aria-expanded="false" aria-controls="${id}"`
-    : `aria-describedby="${id}"`;
-  const role = /<a\s/.test(panel) ? "" : ' role="tooltip"';
-  // The page-wide list's items lead with their own mark, so a test's `<li data-note=` finds a card's.
-  return `<li ${essential ? "data-essential " : ""}data-note="${kind}"${chain ? ` data-chain="${chain}"` : ""}><span class="tip tip--text" data-tip><button type="button" class="tip__trigger tip__badge" aria-label="Note ${number}" ${points}>${number}</button><span class="tip__panel" id="${id}"${role}>${panel}</span></span></li>`;
+let nextNotesId = 0;
+// A card's footnote prefix, as useId gives each card its own.
+export const notesPrefix = () => `notes-${(nextNotesId += 1)}`;
+
+type PlantedFootnote = { kind: string; chain?: string; words: string; tip?: string; at?: string };
+
+// A card's notes about the whole card first, then the rest in their order, as the card numbers them.
+function ordered<T extends { at?: string }>(notes: T[]): T[] {
+  return [...notes.filter((note) => !note.at), ...notes.filter((note) => note.at)];
 }
 
-export function plantedNotes(notes: Note[]): string {
-  const html = notes.length
-    ? `<ol data-note-badges>${notes.map(({ kind, chain, text }, index) => plantedBadge(index + 1, text, { kind, chain, essential: true })).join("")}</ol>`
-    : "";
-  return notes.length > 0 ? `${html}${plantedNotesFlight(notes)}` : html;
+// The footnote markers for what sits at `at`, or the card's own with no `at`, as
+// components/pinned-notes.tsx writes them: superscript links, numbered by the card's order.
+export function plantedMarks(notes: PlantedFootnote[], prefix: string, at?: string): string {
+  const marks = ordered(notes).flatMap(({ kind, chain, at: place }, index) =>
+    place === at
+      ? [
+          `<a href="#${prefix}-fn-${index + 1}" class="fn-ref" aria-label="Footnote ${index + 1}" data-fn-ref="${index + 1}" data-note="${kind}"${chain ? ` data-chain="${chain}"` : ""}>${index + 1}</a>`,
+        ]
+      : [],
+  );
+  return marks.length > 0 ? `<sup class="fn-refs" data-fn-refs>${marks.join(",")}</sup>` : "";
+}
+
+// The card's footnotes: a closed details with its "Footnotes" summary and a numbered list, each
+// item its words and then any note in full.
+export function plantedFootnotes(notes: PlantedFootnote[], prefix: string): string {
+  if (notes.length === 0) return "";
+  const items = ordered(notes).map(
+    ({ kind, chain, words, tip }, index) =>
+      `<li id="${prefix}-fn-${index + 1}" data-note="${kind}"${chain ? ` data-chain="${chain}"` : ""}><span data-note-text>${words}</span>${tip ? ` <span data-note-full>${tip}</span>` : ""}</li>`,
+  );
+  return `<details class="footnotes" data-footnotes><summary>Footnotes</summary><ol class="footnotes__list" aria-label="Footnotes">${items.join("")}</ol></details>`;
+}
+
+// The essential notes on a card of their own, each a marker on its title and a footnote, with
+// their words as given, unescaped, so a test can plant markup in them.
+export function plantedNotes(
+  notes: (Note & { tip?: string })[],
+  frameWord: string | null = "Sample",
+): string {
+  if (notes.length === 0) return "";
+  const prefix = notesPrefix();
+  const footnotes = notes.map(({ kind, chain, text, tip }) => ({ kind, chain, words: text, tip }));
+  const edge = frameWord ? ` data-frame="${frameWord}"` : "";
+  const word = frameWord ? ` · <strong>${frameWord}</strong>` : "";
+  const card = `<section id="${prefix}" class="chart-card"${edge}><div class="chart-card__head"><h2>N</h2>${plantedMarks(footnotes, prefix)}
+  ${plantedInfoTip("About: N", '<p>Source: S</p><a href="/methodology/#velocity">Definition</a>')}</div>
+  <table></table>
+  <p class="chart-card__meta">As of <time datetime="2026-11-03">3 Nov</time>${word}</p>${plantedFootnotes(footnotes, prefix)}
+  <noscript><p class="chart-card__source-note">Source: S · <a href="/methodology/#velocity">Definition</a></p></noscript></section>`;
+  return `${card}${plantedNotesFlight(notes)}`;
 }
 
 // The notes in the payload alone, for a test whose fault is in the HTML.
@@ -296,7 +319,7 @@ export type PlantedPart = {
   band: string | null;
   bandLine: string | null;
 };
-type PlantedPanelNote = { kind: string; chain?: string; words: string; tip?: string; at?: string };
+type PlantedPanelNote = PlantedFootnote;
 type PlantedTable = {
   columns: { key: string; label: string }[];
   rows: Record<string, string>[];
@@ -343,58 +366,21 @@ function plantedTable({ columns, rows }: PlantedTable, caption = ""): string {
     .join("")}</tbody></table>`;
 }
 
-// A card's notes about the whole card first, then the rest in their order, as the card numbers them.
-function ordered<T extends { at?: string }>(notes: T[]): T[] {
-  return [...notes.filter((note) => !note.at), ...notes.filter((note) => note.at)];
-}
-
-// The badges for what sits at `at`, or the card's own with no `at`, each with its words and any
-// note in full in its tooltip, numbered by the card's order.
-export function plantedPanelNotes(notes: PlantedPanelNote[], at?: string): string {
-  const items = ordered(notes).flatMap(({ kind, chain, words, tip, at: place }, index) =>
-    place === at
-      ? [
-          plantedBadge(index + 1, escaped(words), {
-            kind,
-            chain,
-            ...(tip ? { tip: escaped(tip) } : {}),
-          }),
-        ]
-      : [],
-  );
-  return items.length > 0 ? `<ol data-note-badges>${items.join("")}</ol>` : "";
-}
-
-// The title's badges: the card's own, then a copy of those on its chart or legend, numbered alike,
-// shown only while the table is.
-export function plantedHeadNotes(notes: PlantedPanelNote[]): string {
-  const copy = ordered(notes).flatMap(({ kind, chain, words, tip, at }, index) =>
-    at
-      ? [
-          plantedBadge(index + 1, escaped(words), {
-            kind,
-            chain,
-            ...(tip ? { tip: escaped(tip) } : {}),
-          }),
-        ]
-      : [],
-  );
-  const table = copy.length > 0 ? `<ol data-note-badges data-note-copy>${copy.join("")}</ol>` : "";
-  return `${plantedPanelNotes(notes)}${table}`;
-}
-
+// A card with its notes as footnotes: its own marker on the title, the rest wherever `inner` put
+// them with the same prefix, and the list after the as-of line.
 function plantedPanelCard(
   heading: string,
   inner: string,
   panelText: string,
   toggle: string,
   id = "",
-  badges = "",
+  notes: PlantedFootnote[] = [],
+  prefix = notesPrefix(),
 ) {
-  return `<section${id ? ` id="${id}"` : ""} class="chart-card"><div class="chart-card__head"><h2>${escaped(heading)}</h2>${badges}
+  return `<section${id ? ` id="${id}"` : ""} class="chart-card"><div class="chart-card__head"><h2>${escaped(heading)}</h2>${plantedMarks(notes, prefix)}
   ${plantedInfoTip("About", `<p>Source: S</p><a href="/methodology/#velocity">Definition</a>${panelText}`)}</div>
   ${inner}<details class="data-toggle"><summary>Table</summary>${toggle}</details>
-  <p class="chart-card__meta">As of <time datetime="2026-11-03">3 Nov</time></p>
+  <p class="chart-card__meta">As of <time datetime="2026-11-03">3 Nov</time></p>${plantedFootnotes(notes, prefix)}
   <noscript><p class="chart-card__source-note">Source: S · <a href="/methodology/#velocity">Definition</a></p></noscript></section>`;
 }
 
@@ -409,12 +395,12 @@ function plantedSupplyBar({ key, total, parts }: PlantedSupplyPanel): string {
   return `<div data-supply-bar="${key}" data-total="${total}">${drawn.join("")}</div>`;
 }
 
-function plantedLegend({ key, parts, notes }: PlantedSupplyPanel): string {
+function plantedLegend({ key, parts, notes }: PlantedSupplyPanel, prefix: string): string {
   const rows = parts.map(({ key: part, label, compact, share, floor, band, bandLine }) => {
     const mark = floor ? '<span data-coverage="floor">≥</span>' : "";
     const linked = band !== null && BigInt(band) > 0n ? ` data-exchange-linked="${key}"` : "";
     const line = bandLine === null ? "" : `<li data-band="${part}"${linked}>${bandLine}</li>`;
-    return `<li data-segment="${part}"><span data-segment-label>${label}</span>${plantedPanelNotes(notes, part)}<span data-segment-amount>${mark}${compact}</span><span data-segment-share>${share}</span></li>${line}`;
+    return `<li data-segment="${part}"><span data-segment-label>${label}</span>${plantedMarks(escapedNotes(notes), prefix, part)}<span data-segment-amount>${mark}${compact}</span><span data-segment-share>${share}</span></li>${line}`;
   });
   return `<ul class="chart-legend" data-supply-legend>${rows.join("")}</ul>`;
 }
@@ -428,6 +414,7 @@ export function plantedSupplyPanels(
 ): string {
   if (panels.length === 0) return "";
   const [all] = panels;
+  const prefix = notesPrefix();
   const rows = panels
     .map(
       (panel) =>
@@ -447,11 +434,12 @@ export function plantedSupplyPanels(
   );
   return plantedPanelCard(
     all.heading,
-    `<div class="chart-area" aria-hidden="true"><div data-supply-rows>${rows}</div></div>${plantedLegend(all)}<dl>${stats}</dl>`,
+    `<div class="chart-area" aria-hidden="true"><div data-supply-rows>${rows}</div></div>${plantedLegend(all, prefix)}<dl>${stats}</dl>`,
     `<p data-full-note="placed">${escaped(all.placedNote)}</p>`,
     `${plantedTable(all.table)}${walletsTable}${entities}`,
     id,
-    plantedHeadNotes(all.notes),
+    escapedNotes(all.notes),
+    prefix,
   );
 }
 
@@ -466,7 +454,7 @@ export function plantedSeriesPanels(panels: PlantedSeriesPanel[], id: string): s
       `<p data-full-note="series-start">${escaped(panel.fullNote)}</p>`,
       plantedTable({ columns: SERIES_TABLE, rows: panel.rows }),
       "",
-      plantedHeadNotes(panel.notes),
+      escapedNotes(panel.notes),
     )}</div>`;
   });
   return `<div id="${id}" class="chain-panels">${items.join("")}</div>`;
@@ -508,8 +496,14 @@ const WEEK_TABLE = [
   ["everyday", "Clean everyday"],
 ].map(([key, label]) => ({ key, label }));
 
-const plantedActivityNotes = (notes: PlantedActivityNote[], at?: string) =>
-  plantedPanelNotes(notes, at);
+// The words and any note in full as the page escapes them.
+function escapedNotes(notes: PlantedFootnote[]): PlantedFootnote[] {
+  return notes.map((note) => ({
+    ...note,
+    words: escaped(note.words),
+    ...(note.tip ? { tip: escaped(note.tip) } : {}),
+  }));
+}
 
 function plantedFullNotes(fullNotes: Record<string, string>): string {
   return Object.entries(fullNotes)
@@ -520,20 +514,23 @@ function plantedFullNotes(fullNotes: Record<string, string>): string {
 // Each filter option's waterfall and weekly bars, as the views write them.
 export function plantedWaterfallPanels(panels: PlantedWaterfallPanel[], id: string): string {
   const items = panels.map((panel) => {
+    const prefix = notesPrefix();
+    const notes = escapedNotes(panel.notes);
     const rows = panel.steps
       .map(
         ({ key, figure }) =>
-          `<li data-step="${key}"><span>S${plantedActivityNotes(panel.notes, key)}</span><span class="tabular-nums">${figure}</span></li>`,
+          `<li data-step="${key}"><span>S${plantedMarks(notes, prefix, key)}</span><span class="tabular-nums">${figure}</span></li>`,
       )
       .join("");
-    // Its badges sit on its rows, so the chart is read, not hidden.
+    // Its markers sit on its rows, so the chart is read, not hidden.
     return `<div data-chain-panel="${panel.value}">${plantedPanelCard(
       panel.heading,
       `<div class="chart-area" data-plot-content><ol>${rows}</ol></div>`,
       plantedFullNotes(panel.fullNotes),
       `${plantedTable({ columns: STEP_TABLE, rows: panel.stepRows })}${plantedTable({ columns: PERIOD_TABLE, rows: panel.periodRows })}`,
       "",
-      plantedHeadNotes(panel.notes),
+      notes,
+      prefix,
     )}</div>`;
   });
   return `<div id="${id}" class="chain-panels">${items.join("")}</div>`;
@@ -553,7 +550,7 @@ export function plantedWeeklyPanels(panels: PlantedWeeklyPanel[], id: string): s
       plantedFullNotes(panel.fullNotes),
       plantedTable({ columns: WEEK_TABLE, rows: panel.rows }),
       "",
-      plantedHeadNotes(panel.notes),
+      escapedNotes(panel.notes),
     )}</div>`;
   });
   return `<div id="${id}" class="chain-panels">${items.join("")}</div>`;
@@ -574,6 +571,8 @@ export type PlantedGrid = {
 
 // The velocity card and the chain grid's card, as the views write them.
 export function plantedVelocity(velocity: PlantedVelocity, id: string): string {
+  const prefix = notesPrefix();
+  const notes = escapedNotes(velocity.notes);
   const groups = new Map<string, string[]>();
   for (const bar of velocity.bars) {
     const [, chain, measure, value, width] = /^(\w+):(\w+)=(.*)@(.*)$/.exec(bar)!;
@@ -589,7 +588,7 @@ export function plantedVelocity(velocity: PlantedVelocity, id: string): string {
   const chart = [...groups]
     .map(
       ([chain, rows]) =>
-        `<div data-velocity-chain="${chain}"><p class="velocity-chart__name">${chain}${plantedPanelNotes(velocity.notes, chain)}</p>${rows.join("")}</div>`,
+        `<div data-velocity-chain="${chain}"><p class="velocity-chart__name">${chain}${plantedMarks(notes, prefix, chain)}</p>${rows.join("")}</div>`,
     )
     .join("");
   const fullNotes = `<p data-full-note="velocity-denominators">${escaped(VELOCITY_NOTE)}</p><p data-full-note="velocity-jumpy">${escaped(JUMPY_NOTE)}</p>`;
@@ -605,7 +604,8 @@ export function plantedVelocity(velocity: PlantedVelocity, id: string): string {
     `${fullNotes}${full}`,
     `<table><caption>Velocity. Wallets, not people.</caption></table>`,
     "",
-    plantedHeadNotes(velocity.notes),
+    notes,
+    prefix,
   )}</div>`;
 }
 
@@ -665,7 +665,7 @@ export function plantedRealMain(
     : `<section data-section="trust-strip">${staleTrust}${PLANTED_TRUST_LINK}</section>`;
   return `<main>${trust}<section data-section="verdict">${plantedHeadline(expected.verdict)}<p>${expected.headStale}</p></section>
     <section data-section="kpi-row">${plantedKpis(expected.kpiScope ?? "", expected.kpiValues)}</section>
-    ${plantedNotes(expected.essentialNotes)}
+    ${plantedNotes(expected.essentialNotes, null)}
     <div class="dashboard">${plantedFilter(expected.filter)}
     ${plantedSupplyPanels(expected.supplyPanels, CARD_ANCHORS.supply, plantedExchangeRows(expected.exchangeRows))}
     ${plantedSeriesPanels(expected.seriesPanels, CARD_ANCHORS.series)}

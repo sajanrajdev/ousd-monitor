@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { ChainPanels } from "@/components/chain-panels";
 import { ChartCard } from "@/components/chart-card";
 import { HairlineTable } from "@/components/hairline-table";
@@ -28,7 +29,7 @@ export type ActivityViewProps = {
 
 const SOURCE = "Chain data and public labels";
 
-// A note on a waterfall row has its badge on that row's label.
+// A note on a waterfall row has its marker on that row's label.
 const pinnedNote = ({ kind, text, step }: ActivityNote): PinnedNote => ({ kind, text, at: step });
 
 // The notes in full, for the tooltip. Nothing here is the only copy of a caveat.
@@ -47,6 +48,7 @@ function FullNotes({ notes }: { notes: Record<string, string> }) {
 function WaterfallCard({ panel, state }: { panel: WaterfallPanel; state: DatasetState }) {
   const scope = scopeWords(panel.chains);
   const notes = panel.notes.map(pinnedNote);
+  const footnotes = useId();
   return (
     <ChartCard
       takeaway={panel.heading}
@@ -62,6 +64,7 @@ function WaterfallCard({ panel, state }: { panel: WaterfallPanel; state: Dataset
       frameWord={state.frameWord}
       summary={panel.summary}
       notes={notes}
+      footnotes={footnotes}
       plotIsContent
       table={{
         caption: `From headline volume to clean volume, ${scope}, Day 0 through each chain's newest day`,
@@ -76,7 +79,7 @@ function WaterfallCard({ panel, state }: { panel: WaterfallPanel; state: Dataset
         />
       }
     >
-      <WaterfallChart waterfall={panel.waterfall} notes={notes} />
+      <WaterfallChart waterfall={panel.waterfall} notes={notes} footnotes={footnotes} />
     </ChartCard>
   );
 }

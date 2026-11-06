@@ -198,6 +198,6 @@ The changes are listed in [the plan's Maintainer review](plans/2026-11-04-002-da
 
 The changes are listed in [the plan's Third round](plans/2026-11-04-002-dashboard-refurbish-plan.md#third-round).
 
-- **The table would have hidden the caveats.** With each badge moved onto the legend row or chart row it qualifies, opening a card's table took the chart, and so the exchange-floor badge, out of view. The browser check that the floor note stays beside the exchange rows caught it. The title now shows the chart's badges while the table does.
+- **Badges by what they qualify, then footnotes.** With each badge moved onto the legend row or chart row it qualifies, opening a card's table took the chart, and so the exchange-floor badge, out of view, which the browser check on the exchange rows caught. The maintainer then replaced the badges with footnotes, whose list stays one tap away while the table shows.
 - **A footer check read the tooltip with its link.** The check that a non-passing footer never says "Reconciled" read the status's whole text, where the link and its tooltip ran together with no space, so the word boundary could miss a planted "Reconciled". It now reads each element's words apart, with the tooltips left out.
 - **The clock swap wasn't run on real data this round.** The real dataset was more than 36 hours old by the time of the run, so the build was already stale and had nothing to swap. The passing state was checked by `verify-output` on a build with its clock set to 5 Nov, and in screenshots.

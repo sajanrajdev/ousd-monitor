@@ -126,6 +126,11 @@ function listen(root: Document): () => void {
   const onClick = (event: MouseEvent) => {
     clearTimeout(openTimer);
     const target = event.target instanceof Element ? event.target : null;
+    // A footnote marker opens its card's list before the browser goes to the footnote.
+    const ref = target?.closest<HTMLAnchorElement>("a[data-fn-ref]");
+    const footnote = ref && root.getElementById(ref.hash.slice(1));
+    const list = footnote?.closest("details");
+    if (list) list.open = true;
     const tip = tipAt(target);
     const trigger = tip && target?.closest(".tip__trigger");
     if (tip && trigger && trigger.tagName === "BUTTON") {

@@ -82,7 +82,7 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     const end = main.indexOf('<div id="', start);
     return `${main.slice(0, start)}${change(main.slice(start, end))}${main.slice(end)}`;
   };
-  // A change to the badges in the legend, past the title's copy of them for while the table shows.
+  // A change from the legend on, which takes in the card's footnotes after its as-of line.
   const inLegend = (change: (legend: string) => string) =>
     inCard((html) => {
       const at = html.indexOf("data-supply-legend");
@@ -299,80 +299,86 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     );
   });
 
-  it("refuses a caveat lost, hidden, reworded, without its badge, or for another chain", () => {
-    const lost = inLegend((html) => html.replace(/<li data-note="exchange-floor">.*?<\/li>/, ""));
+  it("refuses a caveat lost, out of reach, reworded, without its marker, or for another chain", () => {
+    const lost = inLegend((html) =>
+      html.replace(/<li id="[^"]*" data-note="exchange-floor">.*?<\/li>/, ""),
+    );
+    expect(lost).not.toBe(main);
     expect(cardFaults(lost)).toEqual(
-      expect.arrayContaining([expect.stringContaining("its notes are")]),
+      expect.arrayContaining([expect.stringContaining("its footnotes are")]),
     );
-    const folded = inLegend((html) =>
-      html.replace(
-        /(<li data-note="exchange-floor">)(.*?)(<\/li>)/,
-        "$1<details><summary>More</summary>$2</details>$3",
-      ),
+    // A list with no "Footnotes" toggle can't be opened by keyboard or without a script.
+    const unreachable = inCard((html) =>
+      html.replace("<summary>Footnotes</summary>", "<summary>More</summary>"),
     );
-    expect(cardFaults(folded)).toContain(
-      `${CARD}: its exchange-floor note doesn't keep its words in its badge's tooltip`,
-    );
+    expect(unreachable).not.toBe(main);
+    expect(cardFaults(unreachable)).toContain(`${CARD}: it has no footnotes toggle with its list`);
     const reworded = inLegend((html) =>
       html.replace("Exchange venues are a floor.", "Exchange venues are about right."),
     );
     expect(cardFaults(reworded)).toContain(
-      `${CARD}: its exchange-floor note doesn't keep its words in its badge's tooltip`,
+      `${CARD}: its exchange-floor footnote doesn't keep its words`,
     );
-    // Words with no badge to open them can't be reached, which is the caveat lost.
-    const unbadged = inLegend((html) =>
-      html.replace(/(<li data-note="placed">.*?)<button[^>]*>\d+<\/button>/, "$1"),
+    // A footnote with no marker to point at it is the caveat lost from what it qualifies.
+    const unmarked = inLegend((html) =>
+      html.replace(
+        /(data-segment="placed_supply"><span data-segment-label>[^<]*<\/span>)<sup class="fn-refs" data-fn-refs>.*?<\/sup>/,
+        "$1",
+      ),
     );
-    expect(unbadged).not.toBe(main);
-    expect(cardFaults(unbadged)).toContain(
-      `${CARD}: its placed note doesn't keep its words in its badge's tooltip`,
+    expect(unmarked).not.toBe(main);
+    expect(cardFaults(unmarked)).toEqual(
+      expect.arrayContaining([expect.stringContaining("its placed footnote hasn't one marker")]),
     );
-    // And the note in full, in the same tooltip, keeps its words too.
+    // And the note in full, in the same footnote, keeps its words too.
     const full = inLegend((html) =>
-      html.replace(/(<li data-note="placed">.*?<span data-note-full>)[^<]*/, "$1Placed is fine."),
+      html.replace(
+        /(<li id="[^"]*" data-note="placed">.*?<span data-note-full>)[^<]*/,
+        "$1Placed is fine.",
+      ),
     );
     expect(full).not.toBe(main);
-    expect(cardFaults(full)).toContain(`${CARD}: its placed note has lost its words in full`);
+    expect(cardFaults(full)).toContain(`${CARD}: its placed footnote has lost its words in full`);
     const other = inLegend((html) =>
       html.replace(
-        '<li data-note="placed">',
-        '<li data-note="exchange-coverage" data-chain="base"><button class="tip__badge">9</button></li><li data-note="placed">',
+        /<li id="[^"]*" data-note="placed">/,
+        '<li id="other" data-note="exchange-coverage" data-chain="base">Base.</li>$&',
       ),
     );
     expect(cardFaults(other)).toEqual(
-      expect.arrayContaining([expect.stringContaining("its notes are")]),
+      expect.arrayContaining([expect.stringContaining("its footnotes are")]),
     );
   });
 
-  it("refuses a badge with the wrong number, one moved off what it qualifies, or a title that loses its copy", () => {
-    const note = inCard((html) =>
-      html.replace(/(class="tip__trigger tip__badge"[^>]*>)1</, "$17<"),
-    );
+  it("refuses a marker with the wrong number, one moved off what it qualifies, or a second set", () => {
+    const note = inCard((html) => html.replace(/(data-fn-ref="1"[^>]*>)1</, "$17<"));
     expect(note).not.toBe(main);
     expect(cardFaults(note)).toEqual(
-      expect.arrayContaining([expect.stringContaining("has the wrong number")]),
+      expect.arrayContaining([expect.stringContaining("hasn't one marker numbered 1")]),
     );
-    // The placed badge moved to the DEX row, which keeps the order but points at another row.
+    // The placed marker moved to the DEX row, which keeps the order but points at another row.
     const moved = inLegend((html) => {
-      const badge =
-        /(data-segment="placed_supply"><span data-segment-label>[^<]*<\/span>)(<ol data-note-badges>.*?<\/ol>)/.exec(
+      const marker =
+        /(data-segment="placed_supply"><span data-segment-label>[^<]*<\/span>)(<sup class="fn-refs" data-fn-refs>.*?<\/sup>)/.exec(
           html,
         )!;
       return html
-        .replace(badge[0], badge[1])
+        .replace(marker[0], marker[1])
         .replace(
           /(data-segment="venue_dex"><span data-segment-label>[^<]*<\/span>)/,
-          `$1${badge[2]}`,
+          `$1${marker[2]}`,
         );
     });
     expect(moved).not.toBe(main);
-    expect(cardFaults(moved)).toContain(`${CARD}: its placed note's badge isn't on placed_supply`);
-    const uncopied = inCard((html) =>
-      html.replace(/<ol data-note-badges data-note-copy>.*?<\/ol>/, ""),
-    );
-    expect(uncopied).not.toBe(main);
-    expect(cardFaults(uncopied)).toContain(
-      `${CARD}: its title doesn't keep its chart's badges for while the table shows`,
+    expect(cardFaults(moved)).toContain(`${CARD}: its placed marker isn't on placed_supply`);
+    // The title's marker again at the foot of the card is a second set of markers.
+    const twice = inCard((html) => {
+      const marks = /<h2>[^<]*<\/h2>(<sup class="fn-refs" data-fn-refs>.*?<\/sup>)/.exec(html)![1];
+      return html.replace('<p class="chart-card__meta">', `<p>${marks}</p>$&`);
+    });
+    expect(twice).not.toBe(main);
+    expect(cardFaults(twice)).toEqual(
+      expect.arrayContaining([expect.stringContaining("footnote markers for")]),
     );
   });
 
@@ -420,7 +426,9 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     );
     const note = inPanel("tempo", (html) => html.replace(">Starts ", ">Began "), id);
     expect(faults(note, "tempo")).toEqual(
-      expect.arrayContaining([expect.stringContaining("series-start note doesn't keep its words")]),
+      expect.arrayContaining([
+        expect.stringContaining("series-start footnote doesn't keep its words"),
+      ]),
     );
     const full = inPanel(
       "tempo",

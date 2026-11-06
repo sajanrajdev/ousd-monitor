@@ -102,16 +102,20 @@ describe("touch targets", () => {
     expect(rule[1]).not.toMatch(/(^|,)\s*(main\s+)?p\s+a\b/);
   });
 
-  it.each([".tip__icon", ".data-toggle > summary"])("gives %s at least 24px", (selector) => {
-    const escaped = selector.replace(/[.>]/g, "\\$&");
-    const rule = new RegExp(`${escaped} \\{([^}]*)\\}`).exec(css)!;
-    expect(rule).not.toBeNull();
-    const sizes = [...rule[1].matchAll(/(?:min-)?height:\s*([\d.]+)rem/g)].map((match) =>
-      Number(match[1]),
-    );
-    expect(sizes.length).toBeGreaterThan(0);
-    for (const size of sizes) expect(size).toBeGreaterThanOrEqual(1.5);
-  });
+  it.each([".tip__icon", ".data-toggle > summary", ".footnotes > summary"])(
+    "gives %s at least 24px",
+    (selector) => {
+      const escaped = selector.replace(/[.>]/g, "\\$&");
+      // The rule that names it on its own, alone or in a list of selectors.
+      const rule = new RegExp(`(?:^|,)\\s*${escaped}\\s*(?:,[^{]*)?\\{([^}]*)\\}`, "m").exec(css)!;
+      expect(rule).not.toBeNull();
+      const sizes = [...rule[1].matchAll(/(?:min-)?height:\s*([\d.]+)rem/g)].map((match) =>
+        Number(match[1]),
+      );
+      expect(sizes.length).toBeGreaterThan(0);
+      for (const size of sizes) expect(size).toBeGreaterThanOrEqual(1.5);
+    },
+  );
 
   it("puts target-link on the header's own links", () => {
     render(<SiteHeader />);

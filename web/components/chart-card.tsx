@@ -3,7 +3,7 @@ import type { FrameWord } from "@/lib/dataset/state";
 import { formatAsOf, type AsOfRange } from "@/lib/format";
 import { DataToggle } from "./data-toggle";
 import { HairlineTable, type HairlineTableProps } from "./hairline-table";
-import { NoteBadges, type PinnedNote } from "./pinned-notes";
+import { Footnotes, NoteMarks, type PinnedNote } from "./pinned-notes";
 import { InfoTip } from "./tooltip";
 
 // Every prop from `takeaway` to `children` is required, so a chart missing its source, time,
@@ -21,9 +21,10 @@ export type ChartCardProps = {
   children: ReactNode;
   // The card's anchor. Under a filter it goes on ChainPanels instead, as a panel repeats its card.
   id?: string;
-  // Caveats, as numbered badges, each with its text as a tooltip. A note about the whole card has its
-  // badge by the title; the view puts each other one's at what it qualifies, with NoteBadges.
+  // Caveats, as footnotes. A note about the whole card has its marker on the title; the view puts
+  // each other one's at what it qualifies, with NoteMarks and `footnotes`, the prefix of their ids.
   notes?: PinnedNote[];
+  footnotes?: string;
   // More for the tooltip, under the summary: the long takeaway or a note in full. Nothing essential.
   detail?: ReactNode;
   // Further tables under the data toggle, after the chart's own.
@@ -57,7 +58,7 @@ type CardFrameProps = Pick<
   | "id"
   | "detail"
   | "level"
-> & { children: ReactNode; notes?: PinnedNote[] };
+> & { children: ReactNode; notes?: PinnedNote[]; footnotes?: string };
 
 function cardAsOf(asOf: string | AsOfRange): { dateTime: string; text: string } {
   const dateTime = typeof asOf === "string" ? asOf : asOf.to;
@@ -82,8 +83,11 @@ function CardFrame({
   level = 2,
   children,
   notes = [],
+  footnotes,
 }: CardFrameProps) {
   const headingId = useId();
+  const ownPrefix = useId();
+  const prefix = footnotes ?? ownPrefix;
   const Heading = level === 3 ? "h3" : "h2";
   const when = cardAsOf(asOf);
   return (
@@ -95,8 +99,7 @@ function CardFrame({
     >
       <div className="chart-card__head explain-head">
         <Heading id={headingId}>{takeaway}</Heading>
-        <NoteBadges notes={notes} />
-        <NoteBadges notes={notes} inTable />
+        <NoteMarks notes={notes} prefix={prefix} />
         <InfoTip label={`About: ${takeaway}`}>
           <p>{summary}</p>
           {detail}
@@ -132,6 +135,7 @@ function CardFrame({
           </>
         ) : null}
       </p>
+      <Footnotes notes={notes} prefix={prefix} />
       <noscript>
         <p className="chart-card__source-note">
           Source: {source} ·{" "}

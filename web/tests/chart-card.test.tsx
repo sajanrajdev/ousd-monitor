@@ -148,30 +148,34 @@ describe("chart card", () => {
     expect(link.className).toContain("target-link");
   });
 
-  it("puts a note about the whole card beside its title, leaves one with a place to the view, and has none when it has none", () => {
+  it("marks a note about the whole card on its title, leaves one with a place to the view, and lists all as footnotes", () => {
     const notes = [
       { kind: "a-caveat", text: "On Tempo, a caveat." },
       { kind: "on-a-row", text: "About one row.", at: "placed" },
     ];
-    const { container, rerender } = render(<ChartCard {...props} notes={notes} />);
-    const badges = container.querySelectorAll("[data-note-badges]:not([data-note-copy])");
-    expect(badges).toHaveLength(1);
-    const [title] = badges;
+    const { container, rerender } = render(<ChartCard {...props} notes={notes} footnotes="card" />);
+    const marks = container.querySelectorAll("[data-fn-refs]");
+    expect(marks).toHaveLength(1);
+    const [title] = marks;
     expect(title.parentElement!.className).toContain("chart-card__head");
     expect(title.previousElementSibling!.tagName).toBe("H2");
-    expect(title.querySelector('[data-note="a-caveat"] .tip__badge')!.textContent).toBe("1");
+    const marker = title.querySelector('a[data-fn-ref][data-note="a-caveat"]')!;
+    expect(marker.textContent).toBe("1");
+    expect(marker.getAttribute("href")).toBe("#card-fn-1");
     expect(title.querySelector('[data-note="on-a-row"]')).toBeNull();
-    // The title keeps a copy of the row's badge, numbered alike, for while the table shows.
-    const copy = container.querySelector(".chart-card__head > [data-note-copy]")!;
-    expect(copy.className).toContain("note-badges--table");
-    expect(copy.querySelector('[data-note="on-a-row"] .tip__badge')!.textContent).toBe("2");
-    expect(copy.querySelector('[data-note="a-caveat"]')).toBeNull();
-    expect(container.querySelector(".chart-card > .note-badges, [data-pinned-notes]")).toBeNull();
+    // The card's one footnote list, after its as-of line, closed, holds every note in order.
+    const footnotes = container.querySelector(".chart-card > details.footnotes")!;
+    expect(footnotes.hasAttribute("open")).toBe(false);
+    expect(footnotes.previousElementSibling!.className).toContain("chart-card__meta");
+    expect(footnotes.querySelector("summary")!.textContent).toBe("Footnotes");
+    const items = [...footnotes.querySelectorAll(".footnotes__list > li")];
+    expect(items.map((item) => item.id)).toEqual(["card-fn-1", "card-fn-2"]);
+    expect(items[1].textContent).toBe("About one row.");
+    expect(container.querySelectorAll("details.footnotes")).toHaveLength(1);
+    expect(container.querySelector(".tip__badge, .note-badges")).toBeNull();
 
-    rerender(<ChartCard {...props} notes={notes.slice(0, 1)} />);
-    expect(container.querySelector("[data-note-copy]")).toBeNull();
     rerender(<ChartCard {...props} />);
-    expect(container.querySelector("[data-note-badges]")).toBeNull();
+    expect(container.querySelector("[data-fn-refs], details.footnotes")).toBeNull();
   });
 
   it("takes an anchor, more for the popover, and further tables under the toggle", () => {

@@ -485,11 +485,15 @@ function checkReconciliationPage(page, document, expected, problems) {
   checkBackLink(page, document, problems);
 }
 
-// Explanations float: a details element on the main page is a data toggle and nothing else, so no
-// popover, accordion or disclosure can push the page down again.
+// Explanations float: a details element on the main page is a data toggle or a card's footnotes,
+// which the maintainer chose to open inside the card, so no popover or accordion can push the page
+// down again.
 function checkNoPushDown(page, document, problems) {
   for (const details of document.querySelectorAll("main details")) {
-    if (!details.classList.contains("data-toggle")) {
+    if (
+      !details.classList.contains("data-toggle") &&
+      !details.matches(".chart-card > .footnotes")
+    ) {
       problems.push(`${page}: an explanation pushes the page down, in a details element`);
     }
   }
@@ -540,33 +544,46 @@ function checkTooltips(page, document, problems) {
 
 const PIN_NUMBER = /^\d+$/;
 
-// A note is its numbered badge, in view, and its words, in the tooltip the badge describes or
-// controls, as the maintainer decided after the whole-page review. No badge in view, or a tooltip
-// that isn't the badge's own, gives no words.
-function noteWords(note) {
-  const badge = note.querySelector(":scope .tip > .tip__badge");
-  if (!badge || !inView(note) || !inView(badge) || !PIN_NUMBER.test(badge.textContent.trim())) {
-    return "";
-  }
-  const id = badge.getAttribute("aria-describedby") ?? badge.getAttribute("aria-controls");
-  const panel = id ? note.ownerDocument.getElementById(id) : null;
-  if (!panel || badge.nextElementSibling !== panel) return "";
-  return panel.querySelector("[data-note-text]")?.textContent ?? "";
+// A card's footnotes: a details element whose summary says "Footnotes", so it opens by keyboard and
+// with JavaScript off, holding a numbered list. Null if it's missing or not like that.
+function footnoteList(card) {
+  const details = card.querySelector(":scope > [data-footnotes]");
+  if (details?.tagName !== "DETAILS") return null;
+  if (plainText(details.querySelector(":scope > summary")) !== "Footnotes") return null;
+  return details.querySelector(":scope > ol");
 }
 
-// The caveats needed to read a number, wherever a unit pins them. Each required instance has its
-// numbered badge in view and keeps its words in the badge's tooltip, read whole so a date or a link
+// A footnote's words, if a marker in view in its card links to it: the maintainer's call after the
+// page reviews, over the rule that a caveat's words stay in view.
+function footnoteWords(item) {
+  const card = item.closest(".chart-card");
+  if (!card || footnoteList(card) !== item.parentElement || !item.id) return "";
+  const marked = [...card.querySelectorAll(`a[data-fn-ref][href="#${item.id}"]`)].some(
+    (marker) => inView(marker) && PIN_NUMBER.test(plainText(marker)),
+  );
+  return marked ? item.textContent : "";
+}
+
+// The caveats needed to read a number, wherever a unit pins them. Each required instance has a
+// marker in view in its card and its words in that card's footnotes, read whole so a date or a link
 // can't split a sentence.
 function checkEssentialNotes(page, document, expected, problems) {
   for (const { kind, chain, text, exact } of expected.essentialNotes) {
-    const selector = `[data-note="${kind}"]${chain ? `[data-chain="${chain}"]` : ""}`;
-    const shown = [...document.querySelectorAll(selector)]
-      .map((note) => noteWords(note).replace(/\s+/g, " "))
+    const selector = `.footnotes__list > li[data-note="${kind}"]${chain ? `[data-chain="${chain}"]` : ""}`;
+    const items = [...document.querySelectorAll(selector)];
+    const shown = items
+      .map((item) => footnoteWords(item).replace(/\s+/g, " "))
       .filter((words) => words.trim());
+    const said = items.map((item) =>
+      (item.querySelector("[data-note-text]")?.textContent ?? "").replace(/\s+/g, " ").trim(),
+    );
     const name = `the ${kind} note${chain ? ` for ${chain}` : ""}`;
     if (shown.length === 0) {
-      problems.push(`${page}: ${name} has no badge in view with its words`);
-    } else if (!shown.some((words) => (exact ? words.trim() === text : words.includes(text)))) {
+      problems.push(`${page}: ${name} has no marker in view and footnote with its words`);
+    } else if (
+      !said.some((words) => (exact ? words === text : words.includes(text))) ||
+      !shown.some((words) => words.includes(text))
+    ) {
       problems.push(`${page}: ${name} doesn't say "${text}"`);
     }
   }
@@ -638,10 +655,12 @@ function checkCards(page, document, problems) {
       }
     }
   }
-  for (const notes of document.querySelectorAll("[data-note-badges]")) {
-    if (notes.closest("details, noscript, .tip__panel")) {
-      problems.push(`${page}: pinned notes inside a details, noscript or tooltip`);
+  for (const notes of document.querySelectorAll("[data-footnotes]")) {
+    if (notes.closest("noscript, .tip__panel") || notes.parentElement.closest("details")) {
+      problems.push(`${page}: footnotes inside a details, noscript or tooltip`);
     }
+    if (notes.hasAttribute("open"))
+      problems.push(`${page}: a card's footnotes are open by default`);
   }
 }
 
@@ -905,60 +924,70 @@ function checkTableRows(where, table, columns, rows, problems) {
   });
 }
 
-// Notes about the whole card come first, by its title, then the rest in their own order, as the
+// Notes about the whole card come first, on its title, then the rest in their own order, as the
 // card numbers them.
 const ordered = (notes) => [
   ...notes.filter((note) => !note.at),
   ...notes.filter((note) => note.at),
 ];
 
-// The notes this panel holds, in order, each whole, and none for another chain. A badge's number is
-// its note's place in that order. A note about the whole card has its badge by the title, and any
-// other has its badge on the legend row, waterfall row or chain it qualifies.
+// The notes this panel holds, in order, each whole, and none for another chain, as its footnotes. A
+// footnote's number is its note's place in that order, and its markers run in reading order. A note
+// about the whole card has its marker on the title, and any other on the legend row, waterfall row
+// or chain it qualifies. One footnote list, and one set of markers.
 function checkPanelNotes(where, panel, notes, problems) {
   const want = ordered(notes);
-  const shown = [
-    ...panel.querySelectorAll("[data-note-badges]:not([data-note-copy]) > [data-note]"),
-  ];
-  const said = shown.map((note) => `${note.dataset.note}:${note.dataset.chain ?? ""}`);
-  const wanted = want.map(({ kind, chain }) => `${kind}:${chain ?? ""}`);
-  if (said.join() !== wanted.join()) {
-    problems.push(`${where}: its notes are ${said.join()}, not ${wanted.join()}`);
+  const cards = panel.matches(".chart-card") ? [panel] : [...panel.querySelectorAll(".chart-card")];
+  const list = cards.length === 1 ? footnoteList(cards[0]) : null;
+  if (want.length === 0) {
+    if (panel.querySelector("[data-footnotes], a[data-fn-ref]")) {
+      problems.push(`${where}: it has footnotes but no notes`);
+    }
     return;
   }
-  want.forEach(({ kind, words, tip, at }, index) => {
-    if (noteWords(shown[index]).replace(/\s+/g, " ").trim() !== words) {
-      problems.push(`${where}: its ${kind} note doesn't keep its words in its badge's tooltip`);
+  if (!list) {
+    problems.push(`${where}: it has no footnotes toggle with its list`);
+    return;
+  }
+  const items = [...list.children];
+  const said = items.map((item) => `${item.dataset.note}:${item.dataset.chain ?? ""}`);
+  const wanted = want.map(({ kind, chain }) => `${kind}:${chain ?? ""}`);
+  if (said.join() !== wanted.join()) {
+    problems.push(`${where}: its footnotes are ${said.join()}, not ${wanted.join()}`);
+    return;
+  }
+  const markers = [...panel.querySelectorAll("a[data-fn-ref]")];
+  const numbers = markers.map((marker) => Number(plainText(marker)));
+  if (numbers.some((number, index) => index > 0 && number <= numbers[index - 1])) {
+    problems.push(`${where}: its footnote markers aren't in reading order: ${numbers.join()}`);
+  }
+  want.forEach(({ kind, chain, words, tip, at }, index) => {
+    const item = items[index];
+    if (plainText(item.querySelector("[data-note-text]")).replace(/\s+/g, " ") !== words) {
+      problems.push(`${where}: its ${kind} footnote doesn't keep its words`);
     }
-    // The note in full follows its words in the same tooltip.
-    const full = shown[index].querySelector(".tip__panel [data-note-full]");
+    const full = item.querySelector("[data-note-full]");
     if (tip && !full?.textContent.replace(/\s+/g, " ").includes(tip)) {
-      problems.push(`${where}: its ${kind} note has lost its words in full`);
+      problems.push(`${where}: its ${kind} footnote has lost its words in full`);
     }
-    if (plainText(shown[index].querySelector(".tip__badge")) !== String(index + 1)) {
-      problems.push(`${where}: its ${kind} note has the wrong number`);
+    const own = markers.filter((marker) => marker.getAttribute("href") === `#${item.id}`);
+    if (own.length !== 1 || plainText(own[0]) !== String(index + 1) || !item.id) {
+      problems.push(`${where}: its ${kind} footnote hasn't one marker numbered ${index + 1}`);
+      return;
     }
+    if (own[0].dataset.note !== kind || (own[0].dataset.chain ?? "") !== (chain ?? "")) {
+      problems.push(`${where}: its ${kind} marker links to another note's footnote`);
+    }
+    if (!inView(own[0])) problems.push(`${where}: its ${kind} marker isn't in view`);
     const place = at
-      ? shown[index].closest(
-          `[data-segment="${at}"], [data-step="${at}"], [data-velocity-chain="${at}"]`,
-        )
-      : shown[index].closest(".chart-card__head");
+      ? own[0].closest(`[data-segment="${at}"], [data-step="${at}"], [data-velocity-chain="${at}"]`)
+      : own[0].closest(".chart-card__head");
     if (!place || !panel.contains(place)) {
-      problems.push(`${where}: its ${kind} note's badge isn't on ${at ?? "the card's title"}`);
+      problems.push(`${where}: its ${kind} marker isn't on ${at ?? "the card's title"}`);
     }
   });
-  // The title's copy, for while the table shows, has every badge on the chart or legend, numbered alike.
-  const copy = [
-    ...panel.querySelectorAll(".chart-card__head > [data-note-copy] > [data-note]"),
-  ].map(
-    (note) =>
-      `${note.dataset.note}:${note.dataset.chain ?? ""}=${plainText(note.querySelector(".tip__badge"))}`,
-  );
-  const anchored = want.flatMap(({ kind, chain, at }, index) =>
-    at ? [`${kind}:${chain ?? ""}=${index + 1}`] : [],
-  );
-  if (copy.join() !== anchored.join()) {
-    problems.push(`${where}: its title doesn't keep its chart's badges for while the table shows`);
+  if (markers.length !== want.length) {
+    problems.push(`${where}: it has ${markers.length} footnote markers for ${want.length} notes`);
   }
 }
 
@@ -1062,10 +1091,12 @@ const WALLET_TABLE_COLUMNS = [
 
 // Held to the KPI rows, which the page's own supply code doesn't read, so a fault in that code can't
 // set what this check expects. Wallets are never summed, so a panel over several chains shows no
-// wallet figure outside its tooltip and table, whatever the stats list says.
+// wallet figure outside its tooltip, footnotes and table, whatever the stats list says.
 function checkPanelAgainstKpis(where, panel, want, problems) {
   const shown = panel.cloneNode(true);
-  for (const hidden of shown.querySelectorAll(".data-toggle, .tip__panel, .sr-only, noscript")) {
+  for (const hidden of shown.querySelectorAll(
+    ".data-toggle, .footnotes, .tip__panel, .sr-only, noscript",
+  )) {
     hidden.remove();
   }
   if (want.chains > 1 && /active wallets/i.test(shown.textContent)) {
