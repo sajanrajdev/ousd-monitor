@@ -57,7 +57,7 @@ const row = (container: HTMLElement, value: string) =>
 const series = (container: HTMLElement, value: string) =>
   container.querySelector<HTMLElement>(`#placed-vs-circulating > [data-chain-panel="${value}"]`)!;
 const noteKeys = (panel: HTMLElement) =>
-  [...panel.querySelectorAll("[data-pinned-notes] > [data-note]")].map(
+  [...panel.querySelectorAll("[data-note-badges]:not([data-note-copy]) > [data-note]")].map(
     (note) => `${note.getAttribute("data-note")}:${note.getAttribute("data-chain") ?? ""}`,
   );
 // A note is a numbered badge. Its words, then the note in full, are in the badge's tooltip.
@@ -81,7 +81,9 @@ describe("journey view", () => {
     expect(panels.map((panel) => panel.getAttribute("data-chain-panel"))).toEqual(VALUES);
     for (const each of [supply, ...panels.map((panel) => panel.querySelector(".chart-card")!)]) {
       expect(each.querySelector("h2")!.textContent!.length).toBeGreaterThan(10);
-      expect(each.querySelector(".chart-card__head .tip__panel")!.textContent).toContain("Source:");
+      expect(
+        each.querySelector(".chart-card__head > .tip--info > .tip__panel")!.textContent,
+      ).toContain("Source:");
       expect(each.querySelector(".chart-card__meta time")).toBeTruthy();
       expect(each.querySelector('a[href^="/methodology/#"]')).toBeTruthy();
     }
@@ -215,34 +217,53 @@ describe("journey view", () => {
 
   it("lists every chain's coverage and issuer notes once, on the one card", () => {
     const { container } = render(view().ui);
+    // The card's own note first, by its title, then each segment's, down the legend.
     expect(noteKeys(card(container))).toEqual([
+      "wallets-not-people:",
       "issuer-unlabeled:solana",
       "placed:",
       "exchange-floor:",
       "exchange-coverage:solana",
       "exchange-coverage:tempo",
-      "wallets-not-people:",
     ]);
-    expect(container.querySelectorAll("[data-pinned-notes]")).toHaveLength(1 + VALUES.length);
+    // Each series panel's card has its badge by its title.
+    for (const value of VALUES) {
+      expect(series(container, value).querySelectorAll("[data-note-badges]")).toHaveLength(1);
+    }
   });
 
-  it("badges the issuer note first, and pins nothing on the legend's issuer row", () => {
+  it("badges a note about the whole card by its title, and each segment's note on its legend row", () => {
     const { container } = render(view().ui);
-    expect(card(container).querySelector('[data-segment="issuer_inventory"] .pin')).toBeNull();
-    const note = card(container).querySelector('[data-note="issuer-unlabeled"]')!;
-    expect(note.querySelector(".tip__badge")!.textContent).toBe("1");
-    expect(noteWords(note)).toBe(issuerUnlabeledNote("solana"));
+    const panel = card(container);
+    const head = panel.querySelector(".chart-card__head")!;
+    expect(head.querySelector('[data-note="wallets-not-people"] .tip__badge')!.textContent).toBe(
+      "1",
+    );
+    const issuer = panel.querySelector(
+      '[data-segment="issuer_inventory"] [data-note="issuer-unlabeled"]',
+    )!;
+    expect(issuer.querySelector(".tip__badge")!.textContent).toBe("2");
+    expect(noteWords(issuer)).toBe(issuerUnlabeledNote("solana"));
+    expect(
+      panel.querySelector('[data-segment="placed_supply"] [data-note="placed"]'),
+    ).not.toBeNull();
+    const floor = panel.querySelector('[data-segment="venue_exchange"]')!;
+    expect(
+      [...floor.querySelectorAll("[data-note]")].map((note) => note.getAttribute("data-note")),
+    ).toEqual(["exchange-floor", "exchange-coverage", "exchange-coverage"]);
+    // No cluster at the foot of the card.
+    expect(panel.querySelector(".chart-card > .note-badges")).toBeNull();
   });
 
   it("numbers its badges in order, its one set of markers, with no pin in its legend or bars", () => {
     const { container } = render(view().ui);
     const panel = card(container);
-    const numbers = [...panel.querySelectorAll("[data-pinned-notes] > [data-note]")].map(
-      (note) => note.querySelector(".tip__badge")!.textContent,
-    );
+    const numbers = [
+      ...panel.querySelectorAll("[data-note-badges]:not([data-note-copy]) > [data-note]"),
+    ].map((note) => note.querySelector(".tip__badge")!.textContent);
     expect(numbers).toEqual(numbers.map((_, index) => String(index + 1)));
-    expect(panel.querySelector("[data-supply-legend] .pin, .chart-stats .pin")).toBeNull();
-    expect(panel.querySelector("[data-supply-bar] .pin")).toBeNull();
+    expect(panel.querySelector(".pin")).toBeNull();
+    expect(panel.querySelector("[data-supply-bar] [data-note-badges]")).toBeNull();
   });
 
   it("badges the short placed note, with the note in full in its tooltip and the card's", () => {
@@ -251,9 +272,9 @@ describe("journey view", () => {
     const note = panel.querySelector('[data-note="placed"]')!;
     expect(noteWords(note)).toBe(PLACED_PIN);
     expect(noteTip(note)).toBe(PLACED_NOTE);
-    expect(panel.querySelector(".chart-card__head .tip__panel")!.textContent).toContain(
-      PLACED_NOTE,
-    );
+    expect(
+      panel.querySelector(".chart-card__head > .tip--info > .tip__panel")!.textContent,
+    ).toContain(PLACED_NOTE);
     expect(panel.querySelector('a[href="/methodology/#venue-supply"]')).toBeTruthy();
   });
 
@@ -289,7 +310,10 @@ describe("journey view", () => {
   it("shows no wallet total, in any figure", () => {
     const { container } = render(view().ui);
     const panel = card(container);
-    const beside = panel.querySelector(".chart-card__beside")!.textContent;
+    // What's in view beside the bars, leaving out the notes' tooltips.
+    const shown = panel.querySelector(".chart-card__beside")!.cloneNode(true) as HTMLElement;
+    for (const tip of shown.querySelectorAll(".tip__panel")) tip.remove();
+    const beside = shown.textContent;
     expect(beside).not.toMatch(/wallets/i);
     expect(beside).not.toContain("1,200");
     const rows = [...panel.querySelectorAll("[data-supply-row]")].map((r) => r.textContent).join();
@@ -410,9 +434,9 @@ describe("journey view", () => {
       expect(note.closest("details, .tip__panel")).toBeNull();
       expect(noteWords(note)).toBe(seriesStartPin(definitions));
       expect(noteTip(note)).toBe(seriesStartNote(definitions));
-      expect(panel.querySelector(".chart-card__head .tip__panel")!.textContent).toContain(
-        seriesStartNote(definitions),
-      );
+      expect(
+        panel.querySelector(".chart-card__head > .tip--info > .tip__panel")!.textContent,
+      ).toContain(seriesStartNote(definitions));
     }
     expect(seriesStartNote(definitions)).not.toContain("first card");
   });

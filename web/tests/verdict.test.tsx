@@ -130,8 +130,9 @@ describe("the headline's text rule", () => {
     const { container } = renderBlock(dataset, () => {});
     const line = container.querySelector(".verdict-block__as-of")!;
     expect(line.closest("details, .tip__panel")).toBeNull();
-    // A passing build has no trust row at the top, so its stale text says when it was reconciled.
-    expect(dataset.state.headStale).toContain("Last reconciled");
+    // Real data that's only old says so in the footer, so the line says when the data is from.
+    expect(dataset.state.headStale).toMatch(/^Data from .* UTC\.$/);
+    expect(line.textContent).not.toMatch(/Last reconciled|out of date/);
     expect(line.textContent).toContain(dataset.state.headStale);
     expect(line.textContent).toContain(dataset.state.asOfLine.fresh);
   });
@@ -142,13 +143,18 @@ describe("the headline's text rule", () => {
     expect(dataset.state.headStale).toBe(dataset.state.asOfLine.stale);
   });
 
-  it("'How we read this' is a disclosure tooltip, with the reading inside it", () => {
+  it("'How we read this' is a \"?\" button opening a disclosure, with the reading in paragraphs", () => {
     const { container } = renderBlock(real(), () => {});
     const trigger = screen.getByRole("button", { name: "How we read this" });
+    expect(trigger.className).toContain("tip__icon--help");
+    expect(trigger.textContent).toBe("");
+    expect(trigger.closest(".verdict-block__head")).not.toBeNull();
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     const panel = document.getElementById(trigger.getAttribute("aria-controls")!)!;
     expect(panel.classList.contains("tip__panel")).toBe(true);
     expect(panel.querySelector("[data-verdict-group]")).not.toBeNull();
+    expect(panel.tagName).toBe("DIV");
+    expect([...panel.children].every((child) => ["P", "DIV"].includes(child.tagName))).toBe(true);
     expect(container.querySelector("details")).toBeNull();
   });
 });

@@ -67,12 +67,26 @@ describe("the KPI row", () => {
     expect(link.getAttribute("href")).toBe("/methodology/#placed-supply");
   });
 
-  it("repeats no date in its visible line when the as-of line above covers it", () => {
+  it("repeats no date, and lists no chains, when the as-of line covers it and every chain is in", () => {
     const dataset = load();
     const { container } = render(<KpiRow kpis={dataset.summary.kpis} state={dataset.state} />);
-    const line = container.querySelector(".chart-card__meta")!.textContent!;
-    expect(line).toContain("Across Tempo, Ethereum, Base, Solana.");
+    const line = container.querySelector("[data-kpi-scope]")!.textContent!;
+    expect(line).not.toContain("Across");
     expect(line).not.toContain("As of");
+    // The sample keeps its frame word under the row.
+    expect(line).toBe("Sample");
+    const real = { ...dataset.state, frameWord: null };
+    const { container: plain } = render(<KpiRow kpis={dataset.summary.kpis} state={real} />);
+    expect(plain.querySelector("[data-kpi-scope]")).toBeNull();
+  });
+
+  it("names its chains when one is missing", () => {
+    const dataset = load();
+    const kpis = dataset.summary.kpis.filter((row) => row.chain !== "solana");
+    const { container } = render(<KpiRow kpis={kpis} state={dataset.state} />);
+    expect(container.querySelector("[data-kpi-scope]")!.textContent).toContain(
+      "Across Tempo, Ethereum, Base.",
+    );
   });
 
   it("shows its own date if it ever differs from the line above, as the line wouldn't cover it", () => {

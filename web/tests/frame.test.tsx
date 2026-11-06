@@ -244,21 +244,22 @@ describe("a real dataset", () => {
       vi.stubEnv("OUSD_DATASET_DIR", releaseGrade());
       const { container } = render(<Home />);
       expect(container.querySelector('[data-section="trust-strip"]')).toBeNull();
-      // The as-of line carries the reconciled time instead, for the reader's clock.
-      expect(container.querySelector('[data-section="verdict"]')!.textContent).toContain(
-        "Last reconciled",
+      // The line under the headline says when the data is from, and nothing more: the footer
+      // says when the data is old.
+      expect(container.querySelector('[data-section="verdict"]')!.textContent).not.toMatch(
+        /Last reconciled|out of date/,
       );
     });
 
-    it("stays on a real build that's stale, dated and linking to the detail", () => {
+    it("is gone on a real build that's only old, as the footer says so", () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(new Date("2026-11-07T08:00:00Z"));
       vi.stubEnv("OUSD_DATASET_DIR", releaseGrade());
       const { container } = render(<Home />);
-      const strip = container.querySelector('[data-section="trust-strip"]')!;
-      expect(strip.textContent).toContain("Last reconciled");
-      expect(strip.querySelector('a[href="/reconciliation/"]')).not.toBeNull();
-      expect(strip.querySelector("details")).toBeNull();
+      expect(container.querySelector('[data-section="trust-strip"]')).toBeNull();
+      expect(container.querySelector(".verdict-block__as-of")!.textContent).toMatch(
+        /^Data from .* UTC\.$/,
+      );
     });
   });
 });
@@ -339,9 +340,14 @@ describe("the reconciliation page", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Reconciliation");
     const back = screen.getByRole("link", { name: "Back to the dashboard" });
     expect(back.getAttribute("href")).toBe("/");
+    expect(back.textContent).toBe("");
+    // The arrow comes first, then the title, in the large style.
+    const title = screen.getByRole("heading", { level: 1 });
+    expect(back.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(title.className).toContain("page-title");
     const detail = container.querySelector('[data-section="reconciliation"]')!;
-    expect(detail.textContent).toContain("It doesn't verify placed share or velocity.");
-    expect(detail.textContent).toContain("Not reconciled");
+    expect(detail.textContent).toContain("it doesn't check placed share or velocity.");
+    expect(detail.textContent).toContain("Sample figures, not a reconciliation.");
     expect(container.querySelector("details, [data-tip]")).toBeNull();
   });
 });

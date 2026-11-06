@@ -1,3 +1,4 @@
+import { NoteBadges, type PinnedNote } from "@/components/pinned-notes";
 import { UNKNOWN_TEXT } from "@/lib/format";
 import type { VelocityChart as Chart, VelocityMeasure } from "@/lib/chain-views";
 
@@ -18,15 +19,18 @@ export function measureStyle(measure: VelocityMeasure) {
 }
 
 // Hand-built marks, so the chart is in the static HTML. Each bar has a direct label, on a linear scale
-// from zero to the chart's largest figure. Each row names its measure, so there's no legend. The
-// card's notes are its numbered badges, so nothing in the chart is a marker.
-export function VelocityChart({ chart }: { chart: Chart }) {
+// from zero to the chart's largest figure. Each row names its measure, so there's no legend. A
+// chain's note has its badge by the chain's name, so the chart is read by assistive tech.
+export function VelocityChart({ chart, notes = [] }: { chart: Chart; notes?: PinnedNote[] }) {
   if (chart.max === null) return <p className="p-4">{UNKNOWN_TEXT}</p>;
   return (
     <div data-flow className="velocity-chart" data-chart="velocity">
       {chart.groups.map((group) => (
         <div key={group.chain} className="velocity-chart__group" data-velocity-chain={group.chain}>
-          <p className="velocity-chart__name">{group.name}</p>
+          <p className="velocity-chart__name">
+            {group.name}
+            <NoteBadges notes={notes} at={group.chain} />
+          </p>
           {group.bars.map((bar) => (
             <div key={bar.measure} className="velocity-chart__row" data-measure={bar.measure}>
               <span className="velocity-chart__label">{bar.label}</span>

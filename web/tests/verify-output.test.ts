@@ -31,6 +31,7 @@ import {
   plantedRowFlight,
   plantedTip,
   PLANTED_HEADER,
+  PLANTED_BACK,
   plantedBack,
 } from "./planted-first-screen";
 
@@ -40,9 +41,14 @@ const CARD = plantedCard("Sample");
 
 const STALE_NOTE = "Data from 4 Nov. Nothing newer has reached this page.";
 const STALE_TRUST = "Last reconciled 4 Nov. Nothing newer has reached this page.";
+const SHORT_TRUST = "Last reconciled 4 Nov";
 const FRESH_TRUST = "Supply reconciled on all 4 chains as of 4 Nov 2026, 05:30 UTC";
-// A passing build's as-of line, once stale, says when it was reconciled, as no trust row is above.
-const HEAD_STALE = "Data from 4 Nov. Last reconciled 4 Nov. Nothing newer has reached this page.";
+// Real data that's only old: its as-of line says when the data is from, and the footer says it's old.
+const HEAD_STALE = "Data from 4 Nov.";
+const RUN_FRESH = "Last run 4 Nov 2026, 05:30 UTC: every check passed.";
+const RUN_STALE =
+  "Last run 4 Nov 2026, 05:30 UTC: every check passed. Nothing newer has reached this page.";
+const SAMPLE_RUN = "Sample figures, not a reconciliation.";
 
 const sampleExpected = {
   kind: "sample",
@@ -58,7 +64,14 @@ const sampleExpected = {
   passing: false,
   asOfLine: { fresh: null, stale: STALE_NOTE },
   headStale: STALE_NOTE,
-  trustLine: { fresh: "Not reconciled", stale: "Not reconciled" },
+  trustLine: { fresh: "Not reconciled", stale: "Not reconciled" } as {
+    fresh: string | null;
+    stale: string;
+    short?: string;
+  },
+  staleInFooter: false,
+  runLine: { fresh: SAMPLE_RUN, stale: SAMPLE_RUN } as { fresh: string | null; stale: string },
+  checkCount: 7,
   verdict: PLANTED_VERDICT,
   kpiScope: PLANTED_KPI_SCOPE,
   kpiValues: PLANTED_KPI_VALUES,
@@ -74,21 +87,26 @@ const sampleExpected = {
   grid: null,
 };
 
+// Real data after a newer run failed its checks: the trust row and stale note stay at the top.
 const realExpected = {
   ...sampleExpected,
   kind: "real",
   frameWord: null,
-  trustLine: { fresh: null, stale: STALE_TRUST },
+  trustLine: { fresh: null, stale: STALE_TRUST, short: SHORT_TRUST },
+  runLine: { fresh: null, stale: RUN_STALE },
   verdict: { ...PLANTED_VERDICT, textVisible: false },
 };
 
+// A passing build. Once old, it says so in the footer alone.
 const freshRealExpected = {
   ...realExpected,
   freshness: "fresh",
   passing: true,
+  staleInFooter: true,
   asOfLine: { fresh: "Data as of 3 Nov 2026 UTC.", stale: STALE_NOTE },
   headStale: HEAD_STALE,
-  trustLine: { fresh: FRESH_TRUST, stale: STALE_TRUST },
+  trustLine: { fresh: FRESH_TRUST, stale: STALE_TRUST, short: SHORT_TRUST },
+  runLine: { fresh: RUN_FRESH, stale: RUN_STALE },
 };
 
 const REPORTS = '<a href="https://example.com/r" rel="noopener noreferrer">Reports</a>';
@@ -126,19 +144,30 @@ function reconciliationLike(methodology: string): string {
   const frame = /data-frame="(\w+)"/.exec(attrs)?.[1];
   const line = attrs.includes('data-dataset-kind="real"')
     ? attrs.includes('data-freshness="fresh"')
-      ? `${FRESH_TRUST} ${STALE_TRUST}`
-      : STALE_TRUST
-    : "Not reconciled";
-  const html = page(
-    plantedReconciliationMain(line),
-    attrs,
-    frame ? `[${frame}] Open USD Monitor` : "Open USD Monitor",
-    frame ? '<meta name="robots" content="noindex, nofollow"/>' : "",
-    footer,
+      ? `${RUN_FRESH} ${RUN_STALE}`
+      : RUN_STALE
+    : SAMPLE_RUN;
+  const html = withStaleNoteOf(
+    methodology,
+    page(
+      plantedReconciliationMain(line),
+      attrs,
+      frame ? `[${frame}] Open USD Monitor` : "Open USD Monitor",
+      frame ? '<meta name="robots" content="noindex, nofollow"/>' : "",
+      footer,
+    ),
   );
   return frame
     ? html
     : html.replace("<aside data-dataset-banner>Sample data. Nothing here is real.</aside>", "");
+}
+
+// A stale note at the top only where the page beside it has one, as real data that's only old has
+// none.
+function withStaleNoteOf(beside: string, html: string): string {
+  return beside.includes("data-stale-note")
+    ? html
+    : html.replace(/<p data-stale-note>.*?<\/p>/, "");
 }
 
 function site(
@@ -174,7 +203,8 @@ const REAL_HEADLINE = plantedHeadline(realExpected.verdict);
 const REAL_REST = `<section data-section="kpi-row">${plantedKpis()}</section>${plantedCard(null)}`;
 const REAL_MAIN = `<main><section data-section="trust-strip">${STALE_TRUST}${PLANTED_TRUST_LINK}</section>
   <section data-section="verdict">${REAL_HEADLINE}<p>${STALE_NOTE}</p></section>${REAL_REST}</main>`;
-// A passing build: no trust row at the top, and its as-of line carries the reconciled time.
+// A passing build: no trust row or stale note at the top, and its as-of line says only when the data
+// is from.
 const FRESH_MAIN = `<main><section data-section="verdict">${REAL_HEADLINE}<p>Data as of 3 Nov 2026 UTC.</p><p>${HEAD_STALE}</p></section>${REAL_REST}</main>`;
 
 function realPage(body: string, footer = REAL_FOOTER) {
@@ -185,7 +215,9 @@ function realPage(body: string, footer = REAL_FOOTER) {
 }
 
 const freshPage = (body: string) =>
-  realPage(body, FRESH_FOOTER).replace('data-freshness="stale"', 'data-freshness="fresh"');
+  realPage(body, FRESH_FOOTER)
+    .replace('data-freshness="stale"', 'data-freshness="fresh"')
+    .replace(/<p data-stale-note>.*?<\/p>/, "");
 
 describe("verifyOutput", () => {
   it("passes a good sample site", () => {
@@ -206,6 +238,29 @@ describe("verifyOutput", () => {
       methodology: freshPage("<main>Methodology</main>"),
     });
     expect(verifyOutput(dir, freshRealExpected)).toEqual([]);
+  });
+
+  it("passes a good real site that was already old when built, saying so in the footer alone", () => {
+    const old = {
+      ...freshRealExpected,
+      freshness: "stale",
+      passing: false,
+      asOfLine: { fresh: null, stale: STALE_NOTE },
+      trustLine: { fresh: null, stale: STALE_TRUST, short: SHORT_TRUST },
+      runLine: { fresh: null, stale: RUN_STALE },
+    };
+    const oldPage = (body: string) => realPage(body).replace(/<p data-stale-note>.*?<\/p>/, "");
+    const main = `<main><section data-section="verdict">${REAL_HEADLINE}<p>${HEAD_STALE}</p></section>${REAL_REST}</main>`;
+    const dir = site({ main: oldPage(main), methodology: oldPage("<main>Methodology</main>") });
+    expect(verifyOutput(dir, old)).toEqual([]);
+    // The footer must show its clock state, in view.
+    const hidden = site({
+      main: oldPage(main).replace("data-stale-status>", 'data-stale-status style="display:none">'),
+      methodology: oldPage("<main>Methodology</main>"),
+    });
+    expect(verifyOutput(hidden, old)).toContain(
+      "index.html: the footer's clock state isn't in view on old data",
+    );
   });
 
   it("fails when a page is missing", () => {
@@ -919,9 +974,9 @@ describe("verifyOutput", () => {
     });
 
     it.each([
-      ["a details", "<details><ol data-pinned-notes><li>A caveat</li></ol></details>"],
-      ["a noscript", "<noscript><ol data-pinned-notes><li>A caveat</li></ol></noscript>"],
-      ["a tooltip", plantedTip("Notes", "<ol data-pinned-notes><li>A caveat</li></ol>")],
+      ["a details", "<details><ol data-note-badges><li>A caveat</li></ol></details>"],
+      ["a noscript", "<noscript><ol data-note-badges><li>A caveat</li></ol></noscript>"],
+      ["a tooltip", plantedTip("Notes", "<ol data-note-badges><li>A caveat</li></ol>")],
     ])("fails on pinned notes inside %s", (_name, html) => {
       expect(verifyOutput(mainWith(html), sampleExpected)).toContain(
         "index.html: pinned notes inside a details, noscript or tooltip",
@@ -929,7 +984,7 @@ describe("verifyOutput", () => {
     });
 
     it("passes pinned notes in the open", () => {
-      const html = "<ol data-pinned-notes><li>A caveat</li></ol>";
+      const html = "<ol data-note-badges><li>A caveat</li></ol>";
       expect(verifyOutput(mainWith(html), sampleExpected)).toEqual([]);
     });
   });
@@ -937,10 +992,7 @@ describe("verifyOutput", () => {
 
 describe('"Our reading" and the frame words', () => {
   it("is fine as a group's title in the reading's tooltip, on a framed page", () => {
-    const heading = MAIN.replace(
-      "<span>An estimate.</span>",
-      "<span>An estimate.</span><span>Our reading</span>",
-    );
+    const heading = MAIN.replace("<p>An estimate.</p>", "<p>An estimate.</p><p>Our reading</p>");
     expect(heading).not.toBe(MAIN);
     expect(verifyOutput(site({ main: page(heading) }), sampleExpected)).toEqual([]);
   });
@@ -1029,7 +1081,7 @@ describe("the first screen", () => {
     ],
     [
       "a verdict item lost from the tooltip",
-      change("<span>An estimate.</span>", ""),
+      change("<p>An estimate.</p>", ""),
       "the headline's tooltip has lost a verdict item",
     ],
     [
@@ -1078,12 +1130,12 @@ describe("the first screen", () => {
     ],
     [
       "the KPI row's chains in a details",
-      change("<p>Across Tempo.</p>", inDetails("<p>Across Tempo.</p>")),
+      change("<p data-kpi-scope>Across Tempo.</p>", inDetails("<p>Across Tempo.</p>")),
       "the KPI row doesn't say which chains it covers",
     ],
     [
       "the KPI row's chains in a tooltip",
-      change("<p>Across Tempo.</p>", `<p>${inTooltip("Across Tempo.")}</p>`),
+      change("<p data-kpi-scope>Across Tempo.</p>", `<p>${inTooltip("Across Tempo.")}</p>`),
       "the KPI row doesn't say which chains it covers",
     ],
     [
@@ -1121,7 +1173,7 @@ describe("the first screen", () => {
     [
       "the trust row gone on a build that didn't pass",
       (html: string) => html.replace(/<section data-section="trust-strip">[\s\S]*?<\/section>/, ""),
-      "the trust row isn't at the top on a build that didn't pass",
+      "the trust row isn't at the top on sample, preview or a failed run",
     ],
   ])("fails on %s", (_name, mutate, problem) => {
     const problems = verifyOutput(site({ main: mutate(page(MAIN)) }), sampleExpected);
@@ -1340,25 +1392,46 @@ describe("freshness in the output", () => {
     expect(verifyOutput(dir, realExpected)).toEqual([]);
   });
 
-  it("fails when a passing build keeps the trust row at the top", () => {
+  it("fails when a passing build keeps the trust row or the stale note at the top", () => {
     const back = FRESH_MAIN.replace(
       "<main>",
       `<main><section data-section="trust-strip">${FRESH_TRUST}${PLANTED_TRUST_LINK}</section>`,
     );
     const dir = site({ main: freshPage(back), methodology: freshPage("<main>M</main>") });
     expect(verifyOutput(dir, freshRealExpected)).toContain(
-      "index.html: a build that passed still has the trust row at the top",
+      "index.html: real data that's only old has the trust row at the top",
+    );
+    const noted = site({
+      main: freshPage(FRESH_MAIN).replace(
+        "</header>",
+        `</header><p data-stale-note>${STALE_NOTE}</p>`,
+      ),
+      methodology: freshPage("<main>M</main>"),
+    });
+    expect(verifyOutput(noted, freshRealExpected)).toContain(
+      "index.html: a stale note is at the top of real data",
     );
   });
 
-  it("fails when a passing build's as-of line can't say when it was last reconciled", () => {
-    const dir = site({
-      main: freshPage(FRESH_MAIN.replace(HEAD_STALE, STALE_NOTE)),
-      methodology: freshPage("<main>M</main>"),
-    });
-    expect(verifyOutput(dir, freshRealExpected)).toContain(
+  it("fails when a passing build's as-of line loses when the data is from, or says it's old", () => {
+    const check = (main: string) =>
+      verifyOutput(
+        site({ main: freshPage(main), methodology: freshPage("<main>M</main>") }),
+        freshRealExpected,
+      );
+    expect(check(FRESH_MAIN.replace(`<p>${HEAD_STALE}</p>`, "<p>Data.</p>"))).toContain(
       "index.html: the verdict block has no stale text",
     );
+    expect(
+      check(
+        FRESH_MAIN.replace(`<p>${HEAD_STALE}</p>`, `<p>${HEAD_STALE} Last reconciled 4 Nov.</p>`),
+      ),
+    ).toContain("index.html: the line under the headline says more than when the data is from");
+    expect(
+      check(
+        FRESH_MAIN.replace(`<p>${HEAD_STALE}</p>`, `<p>${HEAD_STALE} It may be out of date.</p>`),
+      ),
+    ).toContain("index.html: the line under the headline says more than when the data is from");
   });
 
   it("fails when a fresh page drops its fresh as-of text", () => {
@@ -1449,14 +1522,30 @@ describe("the footer's reconciliation status", () => {
   });
 
   it("fails on the word alone, swapped out or unmarked, on a build that didn't pass", () => {
-    const swappedOut = SAMPLE_FOOTER.replace(
-      '<span class="freshness-text__stale">',
-      '<span class="freshness-text__stale">Reconciled ',
+    const unmarked = SAMPLE_FOOTER.replace(
+      '<span aria-hidden="true">○</span>',
+      '<span aria-hidden="true">○</span> Reconciled ',
     );
+    expect(unmarked).not.toBe(SAMPLE_FOOTER);
     expect(
       verifyOutput(
-        site({ main: page(MAIN, undefined, undefined, undefined, swappedOut) }),
+        site({ main: page(MAIN, undefined, undefined, undefined, unmarked) }),
         sampleExpected,
+      ),
+    ).toContain(`index.html: ${PROBLEM}`);
+    // On old real data, swapped in where the clock state is.
+    const swappedOut = REAL_FOOTER.replace(
+      '<span class="freshness-text__stale">',
+      '<span class="freshness-text__stale"><span data-reconciled>Reconciled</span> ',
+    );
+    expect(swappedOut).not.toBe(REAL_FOOTER);
+    expect(
+      verifyOutput(
+        site({
+          main: realPage(REAL_MAIN, swappedOut),
+          methodology: realPage("<main>M</main>", swappedOut),
+        }),
+        realExpected,
       ),
     ).toContain(`index.html: ${PROBLEM}`);
   });
@@ -1476,9 +1565,14 @@ describe("the footer's reconciliation status", () => {
     expect(check(FRESH_FOOTER.replace(FRESH_TRUST, "Fine."))).toContain(
       'index.html: the footer\'s "Reconciled" has no tooltip with the dated sentence',
     );
-    expect(check(FRESH_FOOTER.replace('<span aria-hidden="true">✓</span> ', ""))).toContain(
-      'index.html: the footer\'s "Reconciled" lost its tick or its word',
-    );
+    expect(
+      check(
+        FRESH_FOOTER.replace(
+          '<svg aria-hidden="true"><path d="M0 0"></path></svg>Reconciled',
+          "Reconciled",
+        ),
+      ),
+    ).toContain('index.html: the footer\'s "Reconciled" lost its tick or its word');
     expect(check(FRESH_FOOTER.replaceAll('href="/reconciliation/"', 'href="/"'))).toEqual(
       expect.arrayContaining([
         "index.html: the footer's status doesn't link to the reconciliation page",
@@ -1491,7 +1585,33 @@ describe("the footer's reconciliation status", () => {
           "</span></p>",
         ),
       ),
-    ).toContain("index.html: the footer's status has no stale text to swap to");
+    ).toContain("index.html: the footer has no clock state to show once the data is old");
+  });
+
+  it("passes the clock state on old real data, and fails when it isn't a clock, its day or its tooltip", () => {
+    const check = (footer: string) =>
+      verifyOutput(
+        site({
+          main: realPage(REAL_MAIN, footer),
+          methodology: realPage("<main>M</main>", footer),
+        }),
+        realExpected,
+      );
+    expect(check(REAL_FOOTER)).toEqual([]);
+    const CLOCK = '<circle r="1"></circle>';
+    expect(REAL_FOOTER).toContain(CLOCK);
+    expect(check(REAL_FOOTER.replace(CLOCK, ""))).toContain(
+      `index.html: the footer's clock state isn't a clock and "${SHORT_TRUST}"`,
+    );
+    expect(check(REAL_FOOTER.replace(`>${SHORT_TRUST}</a>`, ">Reconciled</a>"))).toContain(
+      `index.html: the footer's clock state isn't a clock and "${SHORT_TRUST}"`,
+    );
+    expect(check(REAL_FOOTER.replace(`>${STALE_TRUST}</span>`, ">Old.</span>"))).toContain(
+      "index.html: the footer's clock state has no tooltip with the dated sentence",
+    );
+    expect(
+      check(REAL_FOOTER.replace("data-stale-status>", 'data-stale-status style="display:none">')),
+    ).toContain("index.html: the footer's clock state isn't in view on old data");
   });
 
   it("fails with no status in the footer, and with the wrong state's words", () => {
@@ -1518,7 +1638,7 @@ describe("the footer's reconciliation status", () => {
 describe("the reconciliation page", () => {
   const check = (main: string) =>
     verifyOutput(site({ reconciliation: page(main) }), sampleExpected);
-  const DETAIL = plantedReconciliationMain("Not reconciled");
+  const DETAIL = plantedReconciliationMain(SAMPLE_RUN);
 
   it("passes the detail with its state, caveat, link, table and a way back", () => {
     expect(check(DETAIL)).toEqual([]);
@@ -1543,13 +1663,17 @@ describe("the reconciliation page", () => {
     ],
     [
       "the state lost",
-      (html: string) => html.replace('<p class="trust-strip__status">Not reconciled</p>', ""),
+      (html: string) => html.replace(`<p data-run-line>${SAMPLE_RUN}</p>`, ""),
       "the detail doesn't state the reconciliation's state",
     ],
     [
+      "a check lost from the list",
+      (html: string) => html.replace(/<div class="check-list__row">.*?<\/div>/, ""),
+      "the detail doesn't list every check with its result",
+    ],
+    [
       "the definition link lost",
-      (html: string) =>
-        html.replace('<a href="/methodology/#reconciliation">What this covers</a>', ""),
+      (html: string) => html.replace('<a href="/methodology/#reconciliation">How it works</a>', ""),
       "the detail has no definition link",
     ],
     [
@@ -1559,13 +1683,18 @@ describe("the reconciliation page", () => {
     ],
     [
       "the way back lost",
-      (html: string) => html.replace('<p><a href="/">Back to the dashboard</a></p>', ""),
+      (html: string) => html.replace(PLANTED_BACK, ""),
       'no "Back to the dashboard" link to /',
     ],
     [
       "the way back pointing elsewhere",
-      (html: string) => html.replace('<a href="/">Back', '<a href="/methodology">Back'),
+      (html: string) => html.replace('<a href="/" aria-label', '<a href="/methodology" aria-label'),
       'no "Back to the dashboard" link to /',
+    ],
+    [
+      "the way back under the title",
+      (html: string) => html.replace(PLANTED_BACK, "").replace("</h1>", `</h1>${PLANTED_BACK}`),
+      "the way back isn't above the page's title",
     ],
   ])("fails with %s", (_name, change, problem) => {
     const changed = change(DETAIL);

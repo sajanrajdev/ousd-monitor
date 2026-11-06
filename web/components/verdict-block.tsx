@@ -2,7 +2,7 @@ import type { DatasetState, KpiRow, Verdict } from "@/lib/dataset";
 import { definitionHref } from "@/lib/definitions";
 import { verdictGroups, verdictSentence, verdictTextVisible } from "@/lib/verdict";
 import { FreshnessText } from "./freshness";
-import { TextTip } from "./tooltip";
+import { InfoTip } from "./tooltip";
 
 export type VerdictBlockProps = {
   verdict: Verdict;
@@ -14,46 +14,47 @@ function VerdictText({ verdict }: { verdict: Verdict }) {
   return <span data-verdict-text>{verdict.text}</span>;
 }
 
-// Phrasing content only, as the tooltip's panel is a span.
+// Paragraphs, in the tooltip's panel: the verdict's text if it isn't in view, each group under its
+// title, and the link to how the reading is made.
 function Reading({ verdict, state }: { verdict: Verdict; state: DatasetState }) {
   const groups = verdictGroups(verdict, state.frameWord);
   return (
     <>
       {verdictTextVisible(verdict, state) ? null : (
-        <span className="block">
+        <p>
           <VerdictText verdict={verdict} />
-        </span>
+        </p>
       )}
       {groups.map((group) => (
-        <span key={group.key} className="block" data-verdict-group={group.key}>
-          <span className="block font-semibold">{group.title}</span>
+        <div key={group.key} data-verdict-group={group.key}>
+          <p className="font-semibold">{group.title}</p>
           {group.items.map((item) => (
-            <span key={item} className="block">
-              {item}
-            </span>
+            <p key={item}>{item}</p>
           ))}
-        </span>
+        </div>
       ))}
-      <a href={definitionHref("verdict")} className="target-link underline underline-offset-4">
-        How the reading is made
-      </a>
+      <p>
+        <a href={definitionHref("verdict")} className="target-link underline underline-offset-4">
+          How the reading is made
+        </a>
+      </p>
     </>
   );
 }
 
 // No marker on the headline: the page reads as a reading throughout. A sample or preview still says
-// it isn't a finding, in plain words beside the headline, as that's a guard and not a marker. The
-// as-of line is the page's state line on a dataset that passed at build, so it carries the
-// reconciled time too once the reader's clock says it's old.
+// it isn't a finding, in plain words beside the headline, as that's a guard and not a marker. A "?"
+// beside the headline opens how we read it. The as-of line under it says when the data is from; on
+// real data that's only old, the footer says it's old.
 export function VerdictBlock({ verdict, state }: VerdictBlockProps) {
   const textVisible = verdictTextVisible(verdict, state);
   return (
     <section className="verdict-block" data-section="verdict">
       <div className="verdict-block__head">
         <h1>{verdictSentence(verdict)}</h1>
-        <TextTip text="How we read this" interactive>
+        <InfoTip label="How we read this" icon="help" align="start">
           <Reading verdict={verdict} state={state} />
-        </TextTip>
+        </InfoTip>
         {state.frameWord ? (
           <p className="verdict-block__frame" data-verdict-frame>
             {`${state.frameWord}, not a finding.`}

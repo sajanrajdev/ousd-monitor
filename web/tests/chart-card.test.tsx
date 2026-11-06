@@ -148,17 +148,30 @@ describe("chart card", () => {
     expect(link.className).toContain("target-link");
   });
 
-  it("puts its notes' badges on its last row, after the as-of line, and none when it has none", () => {
-    const notes = [{ kind: "a-caveat", text: "On Tempo, a caveat." }];
+  it("puts a note about the whole card beside its title, leaves one with a place to the view, and has none when it has none", () => {
+    const notes = [
+      { kind: "a-caveat", text: "On Tempo, a caveat." },
+      { kind: "on-a-row", text: "About one row.", at: "placed" },
+    ];
     const { container, rerender } = render(<ChartCard {...props} notes={notes} />);
-    const list = container.querySelector("[data-pinned-notes]")!;
-    expect(list.previousElementSibling!.className).toContain("chart-card__meta");
-    expect(list.closest("details, .chart-card__body")).toBeNull();
-    expect(list.querySelector(".tip__badge")!.textContent).toBe("1");
-    expect(container.querySelector(".chart-card__body .pin")).toBeNull();
+    const badges = container.querySelectorAll("[data-note-badges]:not([data-note-copy])");
+    expect(badges).toHaveLength(1);
+    const [title] = badges;
+    expect(title.parentElement!.className).toContain("chart-card__head");
+    expect(title.previousElementSibling!.tagName).toBe("H2");
+    expect(title.querySelector('[data-note="a-caveat"] .tip__badge')!.textContent).toBe("1");
+    expect(title.querySelector('[data-note="on-a-row"]')).toBeNull();
+    // The title keeps a copy of the row's badge, numbered alike, for while the table shows.
+    const copy = container.querySelector(".chart-card__head > [data-note-copy]")!;
+    expect(copy.className).toContain("note-badges--table");
+    expect(copy.querySelector('[data-note="on-a-row"] .tip__badge')!.textContent).toBe("2");
+    expect(copy.querySelector('[data-note="a-caveat"]')).toBeNull();
+    expect(container.querySelector(".chart-card > .note-badges, [data-pinned-notes]")).toBeNull();
 
+    rerender(<ChartCard {...props} notes={notes.slice(0, 1)} />);
+    expect(container.querySelector("[data-note-copy]")).toBeNull();
     rerender(<ChartCard {...props} />);
-    expect(container.querySelector("[data-pinned-notes]")).toBeNull();
+    expect(container.querySelector("[data-note-badges]")).toBeNull();
   });
 
   it("takes an anchor, more for the popover, and further tables under the toggle", () => {

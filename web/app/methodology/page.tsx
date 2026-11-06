@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import type { ReactNode } from "react";
 import {
   DatasetLimits,
@@ -9,6 +8,7 @@ import {
   SourceLegend,
   UnnamedClusters,
 } from "@/components/methodology-tables";
+import { BackLink } from "@/components/back-link";
 import { ExchangeHoldingsCard, ExchangeListingsCard } from "@/components/exchange-holdings";
 import { getDataset, type Dataset } from "@/lib/dataset";
 import {
@@ -86,12 +86,8 @@ export default function Methodology() {
   return (
     <main id="main-content" className="page-main">
       <div className="max-w-5xl">
-        <p className="mb-4">
-          <Link href="/" className="target-link underline underline-offset-4" data-back-link>
-            Back to the dashboard
-          </Link>
-        </p>
-        <h1 style={{ fontSize: "var(--text-display)" }}>Methodology</h1>
+        <BackLink />
+        <h1 className="page-title">Methodology</h1>
         <div className="mt-6">
           <Contents items={sectionList(chunks)} />
         </div>

@@ -16,9 +16,9 @@ import {
 // times, which the heap of a file with hundreds of tests can't also hold. For the same reason they get
 // longer than the default, as a slower machine takes seconds over a test with several such pages.
 const WHOLE_PAGE_TIMEOUT_MS = 30_000;
-// The release-grade copy, long past its 36 hours, so its detail page states it as stale.
+// The release-grade copy, long past its 36 hours, so its detail page states its last run as old.
 const RECONCILED_TRUST =
-  "Last reconciled 4 Nov 2026, 05:30 UTC. Nothing newer has reached this page, so it may be out of date.";
+  "Last run 4 Nov 2026, 05:30 UTC: every check passed. Nothing newer has reached this page, so it may be out of date.";
 
 function site({ main, methodology }: { main: string; methodology: string }) {
   const dir = tempDir();
@@ -33,8 +33,6 @@ function site({ main, methodology }: { main: string; methodology: string }) {
 }
 
 describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
-  const STALE =
-    "Data from 4 Nov 2026, 06:00 UTC. Nothing newer has reached this page, so it may be out of date.";
   const TRUST =
     "Last reconciled 4 Nov 2026, 05:30 UTC. Nothing newer has reached this page, so it may be out of date.";
   const location = at(releaseGrade());
@@ -42,8 +40,8 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
   const main = plantedRealMain(expected, TRUST);
   const realPage = (body: string) =>
     `<!doctype html><html data-dataset-kind="real" data-dataset-version="${expected.version}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
-    ${PLANTED_HEADER}<p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
-    ${plantedFooter(false, { fresh: null, stale: TRUST })}</body></html>`;
+    ${PLANTED_HEADER}${plantedFlight([])}${body}
+    ${plantedFooter(false, { fresh: null, stale: TRUST, short: "Last reconciled 4 Nov" })}</body></html>`;
   const check = (body: string, against = expected) =>
     verifyOutput(
       site({ main: realPage(body), methodology: realPage("<main>Fine</main>") }),
@@ -84,6 +82,12 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     const end = main.indexOf('<div id="', start);
     return `${main.slice(0, start)}${change(main.slice(start, end))}${main.slice(end)}`;
   };
+  // A change to the badges in the legend, past the title's copy of them for while the table shows.
+  const inLegend = (change: (legend: string) => string) =>
+    inCard((html) => {
+      const at = html.indexOf("data-supply-legend");
+      return `${html.slice(0, at)}${change(html.slice(at))}`;
+    });
   const cardFaults = (body: string) =>
     check(body).filter((problem: string) => problem.startsWith(CARD));
   const rowFaults = (body: string, value: string) =>
@@ -296,11 +300,11 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
   });
 
   it("refuses a caveat lost, hidden, reworded, without its badge, or for another chain", () => {
-    const lost = inCard((html) => html.replace(/<li data-note="exchange-floor">.*?<\/li>/, ""));
+    const lost = inLegend((html) => html.replace(/<li data-note="exchange-floor">.*?<\/li>/, ""));
     expect(cardFaults(lost)).toEqual(
       expect.arrayContaining([expect.stringContaining("its notes are")]),
     );
-    const folded = inCard((html) =>
+    const folded = inLegend((html) =>
       html.replace(
         /(<li data-note="exchange-floor">)(.*?)(<\/li>)/,
         "$1<details><summary>More</summary>$2</details>$3",
@@ -309,14 +313,14 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     expect(cardFaults(folded)).toContain(
       `${CARD}: its exchange-floor note doesn't keep its words in its badge's tooltip`,
     );
-    const reworded = inCard((html) =>
+    const reworded = inLegend((html) =>
       html.replace("Exchange venues are a floor.", "Exchange venues are about right."),
     );
     expect(cardFaults(reworded)).toContain(
       `${CARD}: its exchange-floor note doesn't keep its words in its badge's tooltip`,
     );
     // Words with no badge to open them can't be reached, which is the caveat lost.
-    const unbadged = inCard((html) =>
+    const unbadged = inLegend((html) =>
       html.replace(/(<li data-note="placed">.*?)<button[^>]*>\d+<\/button>/, "$1"),
     );
     expect(unbadged).not.toBe(main);
@@ -324,12 +328,12 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
       `${CARD}: its placed note doesn't keep its words in its badge's tooltip`,
     );
     // And the note in full, in the same tooltip, keeps its words too.
-    const full = inCard((html) =>
+    const full = inLegend((html) =>
       html.replace(/(<li data-note="placed">.*?<span data-note-full>)[^<]*/, "$1Placed is fine."),
     );
     expect(full).not.toBe(main);
     expect(cardFaults(full)).toContain(`${CARD}: its placed note has lost its words in full`);
-    const other = inCard((html) =>
+    const other = inLegend((html) =>
       html.replace(
         '<li data-note="placed">',
         '<li data-note="exchange-coverage" data-chain="base"><button class="tip__badge">9</button></li><li data-note="placed">',
@@ -340,7 +344,7 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     );
   });
 
-  it("refuses a badge with the wrong number, and a pin put back in the legend", () => {
+  it("refuses a badge with the wrong number, one moved off what it qualifies, or a title that loses its copy", () => {
     const note = inCard((html) =>
       html.replace(/(class="tip__trigger tip__badge"[^>]*>)1</, "$17<"),
     );
@@ -348,17 +352,27 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     expect(cardFaults(note)).toEqual(
       expect.arrayContaining([expect.stringContaining("has the wrong number")]),
     );
-    const pin = inCard((html) =>
-      html.replace(
-        /(data-segment="placed_supply"><span data-segment-label>[^<]*<\/span>)/,
-        '$1<span class="pin">2</span>',
-      ),
+    // The placed badge moved to the DEX row, which keeps the order but points at another row.
+    const moved = inLegend((html) => {
+      const badge =
+        /(data-segment="placed_supply"><span data-segment-label>[^<]*<\/span>)(<ol data-note-badges>.*?<\/ol>)/.exec(
+          html,
+        )!;
+      return html
+        .replace(badge[0], badge[1])
+        .replace(
+          /(data-segment="venue_dex"><span data-segment-label>[^<]*<\/span>)/,
+          `$1${badge[2]}`,
+        );
+    });
+    expect(moved).not.toBe(main);
+    expect(cardFaults(moved)).toContain(`${CARD}: its placed note's badge isn't on placed_supply`);
+    const uncopied = inCard((html) =>
+      html.replace(/<ol data-note-badges data-note-copy>.*?<\/ol>/, ""),
     );
-    expect(pin).not.toBe(main);
-    expect(cardFaults(pin)).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("a pin is in its chart or legend as well as its badges"),
-      ]),
+    expect(uncopied).not.toBe(main);
+    expect(cardFaults(uncopied)).toContain(
+      `${CARD}: its title doesn't keep its chart's badges for while the table shows`,
     );
   });
 

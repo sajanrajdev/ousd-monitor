@@ -12,72 +12,75 @@ export type PinnedNote = {
   // the text, holds a link.
   tip?: ReactNode;
   interactive?: boolean;
+  // What the note qualifies: a legend row's segment, a waterfall row's step or a chain, where the
+  // card puts its badge. With none, it's about the whole card and its badge sits by the title.
+  at?: string;
 };
 
-// A note's number is its place in the list, so it's worked out and never written by hand. Null if a
-// conditional note dropped out.
+// Notes about the whole card come first, as their badges sit by the title, then the rest in their
+// own order, which is the order the card draws what they qualify.
+export function orderedNotes(notes: PinnedNote[]): PinnedNote[] {
+  return [...notes.filter((note) => !note.at), ...notes.filter((note) => note.at)];
+}
+
+// A note's number is its place in that order, so it's worked out and never written by hand. Null if
+// a conditional note dropped out.
 export function pinNumber(
   notes: PinnedNote[],
   kind: PinnedNote["kind"],
   chain?: ChainName,
 ): number | null {
-  const index = notes.findIndex((note) => note.kind === kind && note.chain === chain);
+  const index = orderedNotes(notes).findIndex((note) => note.kind === kind && note.chain === chain);
   return index === -1 ? null : index + 1;
 }
 
-export function PinMark({ number }: { number: number }) {
-  return (
-    <span className="pin" aria-hidden="true">
-      {number}
-    </span>
-  );
-}
-
-// For inside a graphic: the graphic is hidden from assistive tech and out of the tab order, so a pin
-// is never a link or anything focusable. It takes the same notes as the list, so the two can't
-// disagree, and it draws nothing when its note isn't there.
-export function Pin({
+// The numbered badges for what sits at `at`, or for the whole card with no `at`, inline at the end of
+// the row, label or title they qualify. Each opens its note in the shared tooltip, on hover, focus or
+// tap: the short caveat first, then the note in full. A card's badges are its only markers. This is
+// the maintainer's call after the page reviews, over the earlier rule that a caveat's words stay in
+// view. Never in a details or a noscript, which verify-output fails.
+//
+// `inTable` is the card's title copy of the badges that sit on its chart or legend, shown only while
+// its table is, so a caveat stays in view when the chart it qualifies is swapped out.
+export function NoteBadges({
   notes,
-  kind,
-  chain,
+  at,
+  inTable = false,
 }: {
   notes: PinnedNote[];
-  kind: PinnedNote["kind"];
-  chain?: ChainName;
+  at?: string;
+  inTable?: boolean;
 }) {
-  const number = pinNumber(notes, kind, chain);
-  return number === null ? null : <PinMark number={number} />;
-}
-
-// Numbered badges on the card's last row, one per note, and the card's only markers. Each opens its
-// note in the shared tooltip, on hover, focus or tap: the short caveat first, then the note in full.
-// This is the maintainer's call after the whole-page review, over the earlier rule that a caveat's
-// words stay in view. Never in a details or a noscript, which verify-output fails.
-export function PinnedNotes({ notes }: { notes: PinnedNote[] }) {
-  if (notes.length === 0) return null;
+  const here = orderedNotes(notes).flatMap((note, index) =>
+    (inTable ? note.at !== undefined : note.at === at) ? [{ note, number: index + 1 }] : [],
+  );
+  if (here.length === 0) return null;
   return (
-    <ol className="note-badges" role="list" aria-label="Notes" data-pinned-notes>
-      {notes.map((note, index) => (
-        <li key={`${note.kind}:${note.chain ?? ""}`} data-note={note.kind} data-chain={note.chain}>
+    <span
+      className={inTable ? "note-badges note-badges--table" : "note-badges"}
+      data-note-badges
+      data-at={at}
+      data-note-copy={inTable ? "" : undefined}
+    >
+      {here.map(({ note, number }) => (
+        <span
+          key={`${note.kind}:${note.chain ?? ""}`}
+          className="note-badges__item"
+          data-note={note.kind}
+          data-chain={note.chain}
+        >
           <TextTip
-            text={index + 1}
-            label={`Note ${index + 1}`}
+            text={number}
+            label={`Note ${number}`}
             badge
             interactive={note.interactive}
             align="end"
-            above
           >
-            <span className="block font-semibold" data-note-text>
-              {note.text}
-            </span>
-            {note.tip ? (
-              <span className="mt-1 block" data-note-full>
-                {note.tip}
-              </span>
-            ) : null}
+            <span data-note-text>{note.text}</span>
+            {note.tip ? <span data-note-full>{note.tip}</span> : null}
           </TextTip>
-        </li>
+        </span>
       ))}
-    </ol>
+    </span>
   );
 }

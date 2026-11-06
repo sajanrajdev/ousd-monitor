@@ -710,6 +710,28 @@ After this round, by `measure-page.mjs` on the same dataset: 359 words at 1440 a
 
 **Decided in building it:** pins inside charts (the waterfall's rows, the velocity chart's chains, the weekly bars' corner) went with the legend's, as the review asked for one set of markers per card. A note names its row or chain in words. The footer's status swaps outright rather than keeping the hidden text's space, as nothing follows it.
 
+### Third round
+
+The maintainer's third review, UI only. It replaces the first two rounds where they differ.
+
+| # | Decision | As built |
+|---|---|---|
+| 1 | "How we read this" as an icon | A "?" button named "How we read this" after the headline's last word, opening the reading in the shared tooltip on hover, focus or tap. At the 320 px reflow width it may take a line of its own |
+| 2 | Every tooltip consistent | One width (20rem, or the viewport less 2rem), padding, type size and line height. Every part of a panel is a paragraph with 0.5rem between them; a note's short words lead in bold and the note in full follows |
+| 3 | No "Across Tempo, Ethereum, Base, Solana." under the KPIs | The line under the row now says only what differs: the chains when one is missing, and the date when it isn't the page's. With nothing to add, there's no line |
+| 4 | Only "Data from {time} UTC." under the headline | On real data that's only old, nothing else: no "Last reconciled" and no out-of-date sentence there, no trust row at the top, and no stale line above any page's title. Sample, preview and a failed newer run keep their banner, trust row and stale note, unchanged |
+| 5 | A compact footer status | Passing: a green tick and "Reconciled". Old: an amber clock (`--meaning-caution`, 5.3:1) and "Last reconciled 5 Nov". The full sentence is the tooltip and both link to `/reconciliation/`. `verify-output` and the browser checks require the clock state, never "Reconciled", on old data, and the tick on a passing build. This supersedes the rule that state text never moves into a tooltip, for real data that's only old |
+| 6 | A concise `/reconciliation/` | Back arrow, title, then one status line ("Last run {time} UTC: every check passed.", with the stale or failed version), one sentence on what a run covers and doesn't check, the table under a short caption, and the checks as a two-column list of check and result |
+| 7 | An arrow back, and the title at the top | On `/methodology/` and `/reconciliation/`, an arrow link named "Back to the dashboard" above the title, both titles in the large page-title style, at the top under the header |
+| 8 | Badges by what they qualify | A note about the whole card has its badge after the card's title; the rest sit inline at the end of the legend row (placed, exchange venues), waterfall row (headline volume, issuer flows, clean large) or chain name (velocity) they qualify. The bottom-right cluster is gone, so each card still has one set of badges, and the chart keeps its width. The checks that every essential caveat has its badge and tooltip words stay, and `verify-output` now also checks where each badge sits |
+
+After this round, by `measure-page.mjs` on the same dataset: 350 words at 1440 and 344 at 390, and 3,165 px at 1440 and 5,362 px at 390, with 58,763 bytes gzipped.
+
+**Decided in building it:**
+- **The waterfall and velocity charts are now read by screen readers**, as lists, since a badge is a button and can't sit inside a graphic hidden from them. Their tables still have the same figures.
+- **The chart's badges come up by the title while the table shows.** The table swaps the chart and legend out, which would have taken the exchange floor and the other row notes out of view with them. The title then shows the same badges, with the same numbers, until the chart is back.
+- **Real data that was already old when built is treated like a passing page the reader's clock finds old.** It has the same clock state and nothing at the top, as the review moved only staleness. A failed newer run still counts as a failed check and keeps its trust row.
+
 ## Maintainer actions
 
 | When | Action |

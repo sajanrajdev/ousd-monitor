@@ -17,9 +17,9 @@ import {
 // times, which the heap of a file with hundreds of tests can't also hold. For the same reason they get
 // longer than the default, as a slower machine takes seconds over a test with several such pages.
 const WHOLE_PAGE_TIMEOUT_MS = 30_000;
-// The release-grade copy, long past its 36 hours, so its detail page states it as stale.
+// The release-grade copy, long past its 36 hours, so its detail page states its last run as old.
 const RECONCILED_TRUST =
-  "Last reconciled 4 Nov 2026, 05:30 UTC. Nothing newer has reached this page, so it may be out of date.";
+  "Last run 4 Nov 2026, 05:30 UTC: every check passed. Nothing newer has reached this page, so it may be out of date.";
 
 function site({ main, methodology }: { main: string; methodology: string }) {
   const dir = tempDir();
@@ -34,16 +34,14 @@ function site({ main, methodology }: { main: string; methodology: string }) {
 }
 
 describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
-  const STALE =
-    "Data from 4 Nov 2026, 06:00 UTC. Nothing newer has reached this page, so it may be out of date.";
   const TRUST =
     "Last reconciled 4 Nov 2026, 05:30 UTC. Nothing newer has reached this page, so it may be out of date.";
   const expected = expectedFromDataset(at(releaseGrade()));
   const main = plantedRealMain(expected, TRUST);
   const page = (body: string) =>
     `<!doctype html><html data-dataset-kind="real" data-dataset-version="${expected.version}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
-    ${PLANTED_HEADER}<p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
-    ${plantedFooter(false, { fresh: null, stale: TRUST })}</body></html>`;
+    ${PLANTED_HEADER}${plantedFlight([])}${body}
+    ${plantedFooter(false, { fresh: null, stale: TRUST, short: "Last reconciled 4 Nov" })}</body></html>`;
   const check = (body: string) =>
     verifyOutput(site({ main: page(body), methodology: page("<main>Fine</main>") }), expected);
   const inPanel = (id: string, value: string, change: (panel: string) => string) => {
@@ -92,18 +90,24 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     expect(faults(figure, W, "base")).toEqual(
       expect.arrayContaining([expect.stringContaining("its rows aren't the dataset's")]),
     );
-    // The badges are the card's one set of markers, so a pin put back on a row fails.
-    const pin = inPanel(W, "tempo", (html) =>
-      html.replace('<li data-step="clean_large"><span>S', '$&<span class="pin">3</span>'),
+    // A badge moved to the next row keeps its order, but points at another row.
+    const moved = inPanel(W, "tempo", (html) =>
+      html.replace(
+        /(<li data-step="clean_large"><span>S)(<ol data-note-badges>.*?<\/ol>)(<\/span>.*?<li data-step="[^"]+"><span>S)/,
+        "$1$3$2",
+      ),
     );
-    expect(faults(pin, W, "tempo")).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("a pin is in its chart or legend as well as its badges"),
-      ]),
+    expect(faults(moved, W, "tempo")).toContain(
+      `index.html: the tempo panel of #${W}: its hops note's badge isn't on clean_large`,
     );
+    // Past the title's copy, on the row itself.
     const lost = inPanel(W, "tempo", (html) =>
-      html.replace(/<li data-note="small-ticket">.*?<\/li>/, ""),
+      html.replace(
+        /(data-step="issuer_flows"><span>S)<ol data-note-badges><li data-note="small-ticket">.*?<\/li><\/ol>/,
+        "$1",
+      ),
     );
+    expect(lost).not.toBe(main);
     expect(faults(lost, W, "tempo")).toEqual(
       expect.arrayContaining([expect.stringContaining("its notes are")]),
     );
@@ -130,13 +134,15 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     expect(faults(bar, K, "solana")).toEqual(
       expect.arrayContaining([expect.stringContaining("its bars aren't the dataset's")]),
     );
-    const pins = inPanel(K, "solana", (html) =>
-      html.replace('<div class="chart-area" aria-hidden="true">', '$&<span class="pin">1</span>'),
-    );
-    expect(faults(pins, K, "solana")).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("a pin is in its chart or legend as well as its badges"),
-      ]),
+    // Its notes are about the whole card, so badges moved into the chart fail.
+    const moved = inPanel(K, "solana", (html) => {
+      const badges = /<ol data-note-badges>.*?<\/ol>/.exec(html)![0];
+      return html
+        .replace(badges, "")
+        .replace('<div class="chart-area" aria-hidden="true">', `$&${badges}`);
+    });
+    expect(faults(moved, K, "solana")).toContain(
+      `index.html: the solana panel of #${K}: its everyday-meaning note's badge isn't on the card's title`,
     );
     const note = inPanel(K, "solana", (html) => html.replace("nothing more.", "or so."));
     expect(faults(note, K, "solana")).toEqual(
@@ -154,10 +160,13 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     expect(check(marker)).toContain("index.html: a marker is back on the main page");
     const hidden = inPanel(K, "solana", (html) =>
       html.replace(
-        /<ol data-pinned-notes>/,
-        "<details><summary>More</summary><ol data-pinned-notes>",
+        /<ol data-note-badges>/,
+        "<details><summary>More</summary><ol data-note-badges>",
       ),
     );
-    expect(check(hidden).length).toBeGreaterThan(0);
+    expect(hidden).not.toBe(main);
+    expect(check(hidden)).toContain(
+      "index.html: pinned notes inside a details, noscript or tooltip",
+    );
   });
 });

@@ -1,6 +1,11 @@
 import type { DatasetState, KpiRow as KpiRowData } from "@/lib/dataset";
 import { allChainKpis } from "@/lib/aggregate";
-import { CHAIN_NAMES, definitionHref, type DefinitionAnchor } from "@/lib/definitions";
+import {
+  CHAIN_NAMES,
+  definitionHref,
+  REQUIRED_CHAINS,
+  type DefinitionAnchor,
+} from "@/lib/definitions";
 import { formatAsOf, formatBps, formatCompact, UNKNOWN_TEXT } from "@/lib/format";
 import { InfoTip } from "./tooltip";
 
@@ -43,15 +48,24 @@ function kpiList(figures: ReturnType<typeof allChainKpis>): Kpi[] {
   ];
 }
 
-// The as-of line above the row covers these figures, so the row repeats a date only if it differs.
-function scopeLine(figures: NonNullable<ReturnType<typeof allChainKpis>>, state: DatasetState) {
-  const across = `Across ${figures.chains.map((chain) => CHAIN_NAMES[chain]).join(", ")}.`;
+// The as-of line above the row covers these figures, and the row covers every chain, so a line under
+// it says only what differs: the chains, if one is missing, and the date, if it isn't the page's.
+function scopeLine(
+  figures: NonNullable<ReturnType<typeof allChainKpis>>,
+  state: DatasetState,
+): string | null {
+  const parts: string[] = [];
+  if (REQUIRED_CHAINS.some((chain) => !figures.chains.includes(chain))) {
+    parts.push(`Across ${figures.chains.map((chain) => CHAIN_NAMES[chain]).join(", ")}.`);
+  }
   const asOf = formatAsOf(figures.asOf);
-  return state.dataAsOf && formatAsOf(state.dataAsOf) === asOf ? across : `${across} As of ${asOf}`;
+  if (!state.dataAsOf || formatAsOf(state.dataAsOf) !== asOf) parts.push(`As of ${asOf}`);
+  return parts.length > 0 ? parts.join(" ") : null;
 }
 
 export function KpiRow({ kpis, state }: KpiRowProps) {
   const figures = allChainKpis(kpis);
+  const line = figures ? scopeLine(figures, state) : UNKNOWN_TEXT;
   return (
     <section className="kpi-row" aria-label="Key figures" data-section="kpi-row">
       <dl className="kpi-row__cells">
@@ -86,15 +100,13 @@ export function KpiRow({ kpis, state }: KpiRowProps) {
           </div>
         ))}
       </dl>
-      <p className="chart-card__meta mt-2">
-        {figures ? scopeLine(figures, state) : UNKNOWN_TEXT}
-        {state.frameWord ? (
-          <>
-            {" "}
-            · <strong data-frame-word>{state.frameWord}</strong>
-          </>
-        ) : null}
-      </p>
+      {line || state.frameWord ? (
+        <p className="chart-card__meta mt-2" data-kpi-scope>
+          {line}
+          {line && state.frameWord ? " · " : null}
+          {state.frameWord ? <strong data-frame-word>{state.frameWord}</strong> : null}
+        </p>
+      ) : null}
     </section>
   );
 }

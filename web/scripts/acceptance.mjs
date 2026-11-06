@@ -235,7 +235,7 @@ const openCount = (page) =>
 const isOpen = (locator) =>
   locator.evaluate((tip) => tip.querySelector(":scope > .tip__panel").checkVisibility());
 // A tooltip and its trigger, on the harness card that no filter hides.
-const HARNESS_TIP = "#harness-plain .chart-card__head [data-tip]";
+const HARNESS_TIP = "#harness-plain .chart-card__head > .tip--info";
 const focusIsOn = (locator) => locator.evaluate((element) => document.activeElement === element);
 
 const chosenOptionDiffers = (page) =>
@@ -380,10 +380,12 @@ async function checkInView(page, where) {
       for (const label of document.querySelectorAll('[data-section="kpi-row"] dt')) {
         need("a KPI label", label);
       }
-      need("the KPI row's chains", document.querySelector('[data-section="kpi-row"] > p'));
+      // The line under the KPI row is there only when it has something to add.
+      const scope = document.querySelector('[data-section="kpi-row"] > p');
+      if (scope) need("the KPI row's line", scope);
     }
     // Every caveat, wherever a unit pins it. A note in a filter panel counts while its panel shows.
-    for (const caveat of document.querySelectorAll("main [data-note]")) {
+    for (const caveat of document.querySelectorAll("main :not([data-note-copy]) > [data-note]")) {
       const panel = caveat.closest("[data-chain-panel]");
       if (!panel || panel.checkVisibility()) need(`the ${caveat.dataset.note} note`, caveat);
     }
@@ -403,8 +405,15 @@ async function checkInView(page, where) {
       const panel = row.closest("[data-chain-panel]");
       if (!panel || panel.checkVisibility()) need("a legend row or a figure beside its bar", row);
     }
+    // Old real data says so in the footer, with its clock; anything else in a note at the top.
     const note = document.querySelector("[data-stale-note] .freshness-text > *");
-    if (!verdict && root.dataset.freshness === "stale") need("the stale note", note);
+    if (root.dataset.freshness === "stale") {
+      if (root.dataset.datasetKind === "real") {
+        need("the footer's clock state", document.querySelector("footer [data-stale-status]"));
+      } else if (!verdict) {
+        need("the stale note", note);
+      }
+    }
     for (const card of document.querySelectorAll(".chart-card")) {
       if (!card.checkVisibility()) continue;
       need("a card's heading", card.querySelector(".chart-card__head :is(h2, h3)"));
@@ -413,13 +422,15 @@ async function checkInView(page, where) {
       if (root.dataset.frame) {
         need("a card's frame word", card.querySelector(".chart-card__frame-word"));
       }
-      // A note is its numbered badge on the card's last row. Its words are the badge's tooltip,
-      // which the floating check opens.
-      for (const item of card.querySelectorAll("[data-pinned-notes] > li")) {
+      // A note is its numbered badge, by the title or on what it qualifies. Its words are the
+      // badge's tooltip, which the floating check opens.
+      for (const item of card.querySelectorAll(
+        "[data-note-badges]:not([data-note-copy]) > [data-note]",
+      )) {
         need("a note's badge", item.querySelector(".tip__badge"));
       }
-      if (card.querySelector(".chart-area .pin, .chart-legend .pin")) {
-        lacking.push("one set of markers: a pin is in a chart or legend");
+      if (card.querySelector(".chart-card > .note-badges, .pin")) {
+        lacking.push("one set of markers, by what they qualify: a badge cluster is at the foot");
       }
     }
     window.scrollTo({ left: startX, top: startY, behavior: "instant" });
@@ -438,7 +449,6 @@ async function checkFocusRings(page, where) {
   await page.keyboard.press("Shift");
   for (const selector of [
     ".tip__icon",
-    ".tip__words",
     ".tip__badge",
     ".data-toggle > summary",
     ".chain-filter input:checked",
@@ -557,7 +567,7 @@ async function checkOneAtATime(page, where, js) {
 async function checkFloating(page, where, js) {
   const results = await page.evaluate(() => {
     const WATCHED =
-      ".chart-area, .hairline-table, .note-badges > li, .chart-card__meta, .chart-card h2, .chart-card h3, .data-toggle > summary, h1, .freshness-text, [data-verdict-text], [data-kpi-value], [data-section='kpi-row'] dt, [data-section='kpi-row'] > p, footer";
+      ".chart-area, .hairline-table, .note-badges > [data-note], .chart-card__meta, .chart-card h2, .chart-card h3, .data-toggle > summary, h1, .freshness-text, [data-verdict-text], [data-kpi-value], [data-section='kpi-row'] dt, [data-section='kpi-row'] > p, footer";
     // What a hidden filter panel holds has no box, so it can't move, whatever the scroll does.
     const layout = () =>
       [...document.querySelectorAll(WATCHED)].map((element) => {
@@ -675,7 +685,7 @@ async function checkTap(browser, origin, folder, markup, where, options) {
     ...options,
     touch: true,
   });
-  const tips = page.locator("[data-harness] .chart-card__head [data-tip]:visible");
+  const tips = page.locator("[data-harness] .chart-card__head > .tip--info:visible");
   await tips.nth(0).locator("> .tip__trigger").tap();
   check("tap opens", where, await isOpen(tips.nth(0)));
   await tips.nth(1).locator("> .tip__trigger").tap();
@@ -708,7 +718,12 @@ async function checkToggle(page, where) {
       (await summary.innerText()).trim().startsWith("Chart"),
     );
     check("focus stays on the toggle", where, await focusIsOn(summary));
-    check("notes stay visible", where, await card.locator("[data-pinned-notes]").isVisible());
+    // The chart's badges come up by the title while the table shows, so every note stays in view.
+    const kinds = await card
+      .locator("[data-note-badges]:not([data-note-copy]) > [data-note]")
+      .count();
+    const shown = await card.locator(".chart-card__head [data-note]:visible").count();
+    check("notes stay visible", where, shown === kinds, `${shown} of ${kinds}`);
     const openWidth = (await page.locator(name).boundingBox()).width;
     check("an open toggle's card keeps its width", where, Math.abs(openWidth - closedWidth) <= 1);
 
@@ -763,7 +778,7 @@ async function checkNoSidewaysScroll(page, where) {
       `${value}: ${over}px`,
     );
     const outside = await page.evaluate((slack) => {
-      const PARTS = ".hairline-table, .data-toggle__panel, .pinned-notes, .chart-area";
+      const PARTS = ".hairline-table, .data-toggle__panel, .note-badges, .chart-area";
       return [...document.querySelectorAll(".chart-card")]
         .filter((card) => card.checkVisibility())
         .flatMap((card) => {
@@ -951,16 +966,35 @@ async function checkKpiTooltip(page, where) {
   await page.evaluate(() => document.activeElement?.blur());
 }
 
-// "How we read this" is a tooltip, which holds verdict.text where the dataset lets it, and the rest
-// in any case, with the link to how the reading is made.
+// "How we read this" is a "?" beside the headline that opens a tooltip, which holds verdict.text
+// where the dataset lets it, and the rest in any case, with the link to how the reading is made.
 async function checkHeadlineTooltip(page, where) {
   const tip = page.locator('[data-section="verdict"] [data-tip]');
   const trigger = tip.locator("> .tip__trigger");
   check(
-    "the reading's trigger says How we read this",
+    "the reading's trigger is a ? named How we read this",
     where,
-    (await trigger.innerText()).trim() === "How we read this",
+    (await trigger.getAttribute("aria-label")) === "How we read this" &&
+      (await trigger.innerText()).trim() === "",
+    await trigger.innerText(),
   );
+  const [line, mark] = await page.evaluate(() => {
+    const h1 = document.querySelector('[data-section="verdict"] h1').getClientRects();
+    const icon = document
+      .querySelector('[data-section="verdict"] .tip__icon')
+      .getBoundingClientRect();
+    const last = h1[h1.length - 1];
+    return [last.top + last.height / 2, icon.top + icon.height / 2];
+  });
+  // At the 320 px reflow width the "?" may take a line of its own, as the headline fills its lines.
+  if (page.viewportSize().width >= 390) {
+    check("and it sits on the headline's last line", where, Math.abs(line - mark) < 16);
+  }
+  await trigger.hover();
+  await page.waitForTimeout(HOVER_SETTLE_MS);
+  check("hovering it opens how we read this", where, await isOpen(tip));
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(HOVER_SETTLE_MS);
   await trigger.click();
   await page.mouse.move(0, 0);
   const panel = tip.locator("> .tip__panel");
@@ -977,6 +1011,28 @@ async function checkHeadlineTooltip(page, where) {
   }
   await page.keyboard.press("Escape");
   await page.evaluate(() => document.activeElement?.blur());
+}
+
+// An element's colour and its contrast with the page.
+function colourOf(locator) {
+  return locator.evaluate((element) => {
+    const channels = (value) =>
+      value
+        .match(/[\d.]+/g)
+        .slice(0, 3)
+        .map(Number);
+    const luminance = (rgb) => {
+      const [r, g, b] = rgb.map((channel) => {
+        const c = channel / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const text = channels(getComputedStyle(element).color);
+    const page = channels(getComputedStyle(document.body).backgroundColor);
+    const [light, dark] = [luminance(text), luminance(page)].sort((a, b) => b - a);
+    return { color: text, contrast: (light + 0.05) / (dark + 0.05) };
+  });
 }
 
 // The reconciliation detail is its own page. A build that passed says "Reconciled" in the footer, in
@@ -996,41 +1052,67 @@ async function checkReconciliation(page, where) {
     where,
     (await page.locator('[data-section="trust-strip"] details').count()) === 0,
   );
+  const kind = await page.evaluate(() => document.documentElement.dataset.datasetKind);
   if (!passing) {
-    check(
-      "a build that didn't pass keeps the trust row at the top",
-      where,
-      await strip.isVisible(),
-    );
     const footer = await page.locator("footer [data-footer-status]").innerText();
-    check("and its footer never says Reconciled", where, !/\bReconciled\b/.test(footer), footer);
+    check("its footer never says Reconciled", where, !/\bReconciled\b/.test(footer), footer);
+    if (kind !== "real") {
+      check(
+        "sample or preview data keeps the trust row at the top",
+        where,
+        await strip.isVisible(),
+      );
+      return;
+    }
+    // Old real data: the footer's amber clock and "Last reconciled" with the day, and the line
+    // under the headline says only when the data is from. A failed newer run keeps its top row.
+    const clock = page.locator("footer [data-stale-status]");
+    check(
+      "the footer shows a clock and Last reconciled",
+      where,
+      (await clock.isVisible()) &&
+        /^Last reconciled \d{1,2} [A-Z][a-z]{2,3}$/.test((await clock.innerText()).trim()),
+      await clock.innerText(),
+    );
+    const icon = await colourOf(clock.locator("svg"));
+    check(
+      "the clock is amber",
+      where,
+      icon.color[0] > icon.color[1] && icon.color[1] > icon.color[2],
+      `${icon.color}`,
+    );
+    check("and meets 3:1", where, icon.contrast >= 3, icon.contrast.toFixed(2));
+    await clock.locator("a").hover();
+    await page.waitForTimeout(HOVER_SETTLE_MS);
+    check(
+      "hovering it shows the full sentence",
+      where,
+      (await clock.locator("[data-tip] > .tip__panel").innerText()).startsWith("Last reconciled "),
+    );
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(HOVER_SETTLE_MS);
+    if ((await strip.count()) === 0) {
+      const asOf = await page
+        .locator('[data-section="verdict"] > .verdict-block__as-of')
+        .first()
+        .innerText();
+      check(
+        "and the line under the headline says only when the data is from",
+        where,
+        /^Data from [^.]+\.$/.test(asOf.trim()),
+        asOf,
+      );
+    }
     return;
   }
   check("a build that passed has no trust row at the top", where, (await strip.count()) === 0);
   check(
-    "the footer says Reconciled",
+    "the footer says Reconciled, with a tick",
     where,
-    /^✓\s+Reconciled$/.test((await word.innerText()).trim()),
+    (await word.innerText()).trim() === "Reconciled" && (await word.locator("svg").count()) === 1,
     await word.innerText(),
   );
-  const { color, contrast } = await word.evaluate((element) => {
-    const channels = (value) =>
-      value
-        .match(/[\d.]+/g)
-        .slice(0, 3)
-        .map(Number);
-    const luminance = (rgb) => {
-      const [r, g, b] = rgb.map((channel) => {
-        const c = channel / 255;
-        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-      });
-      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    };
-    const text = channels(getComputedStyle(element).color);
-    const page = channels(getComputedStyle(document.body).backgroundColor);
-    const [light, dark] = [luminance(text), luminance(page)].sort((a, b) => b - a);
-    return { color: text, contrast: (light + 0.05) / (dark + 0.05) };
-  });
+  const { color, contrast } = await colourOf(word);
   check("and it's green", where, color[1] > color[0] && color[1] > color[2], `${color}`);
   check("and meets 4.5:1", where, contrast >= 4.5, contrast.toFixed(2));
   const link = word.locator("a");
@@ -1064,9 +1146,15 @@ async function checkReconciliationPage(browser, origin, where, js) {
   check("the footer's status leads to /reconciliation/", where, await detail.isVisible());
   const text = await detail.innerText();
   check(
-    "it says what it doesn't verify",
+    "it says what it doesn't check",
     where,
-    text.includes("doesn't verify placed share or velocity"),
+    text.includes("doesn't check placed share or velocity"),
+  );
+  check(
+    "one status line under the title, and each check with its result",
+    where,
+    (await detail.locator("[data-run-line]").isVisible()) &&
+      (await detail.locator("[data-check-list] > div").count()) > 0,
   );
   check(
     "it has the table, or says there's none",
@@ -1074,8 +1162,18 @@ async function checkReconciliationPage(browser, origin, where, js) {
     (await detail.locator("table").count()) === 1 || text.includes("Not enough data yet"),
   );
   check("it keeps the normal header", where, await page.locator("header").isVisible());
-  const back = page.locator('main a[href="/"]', { hasText: "Back to the dashboard" });
+  const back = page.getByRole("link", { name: "Back to the dashboard", exact: true });
+  // A sample or preview banner may sit between the header and the page, so it's measured from main.
+  const [arrow, title, top] = await Promise.all(
+    [back, page.locator("main h1"), page.locator("main")].map((element) => element.boundingBox()),
+  );
   check("it has a way back to the dashboard", where, await back.isVisible());
+  check(
+    "an arrow above the title, which is at the top of the page",
+    where,
+    arrow.y + arrow.height <= title.y + 4 && title.y - top.y < 80,
+    `${Math.round(title.y - top.y)}px`,
+  );
   await back.click();
   await page.waitForURL(`${origin}/`);
   check(
@@ -1442,7 +1540,8 @@ async function checkSupplyOptions(page, where) {
           rows: card.querySelectorAll("[data-supply-legend] [data-segment]").length,
           bandRows: card.querySelectorAll("[data-supply-legend] [data-band]").length,
           wallets: [...card.querySelectorAll('[data-stat="active-wallets"]')].filter(seen).length,
-          floor: card.querySelectorAll('[data-note="exchange-floor"]').length,
+          floor: card.querySelectorAll(':not([data-note-copy]) > [data-note="exchange-floor"]')
+            .length,
         };
       },
       [SUPPLY, value, BOX_SLACK_PX],
@@ -1549,7 +1648,11 @@ async function checkExchangeRowsOpen(page, where) {
     const seen = await Promise.all(parts.map((part) => row.locator(part).isVisible()));
     check("an open toggle shows each exchange row whole", where, seen.every(Boolean), `${index}`);
   }
-  const notes = await page.locator(`${SUPPLY} [data-note="exchange-floor"]`).isVisible();
+  const notes =
+    (await page
+      .locator(`${SUPPLY} [data-note="exchange-floor"]`)
+      .filter({ visible: true })
+      .count()) > 0;
   check("and the floor note stays in view beside them", where, notes);
   await toggle.locator("> summary").click();
 }
@@ -1581,7 +1684,10 @@ async function checkActivityOptions(page, where) {
       const removals = rows.filter(
         (row) => !["headline_value", "clean_large", "clean_everyday"].includes(row.dataset.step),
       );
-      const pins = [...waterfall.querySelectorAll(".chart-area .pin")];
+      // A badge sits on the row it qualifies, or by the title.
+      const pins = [...waterfall.querySelectorAll(".tip__badge")].filter(
+        (badge) => !badge.closest("[data-step], .chart-card__head"),
+      );
       const numbersWhole = [...weekly.querySelectorAll("[data-week-number]")].every((number) => {
         const range = document.createRange();
         range.selectNodeContents(number);
@@ -1633,12 +1739,7 @@ async function checkActivityOptions(page, where) {
       `${value}: ${seen.outside}`,
     );
     check("the removals are hatched", where, seen.hatched, value);
-    check(
-      "the waterfall's chart holds no pin, as its badges are its markers",
-      where,
-      seen.pins === 0,
-      value,
-    );
+    check("each waterfall badge sits on its row or by the title", where, seen.pins === 0, value);
     check("each week's figure stays over its own bar", where, seen.figuresInside, value);
   }
   await page.locator(`.chain-filter input[value="${values[0]}"]`).check({ force: true });

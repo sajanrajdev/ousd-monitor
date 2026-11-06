@@ -40,7 +40,7 @@ describe("the chain roles view", () => {
     expect(card.classList.contains("chart-card")).toBe(true);
     expect(card.querySelector("h2")!.textContent).toBe("Ethereum leads on all five measures.");
     expect(card.querySelector(".chart-card__meta")!.textContent).toContain("As of");
-    const panel = card.querySelector(".tip__panel")!;
+    const panel = card.querySelector(".chart-card__head > .tip--info > .tip__panel")!;
     expect(panel.textContent).toContain("Ethereum leads on all 5 measures");
     expect(panel.textContent).toContain("Source:");
     expect(panel.querySelector('a[href="/methodology/#chain-roles"]')).not.toBeNull();
@@ -84,9 +84,9 @@ describe("the chain roles view", () => {
     }));
     expect(days.find((d) => d.chain === "Base")!.day).toContain("2 Nov 2026");
     expect(days.find((d) => d.chain === "Ethereum")!.day).toContain("3 Nov 2026");
-    expect(container.querySelector(".tip__panel")!.textContent).toContain(
-      "Chains end on different days",
-    );
+    expect(
+      container.querySelector(".chart-card__head > .tip--info > .tip__panel")!.textContent,
+    ).toContain("Chains end on different days");
   });
 
   it("shows a null share as the unknown text, not zero", () => {
@@ -141,7 +141,9 @@ describe("the chain roles view", () => {
     // The definition link is the card's tooltip's, so the note keeps only its caveat.
     expect(note.querySelector("a")).toBeNull();
     expect(
-      container.querySelector('.chart-card__head .tip__panel a[href="/methodology/#chain-roles"]'),
+      container.querySelector(
+        '.chart-card__head > .tip--info > .tip__panel a[href="/methodology/#chain-roles"]',
+      ),
     ).not.toBeNull();
     const rest = container.cloneNode(true) as HTMLElement;
     rest.querySelector('[data-note="no-swaps"]')!.remove();
@@ -247,7 +249,9 @@ describe("the chain roles view", () => {
     it("gives the no-swaps note a badge with its words in the tooltip, and no pin in the grid", () => {
       const { container } = mount();
       expect(grid(container).querySelector(".pin")).toBeNull();
-      const note = container.querySelector('[data-pinned-notes] [data-note="no-swaps"]')!;
+      const note = container.querySelector(
+        '[data-note-badges]:not([data-note-copy]) [data-note="no-swaps"]',
+      )!;
       expect(note.closest("details, noscript")).toBeNull();
       expect(note.querySelector(".tip__badge")!.textContent).toBe("1");
       expect(note.querySelector(".tip__panel [data-note-text]")!.textContent).toBe(NO_SWAPS_NOTE);

@@ -98,9 +98,13 @@ describe("the rendered page", () => {
   it("has a clear way back to the dashboard, near the top", () => {
     const container = page();
     const back = [...container.querySelectorAll('a[href="/"]')].find(
-      (link) => link.textContent === "Back to the dashboard",
+      (link) => link.getAttribute("aria-label") === "Back to the dashboard",
     )!;
     expect(back).toBeTruthy();
+    // An arrow, named for assistive tech, with no words in view.
+    expect(back.querySelector("svg")).not.toBeNull();
+    expect(back.textContent).toBe("");
+    expect(container.querySelector("h1")!.className).toContain("page-title");
     expect(
       back.compareDocumentPosition(container.querySelector("h1")!) &
         Node.DOCUMENT_POSITION_FOLLOWING,

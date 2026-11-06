@@ -20,11 +20,13 @@ export type VelocityViewProps = {
 // option highlights its chain rather than dropping the others.
 export function VelocityCard({ kpis, definitions, warnings, state }: VelocityViewProps) {
   const chart = velocityChart(kpis, warnings);
+  // A chain's note has its badge by the chain's name in the chart; the rest are about the card.
   const notes: PinnedNote[] = chart.notes.map(({ kind, chain, text, tip }) => ({
     kind,
     chain,
     text,
     tip,
+    at: chart.max === null ? undefined : chain,
   }));
   const dust = formatCompact(definitions.active_dust_base_units);
   const secondary = formatCompact(definitions.active_secondary_base_units);
@@ -58,6 +60,7 @@ export function VelocityCard({ kpis, definitions, warnings, state }: VelocityVie
       frameWord={state.frameWord}
       summary="Velocity, everyday velocity and headline velocity per chain, on one scale from zero. The table has each beside the supply it divides by, and the wallets active in the last 7 days. Wallets, not people."
       notes={notes}
+      plotIsContent
       table={{
         caption: `Velocity, denominators and active wallets, newest day per chain. ${WALLETS_NOTE}`,
         columns: [
@@ -82,7 +85,7 @@ export function VelocityCard({ kpis, definitions, warnings, state }: VelocityVie
         })),
       }}
     >
-      <VelocityChart chart={chart} />
+      <VelocityChart chart={chart} notes={notes} />
     </ChartCard>
   );
 }

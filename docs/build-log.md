@@ -193,3 +193,11 @@ The changes are listed in [the plan's Maintainer review](plans/2026-11-04-002-da
 - **A card is its own stacking context.** Its container query contains it, so an open tooltip painted under the next card. The card with an open tooltip now rises over the cards after it, and stays under the sticky header.
 - **A check counted hidden panels as moved.** The browser check that opening a tooltip moves nothing read each element's place on the page. A hidden filter panel has no box, so its place followed the scroll, and focus scrolling to a tooltip counted as 87 moves. Hidden elements are now left out.
 - **`verify-output` run from the repository root of a worktree** can't find the dataset schemas, as it resolves them from the working directory's parent. Run it from `web/`. This predates the review.
+
+### Maintainer review, third round
+
+The changes are listed in [the plan's Third round](plans/2026-11-04-002-dashboard-refurbish-plan.md#third-round).
+
+- **The table would have hidden the caveats.** With each badge moved onto the legend row or chart row it qualifies, opening a card's table took the chart, and so the exchange-floor badge, out of view. The browser check that the floor note stays beside the exchange rows caught it. The title now shows the chart's badges while the table does.
+- **A footer check read the tooltip with its link.** The check that a non-passing footer never says "Reconciled" read the status's whole text, where the link and its tooltip ran together with no space, so the word boundary could miss a planted "Reconciled". It now reads each element's words apart, with the tooltips left out.
+- **The clock swap wasn't run on real data this round.** The real dataset was more than 36 hours old by the time of the run, so the build was already stale and had nothing to swap. The passing state was checked by `verify-output` on a build with its clock set to 5 Nov, and in screenshots.

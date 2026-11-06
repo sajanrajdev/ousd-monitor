@@ -29,7 +29,7 @@ const tipId = () => `tip-${(nextTipId += 1)}`;
 export function plantedTip(
   trigger: string,
   panel: string,
-  { interactive = /<a\s/.test(panel), icon = false, tag = "span" } = {},
+  { interactive = /<a\s/.test(panel), icon = false, tag = "span", help = false } = {},
 ): string {
   const id = tipId();
   const label = icon ? ` aria-label="${trigger}"` : "";
@@ -37,20 +37,24 @@ export function plantedTip(
     ? `aria-expanded="false" aria-controls="${id}"`
     : `aria-describedby="${id}"`;
   const role = interactive ? "" : ' role="tooltip"';
-  return `<${tag} class="tip" data-tip><button type="button" class="tip__trigger"${label} ${points}>${icon ? "" : trigger}</button><${tag} class="tip__panel" id="${id}"${role}>${panel}</${tag}></${tag}>`;
+  const kind = icon ? ` tip__icon${help ? " tip__icon--help" : ""}` : "";
+  const tip = icon ? "tip tip--info" : "tip";
+  return `<${tag} class="${tip}" data-tip><button type="button" class="tip__trigger${kind}"${label} ${points}>${icon ? "" : trigger}</button><${tag} class="tip__panel" id="${id}"${role}>${panel}</${tag}></${tag}>`;
 }
 
 // An "i" button's tooltip, as a card's or a KPI's head has it.
 export const plantedInfoTip = (label: string, panel: string) =>
   plantedTip(label, panel, { icon: true, interactive: true, tag: "div" });
 
+// The headline's "?" button, named "How we read this", with the reading in paragraphs.
 export function plantedHeadline(verdict: Verdict = PLANTED_VERDICT): string {
   const text = `<span data-verdict-text>${escaped(verdict.text)}</span>`;
-  const items = verdict.items.map((item) => `<span>${escaped(item)}</span>`).join("");
+  const items = verdict.items.map((item) => `<p>${escaped(item)}</p>`).join("");
   return `<div class="verdict-block__head"><h1>${escaped(verdict.sentence)}</h1>
     ${plantedTip(
       "How we read this",
-      `${verdict.textVisible ? "" : text}${items}<a href="/methodology/#verdict">How the reading is made</a>`,
+      `${verdict.textVisible ? "" : `<p>${text}</p>`}${items}<p><a href="/methodology/#verdict">How the reading is made</a></p>`,
+      { icon: true, interactive: true, tag: "div", help: true },
     )}</div>
     ${verdict.textVisible ? `<p>${text}</p>` : ""}`;
 }
@@ -65,7 +69,7 @@ export function plantedKpis(
   scope: string = PLANTED_KPI_SCOPE,
   values: string[] = PLANTED_KPI_VALUES,
 ): string {
-  return `<dl>${values.map(kpiCell).join("")}</dl><p>${scope}</p>`;
+  return `<dl>${values.map(kpiCell).join("")}</dl>${scope ? `<p data-kpi-scope>${scope}</p>` : ""}`;
 }
 
 // The trust row's link to its own page, where the disclosure used to be.
@@ -73,37 +77,61 @@ export const PLANTED_TRUST_LINK = '<a href="/reconciliation/">Reconciliation det
 
 export const PLANTED_INDEPENDENCE = "Independent. Not affiliated with Open Standard or Bridge.";
 
-// The footer's status as components/trust-strip.tsx writes it: "Reconciled" only when the build
-// passed, with the dated sentence as its tooltip and the stale text beside it to swap to.
-export function plantedFooterStatus(
-  passing: boolean,
-  trustLine: { fresh: string | null; stale: string },
-): string {
-  const stale = `<span>▲ <a href="/reconciliation/">${escaped(trustLine.stale)}</a></span>`;
-  const fresh = passing
-    ? `<span data-reconciled><span class="tip" data-tip><a href="/reconciliation/" class="tip__trigger" aria-describedby="footer-tip"><span aria-hidden="true">✓</span> Reconciled</a><span id="footer-tip" class="tip__panel" role="tooltip">${escaped(trustLine.fresh ?? "")}</span></span></span>`
-    : "";
-  return `<p data-footer-status><span class="freshness-text"><span class="freshness-text__fresh">${fresh}</span><span class="freshness-text__stale">${stale}</span></span></p>`;
+export type PlantedTrustLine = { fresh: string | null; stale: string; short?: string };
+
+// A footer status link with its sentence as a tooltip, and a drawn icon.
+function footerTip(text: string, tip: string, icon: string): string {
+  const id = tipId();
+  return `<span class="tip tip--link" data-tip><a href="/reconciliation/" class="tip__trigger" aria-describedby="${id}"><svg aria-hidden="true">${icon}</svg>${text}</a><span id="${id}" class="tip__panel" role="tooltip">${escaped(tip)}</span></span>`;
 }
 
-export function plantedFooter(
-  passing: boolean,
-  trustLine: { fresh: string | null; stale: string },
-  extra = "",
-): string {
+const CHECK_ICON = '<path d="M0 0"></path>';
+const CLOCK_ICON = '<circle r="1"></circle><path d="M0 0"></path>';
+
+// The footer's status as components/trust-strip.tsx writes it: on real data, "Reconciled" only when
+// the build passed, with the dated sentence as its tooltip, and a clock and "Last reconciled" with
+// the day to swap to, its sentence as its tooltip. A sample or preview has one text, with no short
+// label.
+export function plantedFooterStatus(passing: boolean, trustLine: PlantedTrustLine): string {
+  if (trustLine.short === undefined) {
+    return `<p data-footer-status><span class="footer-status"><span aria-hidden="true">○</span> <a href="/reconciliation/">${escaped(trustLine.stale)}</a></span></p>`;
+  }
+  const stale = `<span class="footer-status footer-status--stale" data-stale-status>${footerTip(trustLine.short, trustLine.stale, CLOCK_ICON)}</span>`;
+  const fresh = passing
+    ? `<span class="freshness-text__fresh"><span class="footer-status footer-status--reconciled" data-reconciled>${footerTip("Reconciled", trustLine.fresh ?? "", CHECK_ICON)}</span></span>`
+    : "";
+  return `<p data-footer-status><span class="freshness-text">${fresh}<span class="freshness-text__stale">${stale}</span></span></p>`;
+}
+
+export function plantedFooter(passing: boolean, trustLine: PlantedTrustLine, extra = ""): string {
   return `<footer><p>${PLANTED_INDEPENDENCE}</p>${plantedFooterStatus(passing, trustLine)}
     <nav><a href="/methodology">Methodology</a></nav><p>Not financial advice.</p>${extra}</footer>`;
 }
 
-export const PLANTED_TRUST_CAVEAT = "It doesn't verify placed share or velocity.";
+export const PLANTED_TRUST_CAVEAT = "it doesn't check placed share or velocity.";
 
-// The reconciliation page's main, as app/reconciliation/page.tsx writes it.
-export function plantedReconciliationMain(stateLine: string): string {
-  return `<main><p><a href="/">Back to the dashboard</a></p><h1>Reconciliation</h1>
-    <section data-section="reconciliation"><p class="trust-strip__status">${escaped(stateLine)}</p>
-    <p><a href="/methodology/#reconciliation">What this covers</a></p>
-    <p>Reconciliation compares mints minus burns. ${PLANTED_TRUST_CAVEAT}</p>
-    <table><tbody><tr><td>Tempo</td></tr></tbody></table></section></main>`;
+// The way back to the dashboard, above a page's title: an arrow named for assistive tech.
+export const PLANTED_BACK =
+  '<a href="/" aria-label="Back to the dashboard" data-back-link class="back-link"><svg aria-hidden="true"></svg></a>';
+
+export const PLANTED_CHECK_COUNT = 7;
+
+// The reconciliation page's main, as app/reconciliation/page.tsx writes it: the way back, the title,
+// one line on the run, what it covers, its table and its checks.
+export function plantedReconciliationMain(
+  runLine: string,
+  checks: number = PLANTED_CHECK_COUNT,
+): string {
+  const rows = Array.from(
+    { length: checks },
+    (_, index) =>
+      `<div class="check-list__row"><dt>Check ${index + 1}</dt><dd data-check-status="passed">Passed</dd></div>`,
+  ).join("");
+  return `<main>${PLANTED_BACK}<h1 class="page-title">Reconciliation</h1>
+    <section data-section="reconciliation"><p data-run-line>${escaped(runLine)}</p>
+    <p>Each run compares mints minus burns; ${PLANTED_TRUST_CAVEAT} <a href="/methodology/#reconciliation">How it works</a></p>
+    <table><tbody><tr><td>Tempo</td></tr></tbody></table>
+    <h2>Checks before publishing</h2><dl data-check-list>${rows}</dl></section></main>`;
 }
 
 // The page's serialized copy, as Next writes it into the page, with an id no other chunk has.
@@ -112,14 +140,15 @@ let nextFlightId = 0x1000;
 export const PLANTED_HEADER =
   '<header><a href="/">Open USD Monitor</a><nav aria-label="Site"><a href="/methodology">Methodology</a></nav></header>';
 
-// Every page but the dashboard has a way back to it, near the top of its main.
-export const PLANTED_BACK = '<p><a href="/">Back to the dashboard</a></p>';
-
+// Every page but the dashboard has a way back to it, above its title at the top of its main. A
+// planted page with no title gets one after it.
 export function plantedBack(html: string): string {
   if (html.includes("Back to the dashboard")) return html;
+  const titled = /<main[^>]*>[\s\S]*<h1/.test(html);
+  const back = titled ? PLANTED_BACK : `${PLANTED_BACK}<h1>A page</h1>`;
   return html.includes("<main>")
-    ? html.replace("<main>", `<main>${PLANTED_BACK}`)
-    : html.replace("</header>", `</header><main>${PLANTED_BACK}</main>`);
+    ? html.replace("<main>", `<main>${back}`)
+    : html.replace("</header>", `</header><main>${back}</main>`);
 }
 
 export function plantedFlight(tree: unknown): string {
@@ -131,7 +160,8 @@ export function plantedFlight(tree: unknown): string {
 const flightElement = (type: string, props: object) => ["$", type, null, props];
 
 // A note as components/pinned-notes.tsx writes it: a numbered badge in view, and its words, then the
-// note in full where it has one, in the badge's tooltip.
+// note in full where it has one, in the badge's tooltip. A test's `<li data-note=` finds one, as the
+// checks read a badge by its attributes, whatever its element.
 export function plantedBadge(
   number: number,
   words: string,
@@ -155,7 +185,7 @@ export function plantedBadge(
 
 export function plantedNotes(notes: Note[]): string {
   const html = notes.length
-    ? `<ol data-pinned-notes>${notes.map(({ kind, chain, text }, index) => plantedBadge(index + 1, text, { kind, chain, essential: true })).join("")}</ol>`
+    ? `<ol data-note-badges>${notes.map(({ kind, chain, text }, index) => plantedBadge(index + 1, text, { kind, chain, essential: true })).join("")}</ol>`
     : "";
   return notes.length > 0 ? `${html}${plantedNotesFlight(notes)}` : html;
 }
@@ -266,7 +296,7 @@ export type PlantedPart = {
   band: string | null;
   bandLine: string | null;
 };
-type PlantedPanelNote = { kind: string; chain?: string; words: string; tip?: string };
+type PlantedPanelNote = { kind: string; chain?: string; words: string; tip?: string; at?: string };
 type PlantedTable = {
   columns: { key: string; label: string }[];
   rows: Record<string, string>[];
@@ -313,16 +343,44 @@ function plantedTable({ columns, rows }: PlantedTable, caption = ""): string {
     .join("")}</tbody></table>`;
 }
 
-// A card's notes as numbered badges, each with its words and any note in full in its tooltip.
-export function plantedPanelNotes(notes: PlantedPanelNote[]): string {
-  const items = notes.map(({ kind, chain, words, tip }, index) =>
-    plantedBadge(index + 1, escaped(words), {
-      kind,
-      chain,
-      ...(tip ? { tip: escaped(tip) } : {}),
-    }),
+// A card's notes about the whole card first, then the rest in their order, as the card numbers them.
+function ordered<T extends { at?: string }>(notes: T[]): T[] {
+  return [...notes.filter((note) => !note.at), ...notes.filter((note) => note.at)];
+}
+
+// The badges for what sits at `at`, or the card's own with no `at`, each with its words and any
+// note in full in its tooltip, numbered by the card's order.
+export function plantedPanelNotes(notes: PlantedPanelNote[], at?: string): string {
+  const items = ordered(notes).flatMap(({ kind, chain, words, tip, at: place }, index) =>
+    place === at
+      ? [
+          plantedBadge(index + 1, escaped(words), {
+            kind,
+            chain,
+            ...(tip ? { tip: escaped(tip) } : {}),
+          }),
+        ]
+      : [],
   );
-  return `<ol data-pinned-notes>${items.join("")}</ol>`;
+  return items.length > 0 ? `<ol data-note-badges>${items.join("")}</ol>` : "";
+}
+
+// The title's badges: the card's own, then a copy of those on its chart or legend, numbered alike,
+// shown only while the table is.
+export function plantedHeadNotes(notes: PlantedPanelNote[]): string {
+  const copy = ordered(notes).flatMap(({ kind, chain, words, tip, at }, index) =>
+    at
+      ? [
+          plantedBadge(index + 1, escaped(words), {
+            kind,
+            chain,
+            ...(tip ? { tip: escaped(tip) } : {}),
+          }),
+        ]
+      : [],
+  );
+  const table = copy.length > 0 ? `<ol data-note-badges data-note-copy>${copy.join("")}</ol>` : "";
+  return `${plantedPanelNotes(notes)}${table}`;
 }
 
 function plantedPanelCard(
@@ -331,8 +389,9 @@ function plantedPanelCard(
   panelText: string,
   toggle: string,
   id = "",
+  badges = "",
 ) {
-  return `<section${id ? ` id="${id}"` : ""} class="chart-card"><div class="chart-card__head"><h2>${escaped(heading)}</h2>
+  return `<section${id ? ` id="${id}"` : ""} class="chart-card"><div class="chart-card__head"><h2>${escaped(heading)}</h2>${badges}
   ${plantedInfoTip("About", `<p>Source: S</p><a href="/methodology/#velocity">Definition</a>${panelText}`)}</div>
   ${inner}<details class="data-toggle"><summary>Table</summary>${toggle}</details>
   <p class="chart-card__meta">As of <time datetime="2026-11-03">3 Nov</time></p>
@@ -350,12 +409,12 @@ function plantedSupplyBar({ key, total, parts }: PlantedSupplyPanel): string {
   return `<div data-supply-bar="${key}" data-total="${total}">${drawn.join("")}</div>`;
 }
 
-function plantedLegend({ key, parts }: PlantedSupplyPanel): string {
+function plantedLegend({ key, parts, notes }: PlantedSupplyPanel): string {
   const rows = parts.map(({ key: part, label, compact, share, floor, band, bandLine }) => {
     const mark = floor ? '<span data-coverage="floor">≥</span>' : "";
     const linked = band !== null && BigInt(band) > 0n ? ` data-exchange-linked="${key}"` : "";
     const line = bandLine === null ? "" : `<li data-band="${part}"${linked}>${bandLine}</li>`;
-    return `<li data-segment="${part}"><span data-segment-label>${label}</span><span data-segment-amount>${mark}${compact}</span><span data-segment-share>${share}</span></li>${line}`;
+    return `<li data-segment="${part}"><span data-segment-label>${label}</span>${plantedPanelNotes(notes, part)}<span data-segment-amount>${mark}${compact}</span><span data-segment-share>${share}</span></li>${line}`;
   });
   return `<ul class="chart-legend" data-supply-legend>${rows.join("")}</ul>`;
 }
@@ -388,10 +447,11 @@ export function plantedSupplyPanels(
   );
   return plantedPanelCard(
     all.heading,
-    `<div class="chart-area" aria-hidden="true"><div data-supply-rows>${rows}</div></div>${plantedLegend(all)}<dl>${stats}</dl>${plantedPanelNotes(all.notes)}`,
+    `<div class="chart-area" aria-hidden="true"><div data-supply-rows>${rows}</div></div>${plantedLegend(all)}<dl>${stats}</dl>`,
     `<p data-full-note="placed">${escaped(all.placedNote)}</p>`,
     `${plantedTable(all.table)}${walletsTable}${entities}`,
     id,
+    plantedHeadNotes(all.notes),
   );
 }
 
@@ -402,15 +462,17 @@ export function plantedSeriesPanels(panels: PlantedSeriesPanel[], id: string): s
       .join("");
     return `<div data-chain-panel="${panel.value}">${plantedPanelCard(
       panel.heading,
-      `<ul data-series-legend>${lines}</ul>${plantedPanelNotes(panel.notes)}`,
+      `<ul data-series-legend>${lines}</ul>`,
       `<p data-full-note="series-start">${escaped(panel.fullNote)}</p>`,
       plantedTable({ columns: SERIES_TABLE, rows: panel.rows }),
+      "",
+      plantedHeadNotes(panel.notes),
     )}</div>`;
   });
   return `<div id="${id}" class="chain-panels">${items.join("")}</div>`;
 }
 
-type PlantedActivityNote = { kind: string; words: string; step?: string };
+type PlantedActivityNote = { kind: string; words: string; at?: string };
 export type PlantedWaterfallPanel = {
   value: string;
   heading: string;
@@ -446,12 +508,8 @@ const WEEK_TABLE = [
   ["everyday", "Clean everyday"],
 ].map(([key, label]) => ({ key, label }));
 
-function plantedActivityNotes(notes: PlantedActivityNote[]): string {
-  const items = notes.map(({ kind, words }, index) =>
-    plantedBadge(index + 1, escaped(words), { kind }),
-  );
-  return `<ol data-pinned-notes>${items.join("")}</ol>`;
-}
+const plantedActivityNotes = (notes: PlantedActivityNote[], at?: string) =>
+  plantedPanelNotes(notes, at);
 
 function plantedFullNotes(fullNotes: Record<string, string>): string {
   return Object.entries(fullNotes)
@@ -465,14 +523,17 @@ export function plantedWaterfallPanels(panels: PlantedWaterfallPanel[], id: stri
     const rows = panel.steps
       .map(
         ({ key, figure }) =>
-          `<li data-step="${key}"><span>S</span><span class="tabular-nums">${figure}</span></li>`,
+          `<li data-step="${key}"><span>S${plantedActivityNotes(panel.notes, key)}</span><span class="tabular-nums">${figure}</span></li>`,
       )
       .join("");
+    // Its badges sit on its rows, so the chart is read, not hidden.
     return `<div data-chain-panel="${panel.value}">${plantedPanelCard(
       panel.heading,
-      `<div class="chart-area" aria-hidden="true"><ol>${rows}</ol></div>${plantedActivityNotes(panel.notes)}`,
+      `<div class="chart-area" data-plot-content><ol>${rows}</ol></div>`,
       plantedFullNotes(panel.fullNotes),
       `${plantedTable({ columns: STEP_TABLE, rows: panel.stepRows })}${plantedTable({ columns: PERIOD_TABLE, rows: panel.periodRows })}`,
+      "",
+      plantedHeadNotes(panel.notes),
     )}</div>`;
   });
   return `<div id="${id}" class="chain-panels">${items.join("")}</div>`;
@@ -488,9 +549,11 @@ export function plantedWeeklyPanels(panels: PlantedWeeklyPanel[], id: string): s
       .join("");
     return `<div data-chain-panel="${panel.value}">${plantedPanelCard(
       panel.heading,
-      `<div class="chart-area" aria-hidden="true">${bars}</div>${plantedActivityNotes(panel.notes)}`,
+      `<div class="chart-area" aria-hidden="true">${bars}</div>`,
       plantedFullNotes(panel.fullNotes),
       plantedTable({ columns: WEEK_TABLE, rows: panel.rows }),
+      "",
+      plantedHeadNotes(panel.notes),
     )}</div>`;
   });
   return `<div id="${id}" class="chain-panels">${items.join("")}</div>`;
@@ -526,10 +589,9 @@ export function plantedVelocity(velocity: PlantedVelocity, id: string): string {
   const chart = [...groups]
     .map(
       ([chain, rows]) =>
-        `<div data-velocity-chain="${chain}"><p class="velocity-chart__name">${chain}</p>${rows.join("")}</div>`,
+        `<div data-velocity-chain="${chain}"><p class="velocity-chart__name">${chain}${plantedPanelNotes(velocity.notes, chain)}</p>${rows.join("")}</div>`,
     )
     .join("");
-  const notes = plantedPanelNotes(velocity.notes);
   const fullNotes = `<p data-full-note="velocity-denominators">${escaped(VELOCITY_NOTE)}</p><p data-full-note="velocity-jumpy">${escaped(JUMPY_NOTE)}</p>`;
   const full = velocity.fullWarnings
     .map(
@@ -539,9 +601,11 @@ export function plantedVelocity(velocity: PlantedVelocity, id: string): string {
     .join("");
   return `<div id="${id}">${plantedPanelCard(
     velocity.heading,
-    `<div class="chart-area" aria-hidden="true">${chart}</div>${notes}`,
+    `<div class="chart-area" data-plot-content>${chart}</div>`,
     `${fullNotes}${full}`,
     `<table><caption>Velocity. Wallets, not people.</caption></table>`,
+    "",
+    plantedHeadNotes(velocity.notes),
   )}</div>`;
 }
 
@@ -574,13 +638,14 @@ export function plantedFilter(options: { value: string; label: string }[]): stri
 }
 
 // A whole real main page, from what verify-output expects of a dataset. The trust row is at the
-// top only on a build that didn't pass.
+// top only after a failed newer run, as real data that's only old says so in the footer.
 export function plantedRealMain(
   expected: {
     verdict: Verdict;
     passing: boolean;
+    staleInFooter: boolean;
     headStale: string;
-    kpiScope: string;
+    kpiScope: string | null;
     kpiValues: string[];
     essentialNotes: Note[];
     exchangeRows: Parameters<typeof plantedExchangeRows>[0];
@@ -595,11 +660,11 @@ export function plantedRealMain(
   },
   staleTrust: string,
 ): string {
-  const trust = expected.passing
+  const trust = expected.staleInFooter
     ? ""
     : `<section data-section="trust-strip">${staleTrust}${PLANTED_TRUST_LINK}</section>`;
   return `<main>${trust}<section data-section="verdict">${plantedHeadline(expected.verdict)}<p>${expected.headStale}</p></section>
-    <section data-section="kpi-row">${plantedKpis(expected.kpiScope, expected.kpiValues)}</section>
+    <section data-section="kpi-row">${plantedKpis(expected.kpiScope ?? "", expected.kpiValues)}</section>
     ${plantedNotes(expected.essentialNotes)}
     <div class="dashboard">${plantedFilter(expected.filter)}
     ${plantedSupplyPanels(expected.supplyPanels, CARD_ANCHORS.supply, plantedExchangeRows(expected.exchangeRows))}

@@ -3,7 +3,7 @@ import type { FrameWord } from "@/lib/dataset/state";
 import { formatAsOf, type AsOfRange } from "@/lib/format";
 import { DataToggle } from "./data-toggle";
 import { HairlineTable, type HairlineTableProps } from "./hairline-table";
-import { PinnedNotes, type PinnedNote } from "./pinned-notes";
+import { NoteBadges, type PinnedNote } from "./pinned-notes";
 import { InfoTip } from "./tooltip";
 
 // Every prop from `takeaway` to `children` is required, so a chart missing its source, time,
@@ -21,7 +21,8 @@ export type ChartCardProps = {
   children: ReactNode;
   // The card's anchor. Under a filter it goes on ChainPanels instead, as a panel repeats its card.
   id?: string;
-  // Caveats, as numbered badges on the card's last row, each with its text as a tooltip.
+  // Caveats, as numbered badges, each with its text as a tooltip. A note about the whole card has its
+  // badge by the title; the view puts each other one's at what it qualifies, with NoteBadges.
   notes?: PinnedNote[];
   // More for the tooltip, under the summary: the long takeaway or a note in full. Nothing essential.
   detail?: ReactNode;
@@ -94,6 +95,8 @@ function CardFrame({
     >
       <div className="chart-card__head explain-head">
         <Heading id={headingId}>{takeaway}</Heading>
+        <NoteBadges notes={notes} />
+        <NoteBadges notes={notes} inTable />
         <InfoTip label={`About: ${takeaway}`}>
           <p>{summary}</p>
           {detail}
@@ -129,7 +132,6 @@ function CardFrame({
           </>
         ) : null}
       </p>
-      <PinnedNotes notes={notes} />
       <noscript>
         <p className="chart-card__source-note">
           Source: {source} ·{" "}

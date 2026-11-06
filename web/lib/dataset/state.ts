@@ -1,7 +1,13 @@
 // What a dataset is, from the dataset alone. No flag or argument can make a sample read as real.
 import { dayRange } from "../aggregate.ts";
 import { DEFAULT_DEFINITIONS, REQUIRED_CHAINS, CHECK_LABELS } from "../definitions.ts";
-import { formatAsOf, formatUtcDateTime, UNKNOWN_TEXT, type AsOfRange } from "../format.ts";
+import {
+  formatAsOf,
+  formatUtcDate,
+  formatUtcDateTime,
+  UNKNOWN_TEXT,
+  type AsOfRange,
+} from "../format.ts";
 import { FUTURE_SKEW_MS, isFreshAt, type FreshnessClock } from "./clock.ts";
 import type { DatasetFiles } from "./rows.ts";
 
@@ -36,13 +42,17 @@ export type DatasetState = {
   dataAsOf: AsOfRange | null;
   // Fresh text is null when a dataset is stale at build, as it can never become fresh again.
   asOfLine: { fresh: string | null; stale: string };
-  trustLine: { fresh: string | null; stale: string };
-  // Reconciled, and fresh when built. Only then does the footer say "Reconciled", and the trust row
-  // leave the top of the main page.
+  // `short` is the footer's label once stale, with `stale` as its tooltip.
+  trustLine: { fresh: string | null; stale: string; short: string };
+  // Reconciled, and fresh when built. Only then does the footer say "Reconciled".
   passing: boolean;
-  // The main page's as-of line once it's stale. When the build passed, the trust row isn't at the
-  // top to swap, so this line says when supply was last reconciled as well.
+  // Real data whose only fault is its age. The footer alone says it's old, so the top of each page
+  // has no trust row or stale line. Sample, preview and a failed newer run keep theirs.
+  staleInFooter: boolean;
+  // The main page's as-of line once it's stale.
   headStale: string;
+  // One line under the reconciliation page's title.
+  runLine: { fresh: string | null; stale: string };
   // Why this isn't release grade, for a refusal. Empty only for a dataset fit to release.
   releaseProblems: string[];
 };
@@ -221,6 +231,10 @@ export function deriveState(
   const reconciledTime = reconciledAt ? formatUtcDateTime(reconciledAt) : null;
 
   const passing = kind === "real" && isFresh;
+  const staleInFooter = kind === "real" && !manifest.stale;
+  const reconciledDay = reconciledAt
+    ? formatUtcDate(reconciledAt).replace(/ \d{4} UTC$/, "")
+    : UNKNOWN_TEXT;
   const asOfStale = manifest.stale
     ? `${reason} Data from ${dataTime}.`
     : `Data from ${dataTime}. Nothing newer has reached this page, so it may be out of date.`;
@@ -244,12 +258,24 @@ export function deriveState(
               ? `Supply reconciled on all ${CHAIN_COUNT} chains as of ${reconciledTime}`
               : null,
             stale: `Last reconciled ${reconciledTime}. ${reason}`,
+            short: `Last reconciled ${reconciledDay}`,
           }
-        : { fresh: "Not reconciled", stale: "Not reconciled" },
+        : { fresh: "Not reconciled", stale: "Not reconciled", short: "Not reconciled" },
     passing,
-    headStale: passing
-      ? `Data from ${dataTime}. Last reconciled ${reconciledTime}. ${reason}`
-      : asOfStale,
+    staleInFooter,
+    headStale: staleInFooter ? `Data from ${dataTime}.` : asOfStale,
+    runLine:
+      kind === "real"
+        ? {
+            fresh: isFresh ? `Last run ${reconciledTime}: every check passed.` : null,
+            stale: manifest.stale
+              ? `Last passing run ${reconciledTime}. ${reason}`
+              : `Last run ${reconciledTime}: every check passed. ${reason}`,
+          }
+        : {
+            fresh: `${kind === "sample" ? "Sample" : "Preview"} figures, not a reconciliation.`,
+            stale: `${kind === "sample" ? "Sample" : "Preview"} figures, not a reconciliation.`,
+          },
     releaseProblems: problems,
   };
 }

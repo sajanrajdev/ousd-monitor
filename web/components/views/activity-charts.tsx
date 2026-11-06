@@ -5,10 +5,8 @@ import {
   type WaterfallStep,
   type Week,
 } from "@/lib/takeaways/activity";
+import { NoteBadges, type PinnedNote } from "@/components/pinned-notes";
 import { formatCompact, formatUtcDate, toChartNumber, UNKNOWN_TEXT } from "@/lib/format";
-
-// A pin's number by the waterfall row it sits on, or for the weekly bars, in note order. The card
-// works these out from its notes, so a pin can't point at another note.
 
 // Hatching as well as colour marks what was taken out of headline.
 const HATCH =
@@ -28,8 +26,15 @@ function barStyle(kind: WaterfallStep["kind"], left: number, width: number) {
 // One row per step at every width: label and value on the left, bar on the right, so a sliver of a
 // bar still has a readable label. The card's table carries the same numbers for assistive tech.
 // The card reserves a fixed chart height, and twelve rows are taller than that on a phone, so a
-// chart that sets data-flow lets its area grow to fit (in globals.css).
-export function WaterfallChart({ waterfall }: { waterfall: Waterfall | null }) {
+// chart that sets data-flow lets its area grow to fit (in globals.css). A row's note has its badge
+// at the end of the row's label, so the chart is read by assistive tech, as a list.
+export function WaterfallChart({
+  waterfall,
+  notes = [],
+}: {
+  waterfall: Waterfall | null;
+  notes?: PinnedNote[];
+}) {
   if (!waterfall) return <p className="p-4">{UNKNOWN_TEXT}</p>;
   return (
     <>
@@ -44,7 +49,10 @@ export function WaterfallChart({ waterfall }: { waterfall: Waterfall | null }) {
               style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)" }}
             >
               <span className="flex flex-wrap justify-between gap-x-2">
-                <span>{step.label}</span>
+                <span>
+                  {step.label}
+                  <NoteBadges notes={notes} at={step.key} />
+                </span>
                 <span className="tabular-nums" style={{ fontWeight: 550 }}>
                   {stepFigure(step)}
                 </span>

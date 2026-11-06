@@ -2,7 +2,7 @@ import { ChainPanels } from "@/components/chain-panels";
 import { ChartCard } from "@/components/chart-card";
 import { ExchangeRows } from "@/components/exchange-rows";
 import { HairlineTable } from "@/components/hairline-table";
-import type { PinnedNote } from "@/components/pinned-notes";
+import { NoteBadges, type PinnedNote } from "@/components/pinned-notes";
 import { dayRange } from "@/lib/aggregate";
 import type { ChainOption } from "@/lib/chain-scope";
 import type { ActivityRow, Definitions, DatasetState, JourneyRow, KpiRow } from "@/lib/dataset";
@@ -44,13 +44,15 @@ export type JourneyViewProps = {
 
 const SOURCE = "Chain data and public labels";
 
-// The short words stay in view, and the note in full is a tooltip on them, with its link if it has one.
-function pinnedNote({ kind, chain, text, tip, link }: SegmentNote): PinnedNote {
-  if (!tip) return { kind, chain, text };
+// The short words lead the badge's tooltip, and the note in full follows, with its link if it has
+// one. A segment's note has its badge on that segment's legend row.
+function pinnedNote({ kind, chain, text, tip, link, segment }: SegmentNote): PinnedNote {
+  if (!tip) return { kind, chain, text, at: segment };
   return {
     kind,
     chain,
     text,
+    at: segment,
     interactive: Boolean(link),
     tip: link ? (
       <>
@@ -66,7 +68,7 @@ function pinnedNote({ kind, chain, text, tip, link }: SegmentNote): PinnedNote {
   };
 }
 
-function LegendRow({ segment }: { segment: SupplySegment }) {
+function LegendRow({ segment, notes }: { segment: SupplySegment; notes: PinnedNote[] }) {
   const { style } = segment;
   return (
     <li className="chart-legend__row" data-segment={segment.key}>
@@ -80,6 +82,7 @@ function LegendRow({ segment }: { segment: SupplySegment }) {
       />
       <span className="chart-legend__label">
         <span data-segment-label>{segmentLabel(segment)}</span>
+        <NoteBadges notes={notes} at={segment.key} />
       </span>
       <span className="chart-legend__values">
         <span data-segment-amount>
@@ -99,12 +102,12 @@ function LegendRow({ segment }: { segment: SupplySegment }) {
 // Every segment on every panel, zero included, so the legend doesn't jump between filter options. The
 // band's line says what it marks inside its segment, and carries data-exchange-linked only when
 // there's a band to mark.
-function SupplyLegend({ panel }: { panel: SupplyPanel }) {
+function SupplyLegend({ panel, notes }: { panel: SupplyPanel; notes: PinnedNote[] }) {
   const key = panel.bar?.key;
   return (
     <ul className="chart-legend" data-supply-legend>
       {panel.segments.flatMap((segment) => [
-        <LegendRow key={segment.key} segment={segment} />,
+        <LegendRow key={segment.key} segment={segment} notes={notes} />,
         ...(segment.band
           ? [
               <li
@@ -236,6 +239,10 @@ function SupplyCard({
   const { chains, rows, kpis } = panel;
   const asOf = dayRange(rows.map((row) => row.day)) ?? definitions.journey_first_day;
   const entities = panel.segments.flatMap((segment) => segment.entities ?? []);
+  // With no legend, a segment's note has no row, so its badge goes by the title.
+  const notes = panel.notes
+    .map(pinnedNote)
+    .map((note) => (panel.bar ? note : { ...note, at: undefined }));
   return (
     <ChartCard
       id={CARD_ANCHORS.supply}
@@ -250,11 +257,11 @@ function SupplyCard({
           ? UNKNOWN_TEXT
           : `Where supply sits on ${scopeText(chains)}, together and per chain: issuer inventory, placed, DEX, lending and exchange venues, and free-floating. Circulating is everything except issuer inventory and placed.`
       }
-      notes={panel.notes.map(pinnedNote)}
+      notes={notes}
       beside={
         panel.bar ? (
           <>
-            <SupplyLegend panel={panel} />
+            <SupplyLegend panel={panel} notes={notes} />
             <SupplyStats panel={panel} />
           </>
         ) : null

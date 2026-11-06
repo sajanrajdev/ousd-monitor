@@ -26,19 +26,20 @@ function placeProps({ align = "start", above = false }: Place) {
   return { "data-align": align, "data-above": above ? "" : undefined };
 }
 
-// An "i" button with a name, for a card's, a KPI's or a cell's head. Its panel may hold blocks and
-// links, so it sits in a div.
+// An "i" button with a name, for a card's, a KPI's or a cell's head, or a "?" for how to read the
+// headline. Its panel may hold blocks and links, so it sits in a div.
 export function InfoTip({
   label,
   children,
+  icon = "info",
   ...place
-}: { label: string; children: ReactNode } & Place) {
+}: { label: string; children: ReactNode; icon?: "info" | "help" } & Place) {
   const id = useId();
   return (
     <div className="tip tip--info" data-tip {...placeProps({ align: "end", ...place })}>
       <button
         type="button"
-        className="tip__trigger tip__icon"
+        className={`tip__trigger tip__icon${icon === "help" ? " tip__icon--help" : ""}`}
         aria-label={label}
         {...triggerProps(id, true)}
       />

@@ -594,6 +594,11 @@ h2 {
   content: "i" / "";
 }
 
+.tip__icon--help::before {
+  content: "?";
+  content: "?" / "";
+}
+
 /* Words that open their own explanation: a dotted underline says there's more. */
 .tip--text {
   display: inline;
@@ -613,16 +618,16 @@ h2 {
   text-underline-offset: 3px;
 }
 
+/* Every panel is the same: one width, padding, type size and line height, and its parts are
+   paragraphs with the same space between them, whatever element holds them. */
 .tip__panel {
   position: absolute;
   top: calc(100% + 0.375rem);
   left: 0;
   z-index: 40;
   display: none;
-  gap: 0.5rem;
-  width: max-content;
-  max-width: min(22rem, calc(100vw - 2rem));
-  padding: 0.75rem;
+  width: min(20rem, calc(100vw - 2rem));
+  padding: 0.75rem 0.875rem;
   background: var(--color-off-white);
   border: 1px solid var(--color-maroon);
   border-radius: var(--radius-control);
@@ -632,7 +637,7 @@ h2 {
   font-style: normal;
   font-weight: 450;
   letter-spacing: normal;
-  line-height: 1.4;
+  line-height: 1.45;
   text-align: left;
   white-space: normal;
   translate: var(--tip-shift, 0) 0;
@@ -651,13 +656,26 @@ h2 {
 
 html:not([data-tips]) .tip:is(:hover, :focus-within) > .tip__panel,
 .tip[data-open] > .tip__panel {
-  display: grid;
+  display: block;
 }
 
-/* A panel of running text flows as one block, so a link and the words after it share their line. */
-html:not([data-tips]) .tip:not(.tip--info):is(:hover, :focus-within) > .tip__panel,
-.tip:not(.tip--info)[data-open] > .tip__panel {
+.tip__panel > *,
+.tip__panel [data-verdict-group] > * {
   display: block;
+  margin: 0;
+}
+
+.tip__panel > * + * {
+  margin-top: 0.5rem;
+}
+
+.tip__panel [data-verdict-group] > * + * {
+  margin-top: 0.25rem;
+}
+
+/* A note's short words lead its tooltip, and the note in full follows as its own paragraph. */
+.tip__panel > [data-note-text]:has(+ [data-note-full]) {
+  font-weight: 600;
 }
 
 html:not([data-tips]) .tip--info:is(:hover, :focus-within) > .tip__icon,
@@ -681,38 +699,38 @@ html:not([data-tips]) .tip--info:is(:hover, :focus-within) > .tip__icon,
   list-style: none;
 }
 
-.pin {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: var(--pin-size);
-  height: var(--pin-size);
-  background: var(--color-maroon);
-  border-radius: 50%;
-  color: var(--color-off-white);
-  font-size: var(--text-meta);
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
-
-/* A card's notes: numbered badges at the right of its last row, beside the toggle and as-of line.
+/* A card's notes: numbered badges inline at the end of the title, legend row or label they qualify.
    Each is a tooltip trigger, at least 24 px. */
 .note-badges {
-  display: flex;
-  flex-wrap: wrap;
+  display: inline-flex;
   gap: 0.25rem;
-  margin: 0.75rem 0 0 auto;
-  padding: 0;
-  list-style: none;
+  margin-block: -0.25rem;
+  margin-left: 0.375rem;
+  vertical-align: middle;
+  white-space: nowrap;
 }
 
-.chart-card > .note-badges {
-  flex: 0 0 auto;
+/* A card's title runs as text, so its badges follow its last word, wrapped or not. */
+.chart-card__head.explain-head {
+  display: block;
 }
 
-.chart-card > .chart-card__meta:has(+ .note-badges) {
-  flex: 1 1 0;
+.chart-card__head > h2,
+.chart-card__head > h3 {
+  display: inline;
+}
+
+.chart-card__head > .note-badges {
+  margin-left: 0.5rem;
+}
+
+/* While the table shows, the chart is gone, so its badges come up by the title. */
+.chart-card__head > .note-badges--table {
+  display: none;
+}
+
+.chart-card:has(> .data-toggle[open]) > .chart-card__head > .note-badges--table {
+  display: inline-flex;
 }
 
 .tip__badge {
@@ -1004,11 +1022,9 @@ html:not([data-tips]) .tip:is(:hover, :focus-within) > .tip__badge,
   gap: 0.5rem;
 }
 
+/* The headline runs as text, so its "?" follows its last word, wrapped or not. */
 .verdict-block__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.25rem 0.75rem;
+  display: block;
 }
 
 .verdict-block__head > .tip,
@@ -1016,13 +1032,21 @@ html:not([data-tips]) .tip:is(:hover, :focus-within) > .tip__badge,
   font-size: var(--text-small);
 }
 
+.verdict-block__head > .tip {
+  margin-left: 0.5rem;
+  vertical-align: 0.375em;
+}
+
+.verdict-block__frame {
+  margin-top: 0.25rem;
+}
+
 .verdict-block__frame {
   font-weight: 650;
 }
 
 .verdict-block__head h1 {
-  flex: 0 1 auto;
-  min-width: 0;
+  display: inline;
   font-size: var(--text-headline);
 }
 
@@ -1482,10 +1506,49 @@ html[data-freshness="stale"] .site-footer .freshness-text__fresh {
   }
 }
 
-/* The footer's reconciliation status: green, with a tick and the word, only on a build that passed. */
+/* The footer's reconciliation status: a green tick and "Reconciled" only on a build that passed, and
+   an amber clock and "Last reconciled" with the day once it's old. Each has its shape and words, so
+   colour is never alone. */
+.footer-status__icon {
+  flex: none;
+}
+
 .footer-status--reconciled {
   color: var(--meaning-positive);
   font-weight: 650;
+}
+
+.footer-status--stale {
+  font-weight: 650;
+}
+
+.footer-status--stale .footer-status__icon {
+  color: var(--meaning-caution);
+}
+
+/* A page under the dashboard: its back arrow, then its title, at the top under the header. */
+.page-main:has(> * > .back-link:first-child) {
+  padding-top: 1rem;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-left: -0.5rem;
+  border-radius: var(--radius-control);
+  color: var(--color-body-text);
+}
+
+.back-link:hover {
+  background: var(--color-secondary-strong);
+}
+
+.page-title {
+  margin-top: 0.25rem;
+  font-size: var(--text-display);
 }
 
 .reconciliation-page {
@@ -1494,13 +1557,41 @@ html[data-freshness="stale"] .site-footer .freshness-text__fresh {
   max-width: var(--page-content-width);
 }
 
+.reconciliation-page > .back-link + .page-title {
+  margin-top: -0.75rem;
+}
+
 .reconciliation-detail {
   display: grid;
-  gap: 0.75rem;
+  gap: 1rem;
   font-size: var(--text-small);
 }
 
+.reconciliation-detail__status {
+  font-weight: 650;
+}
+
 .reconciliation-detail__checks {
-  margin-top: 0.5rem;
+  margin-top: 0.75rem;
   font-size: var(--text-card-title);
+}
+
+/* Each check and its result, one to a row. */
+.check-list {
+  display: grid;
+  max-width: 40rem;
+  margin: 0;
+}
+
+.check-list__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  padding: 0.375rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.check-list dd {
+  margin: 0;
+  font-weight: 650;
 }

@@ -40,6 +40,10 @@ function Marker({ state }: { state: DatasetState }) {
   );
 }
 
+// What a run covers, and what it doesn't, in one sentence.
+export const COVERS =
+  "Each run compares every chain's mints minus burns with its supply, and their sum with Bridge's total; it doesn't check placed share or velocity.";
+
 // The state, dated, with its marker. The words never move into a tooltip.
 function TrustLine({ state }: { state: DatasetState }) {
   return (
@@ -50,10 +54,10 @@ function TrustLine({ state }: { state: DatasetState }) {
   );
 }
 
-// At the top of the main page whenever the build didn't pass: stale, a failed run, a preview or a
-// sample. A passing build says "Reconciled" in the footer instead. The detail is its own page.
+// At the top of the main page on sample or preview data, or when a newer run failed its checks. Real
+// data that is only old says so in the footer instead. The detail is its own page.
 export function TrustStrip({ state }: { state: DatasetState }) {
-  if (state.passing) return null;
+  if (state.staleInFooter) return null;
   return (
     <section className="trust-strip" aria-label="Reconciliation" data-section="trust-strip">
       <TrustLine state={state} />
@@ -64,46 +68,84 @@ export function TrustStrip({ state }: { state: DatasetState }) {
   );
 }
 
-// The footer's word for the state, linking to the detail. "Reconciled" in green only on a build that
-// passed, with a tick and the word, so it isn't colour alone, and the full sentence as its tooltip. It
-// swaps in place if the reader's clock finds the page old. A real build that didn't pass is stale for
-// good, and a sample or preview is never reconciled at any age, so each has one text, always shown.
-export function FooterStatus({ state }: { state: DatasetState }) {
-  const line = (mark: string, text: string) => (
-    <span className="footer-status">
-      <span aria-hidden="true">{mark}</span>{" "}
-      <a href={RECONCILIATION_PATH} className="target-link underline underline-offset-4">
-        {text}
-      </a>
-    </span>
+// Drawn, so each state has a shape as well as a colour, and the label beside it says it in words.
+function StatusIcon({ shape }: { shape: "check" | "clock" }) {
+  return (
+    <svg
+      className="footer-status__icon"
+      width="14"
+      height="14"
+      viewBox="0 0 14 14"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {shape === "check" ? (
+        <path d="M2.5 7.5 5.5 10.5 11.5 3.5" fill="none" stroke="currentColor" strokeWidth="2" />
+      ) : (
+        <>
+          <circle cx="7" cy="7" r="5.75" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M7 3.75V7h2.75" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        </>
+      )}
+    </svg>
   );
+}
+
+// The footer's word for the state, linking to the detail, with the full sentence as its tooltip. A
+// green tick and "Reconciled" only on a build that passed. Once the reader's clock finds it old, or
+// on real data that was old when built, an amber clock and "Last reconciled" with the day: never
+// "Reconciled" alone. A sample or preview is never reconciled at any age, so it has one text.
+export function FooterStatus({ state }: { state: DatasetState }) {
   if (state.kind !== "real") {
-    return <p data-footer-status>{line("○", state.trustLine.stale)}</p>;
+    return (
+      <p data-footer-status>
+        <span className="footer-status">
+          <span aria-hidden="true">○</span>{" "}
+          <a href={RECONCILIATION_PATH} className="target-link underline underline-offset-4">
+            {state.trustLine.stale}
+          </a>
+        </span>
+      </p>
+    );
   }
-  const reconciled = state.passing ? (
-    <span className="footer-status footer-status--reconciled" data-reconciled>
+  const status = (variant: "reconciled" | "stale", text: string, tip: string) => (
+    <span
+      className={`footer-status footer-status--${variant}`}
+      data-reconciled={variant === "reconciled" ? "" : undefined}
+      data-stale-status={variant === "stale" ? "" : undefined}
+    >
       <LinkTip
         href={RECONCILIATION_PATH}
         above
-        className="target-link gap-1 underline underline-offset-4"
+        align="end"
+        className="target-link gap-1.5 underline underline-offset-4"
         text={
           <>
-            <span aria-hidden="true">✓</span> Reconciled
+            <StatusIcon shape={variant === "reconciled" ? "check" : "clock"} />
+            {text}
           </>
         }
       >
-        {state.trustLine.fresh}
+        {tip}
       </LinkTip>
     </span>
-  ) : null;
+  );
+  const reconciled =
+    state.passing && state.trustLine.fresh
+      ? status("reconciled", "Reconciled", state.trustLine.fresh)
+      : null;
   return (
     <p data-footer-status>
-      <FreshnessText fresh={reconciled} stale={line("▲", state.trustLine.stale)} />
+      <FreshnessText
+        fresh={reconciled}
+        stale={status("stale", state.trustLine.short, state.trustLine.stale)}
+      />
     </p>
   );
 }
 
-// Everything the trust row's disclosure used to hold, for /reconciliation/.
+// The detail behind the footer's status: one line on the latest run, what it covers, the run's
+// figures and the checks before publishing.
 export function ReconciliationDetail({
   reconciliation,
   latest_run,
@@ -111,27 +153,23 @@ export function ReconciliationDetail({
   state,
 }: ReconciliationDetailProps) {
   const rows = latestRows(reconciliation, latest_run);
-  const framed = state.frameWord ? `${state.frameWord} figures, not a reconciliation. ` : "";
   return (
     <section className="reconciliation-detail" data-section="reconciliation">
-      <TrustLine state={state} />
+      <p className="reconciliation-detail__status" data-run-line>
+        <FreshnessText fresh={state.runLine.fresh} stale={state.runLine.stale} />
+      </p>
       <p>
+        {COVERS}{" "}
         <a
           href={definitionHref("reconciliation")}
           className="target-link underline underline-offset-4"
         >
-          What this covers
+          How it works
         </a>
-      </p>
-      <p>
-        {framed}
-        Reconciliation compares mints minus burns with supply at the block shown. The KPI totals are
-        at the close of the named day, so they can differ from these. It doesn&apos;t verify placed
-        share or velocity.
       </p>
       {rows.length > 0 ? (
         <HairlineTable
-          caption="Latest reconciliation run, in base units (1 OUSD is 1,000,000)"
+          caption="Latest run, in base units (1 OUSD is 1,000,000), at each chain's block"
           columns={[
             { key: "subject", label: "Compared" },
             { key: "block", label: "Block", numeric: true },
@@ -152,15 +190,17 @@ export function ReconciliationDetail({
       ) : (
         <p>{UNKNOWN_TEXT}</p>
       )}
-      <h2 className="reconciliation-detail__checks">Checks before this data was published</h2>
-      <ul className="list-disc pl-5">
+      <h2 className="reconciliation-detail__checks">Checks before publishing</h2>
+      <dl className="check-list" data-check-list>
         {checks.map((check) => (
-          <li key={check.name}>
-            {(CHECK_LABELS as Record<string, string>)[check.name] ?? check.name}:{" "}
-            {check.status === "passed" ? "passed" : "not run"}
-          </li>
+          <div key={check.name} className="check-list__row">
+            <dt>{(CHECK_LABELS as Record<string, string>)[check.name] ?? check.name}</dt>
+            <dd data-check-status={check.status}>
+              {check.status === "passed" ? "Passed" : "Not run"}
+            </dd>
+          </div>
         ))}
-      </ul>
+      </dl>
     </section>
   );
 }

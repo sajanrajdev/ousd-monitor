@@ -16,9 +16,9 @@ import {
 // times, which the heap of a file with hundreds of tests can't also hold. For the same reason they get
 // longer than the default, as a slower machine takes seconds over a test with several such pages.
 const WHOLE_PAGE_TIMEOUT_MS = 30_000;
-// The release-grade copy, long past its 36 hours, so its detail page states it as stale.
+// The release-grade copy, long past its 36 hours, so its detail page states its last run as old.
 const RECONCILED_TRUST =
-  "Last reconciled 4 Nov 2026, 05:30 UTC. Nothing newer has reached this page, so it may be out of date.";
+  "Last run 4 Nov 2026, 05:30 UTC: every check passed. Nothing newer has reached this page, so it may be out of date.";
 
 function site({ main, methodology }: { main: string; methodology: string }) {
   const dir = tempDir();
@@ -33,8 +33,6 @@ function site({ main, methodology }: { main: string; methodology: string }) {
 }
 
 describe("the velocity chart and the chain grid", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
-  const STALE =
-    "Data from 4 Nov 2026, 06:00 UTC. Nothing newer has reached this page, so it may be out of date.";
   const TRUST =
     "Last reconciled 4 Nov 2026, 05:30 UTC. Nothing newer has reached this page, so it may be out of date.";
   const dir = releaseGrade();
@@ -53,8 +51,8 @@ describe("the velocity chart and the chain grid", { timeout: WHOLE_PAGE_TIMEOUT_
   const main = plantedRealMain(expected, TRUST);
   const page = (body: string) =>
     `<!doctype html><html data-dataset-kind="real" data-dataset-version="${expected.version}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
-    ${PLANTED_HEADER}<p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
-    ${plantedFooter(false, { fresh: null, stale: TRUST })}</body></html>`;
+    ${PLANTED_HEADER}${plantedFlight([])}${body}
+    ${plantedFooter(false, { fresh: null, stale: TRUST, short: "Last reconciled 4 Nov" })}</body></html>`;
   const check = (body: string) =>
     verifyOutput(site({ main: page(body), methodology: page("<main>Fine</main>") }), expected);
 
@@ -63,25 +61,28 @@ describe("the velocity chart and the chain grid", { timeout: WHOLE_PAGE_TIMEOUT_
     expect(check(main)).toEqual([]);
   });
 
-  it("fails with the warning's badge gone, or a pin put back beside a chain", () => {
-    const moved = main.replace(/<li data-note="velocity-warning".*?<\/li>/, "");
-    expect(check(moved)).toEqual(
+  it("fails with the warning's badge gone, or moved off its chain", () => {
+    const gone = main.replace(
+      /(<p class="velocity-chart__name">base)<ol data-note-badges><li data-note="velocity-warning".*?<\/li><\/ol>/,
+      "$1",
+    );
+    expect(gone).not.toBe(main);
+    expect(check(gone)).toEqual(
       expect.arrayContaining([
         expect.stringContaining(
-          "#velocity-by-chain: its notes are velocity-denominators:, not velocity-warning:base,",
+          "#velocity-by-chain: its notes are velocity-denominators:, not velocity-denominators:,velocity-warning:base",
         ),
       ]),
     );
-    // The badges are the card's one set of markers, so a pin beside a chain's name fails.
-    const pinned = main.replace(
-      /(<p class="velocity-chart__name">base)/,
-      '$1<span class="pin">1</span>',
-    );
-    expect(pinned).not.toBe(main);
-    expect(check(pinned)).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("a pin is in its chart or legend as well as its badges"),
-      ]),
+    // Beside another chain's name, its badge points at the wrong chain.
+    const badge = /(<p class="velocity-chart__name">base)(<ol data-note-badges>.*?<\/ol>)/.exec(
+      main,
+    )!;
+    const moved = main
+      .replace(badge[0], badge[1])
+      .replace(/(<p class="velocity-chart__name">solana)/, `$1${badge[2]}`);
+    expect(check(moved)).toContain(
+      "index.html: #velocity-by-chain: its velocity-warning note's badge isn't on base",
     );
   });
 
@@ -103,16 +104,20 @@ describe("the velocity chart and the chain grid", { timeout: WHOLE_PAGE_TIMEOUT_
         expect.stringContaining("lost the velocity-denominators note in full"),
       ]),
     );
-    // There's no legend, and the denominators note is a badge, so a pin on the row fails.
-    const pin = main.replace(
-      /(<div data-measure="headline_velocity_bps"><span class="velocity-chart__label">M)/,
-      '$1<span class="pin">2</span>',
-    );
-    expect(pin).not.toBe(main);
-    expect(check(pin)).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("a pin is in its chart or legend as well as its badges"),
-      ]),
+    // The denominators note is about the whole card, so its badge on a headline row fails.
+    const head = /<div class="chart-card__head"><h2>[^<]*<\/h2>(<ol data-note-badges>.*?<\/ol>)/;
+    const own = head.exec(main.slice(main.indexOf('id="velocity-by-chain"')))![1];
+    const start = main.indexOf('id="velocity-by-chain"');
+    const card = main.slice(start);
+    const moved = `${main.slice(0, start)}${card
+      .replace(own, "")
+      .replace(
+        /(<div data-measure="headline_velocity_bps"><span class="velocity-chart__label">M)/,
+        `$1${own}`,
+      )}`;
+    expect(moved).not.toBe(main);
+    expect(check(moved)).toContain(
+      "index.html: #velocity-by-chain: its velocity-denominators note's badge isn't on the card's title",
     );
     expect(main).not.toContain("data-velocity-legend");
   });

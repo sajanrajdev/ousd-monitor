@@ -39,7 +39,7 @@ describe("the real activity view", () => {
     for (const card of cards) {
       expect(card.querySelector("h2")!.textContent!.length).toBeGreaterThan(10);
       expect(card.querySelector(".chart-card__meta")!.textContent).toContain("As of");
-      const panel = card.querySelector(".tip__panel")!;
+      const panel = card.querySelector(".chart-card__head > .tip--info > .tip__panel")!;
       expect(panel.textContent).toContain("Source:");
       expect(panel.querySelector('a[href^="/methodology/#"]')).not.toBeNull();
     }
@@ -205,7 +205,9 @@ describe("the real activity view", () => {
     const card = exact.container.querySelector(
       `#${CARD_ANCHORS.waterfall} > [data-chain-panel="all"]`,
     )!;
-    const note = card.querySelector('[data-pinned-notes] [data-note="day-0-scope"]')!;
+    const note = card.querySelector(
+      '[data-note-badges]:not([data-note-copy]) [data-note="day-0-scope"]',
+    )!;
     // No marker: the page reads as inferred throughout, and a fact needs no chip of its own.
     expect(note.querySelector(".status-chip")).toBeNull();
     const words = note.querySelector(".tip__panel [data-note-text]")!.textContent;
@@ -230,7 +232,9 @@ describe("the real activity view", () => {
     const { container } = mount();
     for (const value of ["all", "tempo", "ethereum", "base", "solana"]) {
       const card = panel(container, CARD_ANCHORS.waterfall, value);
-      const note = card.querySelector('[data-pinned-notes] [data-note="small-ticket"]');
+      const note = card.querySelector(
+        '[data-note-badges]:not([data-note-copy]) [data-note="small-ticket"]',
+      );
       const full = card.querySelector('.tip__panel [data-full-note="small-ticket"]');
       if (value === "all" || value === "tempo") {
         const words = note!.querySelector(".tip__panel [data-note-text]")!.textContent;
@@ -250,12 +254,25 @@ describe("the real activity view", () => {
     const { container } = mount();
     for (const value of ["all", "ethereum"]) {
       const card = panel(container, CARD_ANCHORS.waterfall, value);
-      const notes = [...card.querySelectorAll("[data-pinned-notes] > [data-note]")];
+      const notes = [
+        ...card.querySelectorAll("[data-note-badges]:not([data-note-copy]) > [data-note]"),
+      ];
       const numbers = notes.map((note) => note.querySelector(".tip__badge")!.textContent);
       expect(numbers).toEqual(notes.map((_, index) => String(index + 1)));
       expect(notes.some((note) => note.getAttribute("data-note") === "hops")).toBe(true);
       expect(card.querySelector(".chart-area .pin")).toBeNull();
+      // Each badge sits on the waterfall row it qualifies, so the chart is read, not hidden.
+      expect(card.querySelector('[data-step="clean_large"] [data-note="hops"]')).not.toBeNull();
+      expect(card.querySelector(".chart-area")!.hasAttribute("aria-hidden")).toBe(false);
+      expect(card.querySelector(".chart-card > .note-badges")).toBeNull();
     }
+    const all = panel(container, CARD_ANCHORS.waterfall, "all");
+    expect(
+      all.querySelector('[data-step="issuer_flows"] [data-note="small-ticket"]'),
+    ).not.toBeNull();
+    // The weekly card's notes are about the whole card, so they sit by its title.
+    const weekly = panel(container, CARD_ANCHORS.weekly, "all");
+    expect(weekly.querySelectorAll(".chart-card__head [data-note]")).toHaveLength(2);
   });
 
   it("sums every chain's waterfall back to its headline, with bars at clean large and everyday", () => {
@@ -283,7 +300,9 @@ describe("the real activity view", () => {
         const name = value.charAt(0).toUpperCase() + value.slice(1);
         expect(card.querySelector("h2")!.textContent).toMatch(new RegExp(`^On ${name}, `));
         for (const kind of kinds) {
-          const note = card.querySelector(`[data-pinned-notes] [data-note="${kind}"]`);
+          const note = card.querySelector(
+            `[data-note-badges]:not([data-note-copy]) [data-note="${kind}"]`,
+          );
           expect(note, `${kind} on ${value}`).not.toBeNull();
         }
       }
@@ -309,7 +328,9 @@ describe("the real activity view", () => {
       /^Weeks end on the date shown, in UTC\. \d+ days of history/,
     );
     expect(
-      card.querySelector('[data-pinned-notes] [data-note="history"] [data-note-text]')!.textContent,
+      card.querySelector(
+        '[data-note-badges]:not([data-note-copy]) [data-note="history"] [data-note-text]',
+      )!.textContent,
     ).toMatch(/\d+ days of history: a direction, not a trend\./);
     expect(card.querySelectorAll(".note-badges .tip__badge")).toHaveLength(2);
     expect(card.querySelector(".chart-area .pin")).toBeNull();

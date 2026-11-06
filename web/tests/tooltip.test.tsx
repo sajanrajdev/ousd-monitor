@@ -76,9 +76,16 @@ describe("the tooltip", () => {
   it("opens with no script on :hover and :focus-within, until the enhancer takes over", () => {
     const css = readFileSync(join(process.cwd(), "app/globals.css"), "utf8");
     expect(css).toMatch(
-      /html:not\(\[data-tips\]\) \.tip:is\(:hover, :focus-within\) > \.tip__panel,\s*\.tip\[data-open\] > \.tip__panel \{\s*display: grid;/,
+      /html:not\(\[data-tips\]\) \.tip:is\(:hover, :focus-within\) > \.tip__panel,\s*\.tip\[data-open\] > \.tip__panel \{\s*display: block;/,
     );
     expect(css).toMatch(/\.tip__panel \{[^}]*position: absolute;/);
+  });
+
+  it("styles every panel alike: one width, and its parts as paragraphs with space between", () => {
+    const css = readFileSync(join(process.cwd(), "app/globals.css"), "utf8");
+    expect(css).toMatch(/\.tip__panel \{[^}]*width: min\(20rem, calc\(100vw - 2rem\)\);/);
+    expect(css).not.toMatch(/\.tip__panel \{[^}]*max-content/);
+    expect(css).toMatch(/\.tip__panel > \* \+ \* \{\s*margin-top: 0\.5rem;/);
   });
 
   it("has no axe violations, open", async () => {
