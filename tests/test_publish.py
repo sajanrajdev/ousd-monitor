@@ -2048,3 +2048,104 @@ def test_exchange_holdings_that_miss_exchange_venues_are_refused() -> None:
 
     with pytest.raises(publisher.PublishRefused, match="exchange holdings"):
         publisher._exchange_holdings(_holdings_tables(5), journey)
+
+
+# The commit, where an image has no checkout. publish.py runs git first, so these replace it.
+def _git_fails(*_args, **_kwargs):
+    return publisher.subprocess.CompletedProcess(["git"], 128, "", "fatal: not a git repository")
+
+
+def _git_missing(*_args, **_kwargs):
+    raise FileNotFoundError("git")
+
+
+@pytest.mark.parametrize("no_git", [_git_fails, _git_missing])
+def test_without_git_the_commit_comes_from_ousd_git_commit(monkeypatch, no_git):
+    monkeypatch.setattr(publisher.subprocess, "run", no_git)
+    monkeypatch.setenv("OUSD_GIT_COMMIT", "0123456789abcdef0123456789abcdef01234567")
+    assert publisher._git_commit() == "0123456789ab"
+    monkeypatch.setenv("OUSD_GIT_COMMIT", "fedcba987654")
+    assert publisher._git_commit() == "fedcba987654"
+
+
+@pytest.mark.parametrize("no_git", [_git_fails, _git_missing])
+def test_without_git_or_the_variable_publish_refuses(monkeypatch, no_git):
+    monkeypatch.setattr(publisher.subprocess, "run", no_git)
+    monkeypatch.delenv("OUSD_GIT_COMMIT", raising=False)
+    with pytest.raises(PublishRefused, match="cannot read the git commit"):
+        publisher._git_commit()
+    monkeypatch.setenv("OUSD_GIT_COMMIT", "")
+    with pytest.raises(PublishRefused, match="cannot read the git commit"):
+        publisher._git_commit()
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "abc123",  # too short to trace
+        "0123456789ABCDEF",  # uppercase
+        "0123456789abcdef0123456789abcdef012345678",  # 41 characters
+        " 0123456789abcdef",  # padded
+        "0123456789abcdef\n",
+        "https://rpc.example/0123456789abcdef",
+        "main",
+    ],
+)
+def test_a_malformed_ousd_git_commit_refuses_without_echoing_it(monkeypatch, bad):
+    monkeypatch.setattr(publisher.subprocess, "run", _git_fails)
+    monkeypatch.setenv("OUSD_GIT_COMMIT", bad)
+    with pytest.raises(PublishRefused) as refused:
+        publisher._git_commit()
+    assert "OUSD_GIT_COMMIT isn't a lowercase commit hash" in str(refused.value)
+    assert bad.strip() not in str(refused.value)
+
+
+def _git_prints(stdout):
+    def run(*_args, **_kwargs):
+        return publisher.subprocess.CompletedProcess(["git"], 0, stdout, "")
+
+    return run
+
+
+def test_a_working_git_wins_over_the_variable(monkeypatch):
+    monkeypatch.setattr(publisher.subprocess, "run", _git_prints("0123456789ab\n"))
+    # Malformed, so a read of it would refuse: git working means it's never read.
+    monkeypatch.setenv("OUSD_GIT_COMMIT", "main")
+    assert publisher._git_commit() == "0123456789ab"
+
+
+@pytest.mark.skipif(
+    shutil.which("git") is None or not (Path(__file__).parent.parent / ".git").exists(),
+    reason="needs a git checkout",
+)
+def test_the_real_checkout_gives_a_short_hash(monkeypatch):
+    monkeypatch.setenv("OUSD_GIT_COMMIT", "fedcba987654")
+    commit = publisher._git_commit()
+    assert re.fullmatch(r"[0-9a-f]{12}", commit)
+    assert commit != "fedcba987654"
+
+
+@pytest.mark.parametrize("odd", ["", "warning: something\n0123456789ab", "HEAD\n"])
+def test_odd_git_output_refuses(monkeypatch, odd):
+    monkeypatch.setattr(publisher.subprocess, "run", _git_prints(odd))
+    monkeypatch.setenv("OUSD_GIT_COMMIT", "fedcba987654")
+    with pytest.raises(PublishRefused, match="other than a commit hash"):
+        publisher._git_commit()
+
+
+def test_a_hung_git_falls_back_to_the_variable(monkeypatch):
+    def hang(*_args, **kwargs):
+        assert kwargs["timeout"] == 10
+        raise publisher.subprocess.TimeoutExpired(["git"], 10)
+
+    monkeypatch.setattr(publisher.subprocess, "run", hang)
+    monkeypatch.setenv("OUSD_GIT_COMMIT", "fedcba987654")
+    assert publisher._git_commit() == "fedcba987654"
+
+
+def test_a_published_manifest_carries_the_supplied_commit(world, monkeypatch):
+    monkeypatch.setattr(publisher.subprocess, "run", _git_fails)
+    monkeypatch.setenv("OUSD_GIT_COMMIT", "fedcba9876543210fedcba9876543210fedcba98")
+    world.run_checks()
+    folder = world.publish()
+    assert read_json(folder, "manifest.json")["git_commit"] == "fedcba987654"
