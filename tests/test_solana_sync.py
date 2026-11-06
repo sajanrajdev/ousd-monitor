@@ -150,8 +150,9 @@ def test_the_cursor_never_lands_on_a_slot_with_a_transaction_missing(store, monk
     fake.add(movement("a", slot_of(0), 1))
     for index in (1, 2, 3):
         fake.add(movement(f"b{index}", slot_of(1), index))
-    fake.add(movement("c", slot_of(2), 1))
-    expected = {slot_of(0): 1, slot_of(1): 3, slot_of(2): 1}
+    for index in (1, 2):
+        fake.add(movement(f"c{index}", slot_of(2), index))
+    expected = {slot_of(0): 1, slot_of(1): 3, slot_of(2): 2}
     cursors: list[int] = []
     write = store.write_range
 
@@ -169,7 +170,7 @@ def test_the_cursor_never_lands_on_a_slot_with_a_transaction_missing(store, monk
     sync_solana(CHAIN, fake, store)
 
     assert slot_of(1) in cursors
-    assert len(stored(store)) == 5
+    assert len(stored(store)) == 6
 
 
 def test_a_second_sync_with_nothing_new_changes_nothing(store):
@@ -578,3 +579,88 @@ def test_a_key_is_stripped():
     assert load_solana({"SOLANA_RPC_URL": " http://rpc.invalid/k \n"}).rpc_url == (
         "http://rpc.invalid/k"
     )
+
+
+def _newest_first(fake: FakeSolanaRpc):
+    return sorted(fake.rows, key=lambda r: (r.slot, r.transaction_index), reverse=True)
+
+
+def test_a_long_walk_commits_in_bounded_batches_oldest_first_and_logs_each(
+    store, monkeypatch, caplog
+):
+    monkeypatch.setattr(solana, "COMMIT_EVERY", 3)
+    fake = history(10)
+    fake.page_size = 4
+    cursors: list[int] = []
+    write = store.write_range
+
+    def recording(chain, transfers, hashes, through):
+        assert len(transfers) <= 3
+        write(chain, transfers, hashes, through)
+        cursors.append(through)
+
+    monkeypatch.setattr(store, "write_range", recording)
+    with caplog.at_level("INFO", logger=solana.log.name):
+        sync_solana(CHAIN, fake, store)
+
+    assert cursors == sorted(cursors) and len(cursors) > 2 and cursors[-1] == fake.head
+    assert fake.transaction_requests == [r.signature for r in reversed(_newest_first(fake))]
+    stored_logs = [r.message for r in caplog.records if "stored slots" in r.message]
+    assert len(stored_logs) == len(cursors)
+    assert "transfers" in stored_logs[0]
+
+
+@pytest.mark.parametrize("fail_at", range(1, 11))
+def test_a_walk_cut_short_anywhere_resumes_to_the_rows_of_an_uninterrupted_run(
+    store, monkeypatch, fail_at
+):
+    monkeypatch.setattr(solana, "COMMIT_EVERY", 3)
+    monkeypatch.setattr(solana, "REREAD_SLOTS", 25)
+    fake = history(9)
+    fake.page_size = 2
+    fake.raise_on_transaction_call = fail_at
+    with pytest.raises(RuntimeError, match="dropped"):
+        sync_solana(CHAIN, fake, store)
+    cursor = store.synced_through("solana")
+    in_store = {r[0] for r in stored(store)}
+    if cursor is None:
+        assert in_store == set()
+    else:
+        assert in_store == {s for s in map(slot_of, range(9)) if s <= cursor}
+
+    fake.raise_on_transaction_call = None
+    sync_solana(CHAIN, fake, store)
+
+    reference = Store()
+    sync_solana(CHAIN, history(9), reference)
+    assert stored(store) == stored(reference)
+    assert store.synced_through("solana") == reference.synced_through("solana")
+    reference.close()
+
+
+def test_a_missing_signature_page_is_an_error_not_an_assertion(store, monkeypatch):
+    fake = history(2)
+    monkeypatch.setattr(fake, "signatures", lambda mint, before, slot: None)
+    with pytest.raises(SolanaDataError, match="no signature page"):
+        sync_solana(CHAIN, fake, store)
+    assert stored(store) == []
+
+
+def test_a_reread_batch_never_moves_the_cursor_back(store, monkeypatch):
+    monkeypatch.setattr(solana, "REREAD_SLOTS", 1000)
+    fake = history(8)
+    sync_solana(CHAIN, fake, store)
+    cursor = store.synced_through("solana")
+    monkeypatch.setattr(solana, "COMMIT_EVERY", 2)
+    cursors: list[int] = []
+    write = store.write_range
+
+    def recording(chain, transfers, hashes, through):
+        write(chain, transfers, hashes, through)
+        cursors.append(store.synced_through(chain))
+
+    monkeypatch.setattr(store, "write_range", recording)
+    fake.head += 50
+    sync_solana(CHAIN, fake, store)
+
+    assert cursors and min(cursors) >= cursor

@@ -16,7 +16,7 @@ Row contract, so the store and everything after it work on Solana unchanged:
 import logging
 import os
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, NamedTuple
@@ -466,8 +466,9 @@ def sync_solana(
     """Store the mint's transactions through a slot (default: the finalized head), oldest first.
 
     Everything at or below `synced_through` is stored, so a crash or a stop leaves a cursor that is
-    still true. Only `finalized` data is read, so there is no reorg to repair. With no `reread`, the
-    tail is always read again.
+    still true, and the next run continues from it. The cursor moves in batches of about
+    COMMIT_EVERY transactions, never inside a slot. Only `finalized` data is read, so there is no
+    reorg to repair. With no `reread`, the tail is always read again.
     """
     if rpc.genesis_hash() != GENESIS_HASH:
         raise SolanaDataError(f"{chain.name}: the RPC does not serve Solana mainnet")
@@ -479,21 +480,9 @@ def sync_solana(
     # Read below the cursor again, wherever the head is: a node can list a transaction late.
     heal = reread is None or not reread.spent
     lower = None if cursor is None else cursor - REREAD_SLOTS if heal else cursor
-    rows = _walk(chain, rpc, head, lower)
-    fetch = [row for row in reversed(rows) if not row.failed]
-
-    batch: list[Transfer] = []
-    slots: dict[str, int] = {}
-    last_slot: int | None = None
-    for row in fetch:
-        # Commit only between slots, so the cursor never lands on a slot with a row missing.
-        if last_slot is not None and row.slot != last_slot and len(slots) >= COMMIT_EVERY:
-            _commit(chain, store, batch, slots, last_slot)
-            batch, slots = [], {}
-        batch.extend(_fetch_decoded(rpc, row))
-        slots[row.signature] = row.slot
-        last_slot = row.slot
-    _commit(chain, store, batch, slots, head)
+    for segment, through in _segments(chain, rpc, head, lower):
+        # A re-read batch can end below the stored cursor, which stays true and must not go back.
+        _apply(chain, rpc, store, segment, through if cursor is None else max(through, cursor))
     if reread is not None:
         reread.spent = True
     return SyncResult(chain.name, head, head, None, store.transfer_count(chain.name))
@@ -517,18 +506,57 @@ def _retry[T](rpc: SolanaRpc, attempt: Callable[[], T | None], retry_on_code: bo
     return None
 
 
-def _walk(chain: SolanaChain, rpc: SolanaRpc, head: int, lower: int | None) -> list[SignatureRow]:
-    """Signatures above `lower` and at or below `head`, newest first.
+class _Cut(NamedTuple):
+    """Rows at or below `slot` belong to an older batch. `after` is the signature of the row just
+    above the cut: paging backwards from it starts at the cut."""
+
+    slot: int
+    after: str
+
+
+def _segments(
+    chain: SolanaChain, rpc: SolanaRpc, head: int, lower: int | None
+) -> Iterator[tuple[list[SignatureRow], int]]:
+    """The signatures above `lower` and at or below `head` in batches, oldest batch first, each
+    newest first, with the slot the cursor may move to once its batch is stored.
+
+    Signatures only page backwards, so the oldest batch is found last. One pass down finds where
+    each batch begins, keeping only those cut points and the rows since the last one, which are
+    the oldest batch. The others are paged again, one at a time, so memory stays at one batch.
+    """
+    cuts: list[_Cut] = []
+    rows: list[SignatureRow] = []
+    counted = 0
+    above = ""
+    for row in _signature_rows(chain, rpc, head, lower, None):
+        if rows and row.slot != rows[-1].slot and counted >= COMMIT_EVERY:
+            cuts.append(_Cut(row.slot, above))
+            rows, counted = [], 0
+        rows.append(row)
+        counted += not row.failed
+        above = row.signature
+    through = cuts[-1].slot if cuts else head
+    yield rows, through
+    for index in range(len(cuts) - 1, -1, -1):
+        start = cuts[index - 1].after if index else None
+        newer = cuts[index - 1].slot if index else head
+        stop = cuts[index].slot
+        yield list(_signature_rows(chain, rpc, head, stop, start)), newer
+
+
+def _signature_rows(
+    chain: SolanaChain, rpc: SolanaRpc, head: int, lower: int | None, before: str | None
+) -> Iterator[SignatureRow]:
+    """Signatures above `lower` and at or below `head`, newest first, paging back from `before`.
 
     Stops at a row at or below `lower`, or at the creation signature. A short page proves nothing,
     so an empty page before either of those is truncated history and raises.
     """
-    rows: list[SignatureRow] = []
-    before: str | None = None
     previous: tuple[int, int] | None = None
     while True:
         page = _retry(rpc, partial(rpc.signatures, chain.mint, before, head), True)
-        assert page is not None  # A page is a list, even when empty.
+        if page is None:
+            raise SolanaDataError(f"{chain.name}: the node returned no signature page")
         if not page:
             raise SolanaDataError(
                 f"{chain.name}: signature history ended before its start (slot {lower}) "
@@ -542,12 +570,26 @@ def _walk(chain: SolanaChain, rpc: SolanaRpc, head: int, lower: int | None) -> l
                 )
             previous = position
             if lower is not None and row.slot <= lower:
-                return rows
+                return
             if row.slot <= head:
-                rows.append(row)
+                yield row
             if row.signature == MINT_CREATION_SIGNATURE:
-                return rows
+                return
         before = page[-1].signature
+
+
+def _apply(
+    chain: SolanaChain, rpc: SolanaRpc, store: Store, segment: list[SignatureRow], through: int
+) -> None:
+    """Fetch one batch's transactions, oldest first, and store them with the cursor in one write."""
+    batch: list[Transfer] = []
+    slots: dict[str, int] = {}
+    for row in reversed(segment):
+        if row.failed:
+            continue
+        batch.extend(_fetch_decoded(rpc, row))
+        slots[row.signature] = row.slot
+    _commit(chain, store, batch, slots, through)
 
 
 def _fetch_decoded(rpc: SolanaRpc, row: SignatureRow) -> list[Transfer]:
@@ -568,7 +610,15 @@ def _commit(
 ) -> None:
     _refuse_rekey(chain, store, batch, slots)
     store.write_range(chain.name, batch, {}, through)
-    log.info("%s: stored through slot %d", chain.name, through)
+    first = min(slots.values(), default=through)
+    log.info(
+        "%s: stored slots %d to %d: %d transactions, %d transfers",
+        chain.name,
+        first,
+        through,
+        len(slots),
+        len(batch),
+    )
 
 
 def _refuse_rekey(
