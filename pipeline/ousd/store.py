@@ -906,7 +906,7 @@ class Store:
             [chain],
         ).fetchone()
 
-    def reconciliation_runs(
+    def reconciliation_run_ids(
         self,
         chain: str,
         block_number: int,

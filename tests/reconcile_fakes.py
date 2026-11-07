@@ -250,10 +250,9 @@ def stored_check_text(store):
     )
 
 
-CAROL = "0x" + "d" * 40
-
-
 # For sampled balances, over the same fake chain.
+
+CAROL = "0x" + "d" * 40
 
 
 def tempo_probes(store):

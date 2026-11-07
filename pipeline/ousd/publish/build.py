@@ -193,7 +193,7 @@ def _run_of_chain_row(store: Store, row: Mapping[str, Any]) -> str | None:
     proved its figures. None when unclear."""
     recorded: set[str | None] = {
         run_id
-        for (run_id,) in store.reconciliation_runs(
+        for (run_id,) in store.reconciliation_run_ids(
             row["subject"],
             row["block_number"],
             row["checked_at"],
