@@ -22,6 +22,7 @@ dev = [
     "dagster-webserver>=1.8",
     "mypy>=2.4",
     "pytest>=8",
+    "pytest-xdist>=3",
     "ruff>=0.6",
     "sqlfluff>=3",
 ]
@@ -35,14 +36,20 @@ packages = ["pipeline/ousd"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+# -n auto runs the tests across one worker per core. Every test builds its own in-memory or
+# tmp_path database and the socket block is an autouse fixture, so each worker is isolated.
+addopts = "-q -n auto"
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+"pipeline/ousd/solana.py" = ["S101"]
 
 [tool.mypy]
 python_version = "3.12"
