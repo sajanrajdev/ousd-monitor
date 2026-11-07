@@ -25,7 +25,7 @@ def label(chain, address, category):
         "entity": "",
         "category": category,
         "source_type": "derived_rule",
-        "source_url": "docs/plans/2026-11-03-001-insight-models-plan.md",
+        "source_url": "docs/methodology.md",
         "confidence": "medium",
         "date_checked": LABEL_DATE,
     }

@@ -94,8 +94,8 @@ dagster-dev:
 	mkdir -p "$(DAGSTER_HOME)"
 	DAGSTER_HOME="$(DAGSTER_HOME)" uv run --locked $(ENV_FILE) dagster dev -f $(DAGSTER_FILE)
 
-# Through npx, because a bare or Corepack pnpm can crash. The version's one home is packageManager
-# in web/package.json. These steps never load .env, and web code never reads an RPC variable.
+# Always through npx, never a bare pnpm: see docs/operations.md. The version's one home is
+# packageManager in web/package.json. These steps never load .env.
 PNPM_SPEC = $(shell sed -n 's/.*"packageManager": *"\([^"]*\)".*/\1/p' web/package.json 2>/dev/null)
 PNPM = npx --yes $(PNPM_SPEC) --dir web
 NODE_RANGE = $(shell sed -n 's/.*"node": *"\([^"]*\)".*/\1/p' web/package.json 2>/dev/null)

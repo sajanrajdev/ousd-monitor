@@ -21,11 +21,11 @@ Ethereum and Tempo ingestion work on public endpoints. Base and Solana have no p
 
 ## DuckDB has one writer
 
-`make sync` and `reconcile` write `data/ousd.duckdb`. `make models` writes `data/marts.duckdb` and attaches `data/ousd.duckdb` read-only. `publish` and `run` chain these steps. DuckDB allows one writer per file, and a read-only attach still needs the file free of a writer, so run the steps one at a time. The second to start exits with code 2 and "database in use".
+DuckDB allows one writer per file, so run the pipeline steps one at a time. [The operations guide](docs/operations.md) says which commands write which file and what happens when two collide.
 
 ## Commits and pull requests
 
-- Use [Conventional Commits](https://www.conventionalcommits.org/) with an area scope: `pipeline`, `dbt`, `web`, `docs` or `ops`, for example `fix(dbt): count mints once`.
+- Use [Conventional Commits](https://www.conventionalcommits.org/) with an area scope: `pipeline`, `dbt`, `web`, `docs`, `ops` or `deps`, for example `fix(dbt): count mints once`.
 - Every pull request has a `## Decisions` section: one line per choice, in the form question -> choice (alternatives considered; cost to change later). The template has it.
 - Filter by contract address, never by the OUSD ticker, which Origin Dollar also uses.
 - Entity labels need a public source and a confidence. Do not name a partner or person by inference.

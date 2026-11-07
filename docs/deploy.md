@@ -1,6 +1,8 @@
 # Deploying the daily run
 
-How the hosted run is set up: one Railway cron service that runs the pipeline once a day and deploys a Vercel **preview** of the verified site. The plan and its decisions are in `docs/plans/2026-11-05-001-deployment-plan.md`. Production is promoted by hand, never by this run.
+This is the runbook for the current host, Railway. Running the pipeline, alerts and backups are in [operations](operations.md).
+
+How the hosted run is set up: one Railway cron service that runs the pipeline once a day and deploys a Vercel **preview** of the verified site. Production is promoted by hand, never by this run.
 
 ## What runs
 
@@ -14,11 +16,7 @@ Any failure exits non-zero and stops there: a failed run releases and deploys no
 
 ## Alerts and heartbeat
 
-A failed step of the pipeline writes `data/alerts/<run_id>.json` from inside the run, so it works under `make run`. A failure outside the pipeline, such as a refused release, a failed deploy, a bad setting, or a `make run` that stopped before any step, writes `data/alerts/daily-<time>.json` through `ousd alert`. With `OUSD_ALERT_WEBHOOK_URL` set, each alert is also posted there as JSON: `text`, `run_id`, `job`, `step`, a scrubbed `reason` and `failed_at`.
-
-With `OUSD_HEARTBEAT_URL` set, `ousd heartbeat` pings it only after the whole run has succeeded: published, released and deployed, or built with the deploy off. `make run` gets a blank heartbeat URL, so the pipeline never pings early. A dead-man check on that URL notices a run that failed before it could alert, or never started.
-
-Both URLs are secrets, like the RPC URLs. They are read from the environment, never put on a command line or in a log, and scrubbed from any error. Unset, nothing is sent.
+What the alerts and heartbeat contain, and how they are set, is in [operations](operations.md#alerts-and-heartbeat). On the hosted run, `OUSD_HEARTBEAT_URL` is pinged only after the release is built and deployed, or built with the deploy off.
 
 The allowlisted steps fail closed: if the environment can't be listed, or holds a variable that can't be removed (such as one whose name isn't a shell identifier), they don't run.
 
@@ -64,7 +62,7 @@ Names only. Values go into the service's variables in Railway and nowhere else.
 | `OUSD_RATE_LIMIT_WAIT_SECONDS` | Optional | Total time a run may wait out servers' rate limits. Default 3600 |
 | `OUSD_GIT_COMMIT` | No, leave unset | The commit recorded in the dataset, for local runs. On Railway the entry point always sets it from `RAILWAY_GIT_COMMIT_SHA` |
 
-Railway sets `RAILWAY_GIT_COMMIT_SHA` itself on deploys from GitHub. The image has no `.git` and no `git`, so `pipeline/ousd/publish.py` reads the commit from `OUSD_GIT_COMMIT`, which `scripts/daily.sh` fills from `RAILWAY_GIT_COMMIT_SHA`. A deploy that isn't from GitHub (for example `railway up`) has no commit, and publish refuses every run. That is intended: a dataset that can't be traced isn't published. The fallback in `publish.py` lands in its own PR, as the file is security-sensitive; until it merges, the image refuses to publish.
+Railway sets `RAILWAY_GIT_COMMIT_SHA` itself on deploys from GitHub. The image has no `.git` and no `git`, so `pipeline/ousd/publish.py` reads the commit from `OUSD_GIT_COMMIT`, which `scripts/daily.sh` fills from `RAILWAY_GIT_COMMIT_SHA`. A deploy that isn't from GitHub (for example `railway up`) has no commit, and publish refuses every run. That is intended: a dataset that can't be traced isn't published.
 
 Leave `OUSD_DB_PATH`, `OUSD_MARTS_DB_PATH`, `OUSD_PUBLISHED_DIR` and `OUSD_DATASET_DIR` unset: the defaults point into `/app/data`.
 
@@ -72,17 +70,17 @@ Leave `OUSD_DB_PATH`, `OUSD_MARTS_DB_PATH`, `OUSD_PUBLISHED_DIR` and `OUSD_DATAS
 
 Create the project, then turn on Vercel Authentication for **All Deployments** before the first deploy: a new project's first deployment is always production, even without `--prod`. The CLI reads `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` from the environment, so no linked folder is needed. It doesn't create a missing project in non-interactive mode.
 
-To promote a reviewed preview, after the reviews the plan lists under U7: `vercel promote <preview-url>`.
+To promote a reviewed preview once its numbers and wording have been checked: `vercel promote <preview-url>`.
 
 ## First seeding
 
-Production never does a cold backfill. The volume starts from a copy of the maintainer's `data/ousd.duckdb`:
+Production never does a cold backfill. The volume starts from a copy of a local `data/ousd.duckdb`:
 
-1. On the laptop, stop anything that writes: no `make run`, `make sync` or `make dagster-dev`.
+1. On the machine that holds the copy, stop anything that writes: no `make run`, `make sync` or `make dagster-dev`.
 2. Copy `data/ousd.duckdb` to a temporary file. Upload the copy, not the live file.
 3. On Railway, set the start command to `sleep infinity` with no cron schedule, so the service is online and runs nothing.
 4. `railway volume files upload <copy> /ousd.duckdb` (the volume root is `/app/data`). Optionally upload `data/published/` too, so the first deploy has a last good dataset to show as stale if the first run fails. If you do, check with `railway ssh` that `/app/data/published/latest` is still a symlink, not a folder: publish replaces the symlink and fails on a folder. If in doubt, leave `published/` out.
-5. Check the size matches. Then set the start command back to `scripts/daily.sh` and the cron schedule to `0 6 * * *`. From then on the Railway copy is the only writer, and the laptop copy is the fallback.
+5. Check the size matches. Then set the start command back to `scripts/daily.sh` and the cron schedule to `0 6 * * *`. From then on the Railway copy is the only writer, and the local copy is the fallback.
 
 ## Local test
 
