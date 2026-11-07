@@ -39,6 +39,7 @@ import { checkVelocity } from "./velocity.ts";
 import { checkGrid } from "./grid.ts";
 import { checkWaterfallPanels, checkWeeklyPanels } from "./activity.ts";
 import { checkEveryFile } from "./files.ts";
+import { checkFavicon, checkIconLinks } from "./favicon.ts";
 
 // What a caller may pass: the checks read only the fields they need, so a test can give a few.
 export type ExpectedInput = { [K in keyof Expected]?: unknown } & Record<string, unknown>;
@@ -53,6 +54,7 @@ export function verifyOutput(outDir: string, given: ExpectedInput) {
   for (const page of ["index.html", "methodology/index.html", "reconciliation/index.html"]) {
     if (!files.includes(join(outDir, page))) problems.push(`${page}: missing`);
   }
+  checkFavicon(outDir, problems);
   for (const path of pages) {
     const page = relative(outDir, path);
     const html = readFileSync(path, "utf8");
@@ -60,6 +62,7 @@ export function verifyOutput(outDir: string, given: ExpectedInput) {
     const nodes = allTextNodes(document);
     const text = nodes.map((node) => node.data).join(" ");
     checkEveryPage(page, document, problems);
+    checkIconLinks(page, document, problems);
     checkFooterStatus(page, document, expected, problems);
     checkTooltips(page, document, problems);
     checkStateOnPage(page, document, expected, problems);

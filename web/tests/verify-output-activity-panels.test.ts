@@ -7,6 +7,7 @@ import {
   plantedFooter,
   plantedRealMain,
   plantedReconciliationMain,
+  ICON_LINKS,
   PLANTED_HEADER,
   plantedBack,
 } from "./planted-first-screen";
@@ -24,6 +25,8 @@ const RECONCILED_TRUST =
 function site({ main, methodology }: { main: string; methodology: string }) {
   const dir = tempDir();
   plantFile(dir, "index.html", main);
+  plantFile(dir, "favicon.ico", "ico");
+  plantFile(dir, "icon.svg", "<svg/>");
   plantFile(dir, "methodology/index.html", plantedBack(methodology));
   plantFile(
     dir,
@@ -39,7 +42,7 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
   const expected = expectedFromDataset(at(releaseGrade()));
   const main = plantedRealMain(expected, TRUST);
   const page = (body: string) =>
-    `<!doctype html><html data-dataset-kind="real" data-dataset-version="${expected.version}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
+    `<!doctype html><html data-dataset-kind="real" data-dataset-version="${expected.version}" data-freshness="stale"><head><title>Open USD Monitor</title>${ICON_LINKS}</head><body>
     ${PLANTED_HEADER}${plantedFlight([])}${body}
     ${plantedFooter(false, { fresh: null, stale: TRUST, short: "Last reconciled 4 Nov" })}</body></html>`;
   const check = (body: string) =>
