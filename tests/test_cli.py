@@ -22,7 +22,7 @@ from ousd.reconcile import (
 )
 from ousd.sources import BridgeSnapshot, bridge_snapshot
 from ousd.store import Store, StoreConflict
-from test_reconcile import (
+from reconcile_fakes import (
     GOOD,
     NOW,
     Drift,
