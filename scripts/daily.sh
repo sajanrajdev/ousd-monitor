@@ -6,7 +6,7 @@
 #   scripts/daily.sh
 #
 # Each step gets only the environment it needs:
-#   make run          everything but the Vercel variables
+#   make run          everything but the Vercel variables; its dbt build gets an allowlist
 #   make web-release  an allowlist, so no RPC variable reaches the site build
 #   vercel deploy     the same allowlist plus the three Vercel variables
 #
@@ -18,6 +18,9 @@
 # included, and only a run that got all the way through pings the heartbeat (`ousd heartbeat`).
 # Both read their URLs from the environment, so no URL is ever on a command line here.
 set -euo pipefail
+# Every file and folder the run creates is its user's alone, so nothing new under data/ is group
+# or world readable. The release is read back only by the same user, to verify and upload it.
+umask 077
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -174,6 +177,9 @@ cp -RL "$release_dir/." "$work/.vercel/output/static"
 node --experimental-strip-types --disable-warning=ExperimentalWarning \
   "$ROOT/web/scripts/vercel-config.mjs" "$work/.vercel/output/static" >"$work/.vercel/output/config.json" ||
   alert_and_fail deploy "web/scripts/vercel-config.mjs could not write the deploy config."
+# Under umask 077 the copy is 600, and the Vercel CLI uploads each file with its mode. $work is a 700
+# directory, so opening the modes exposes nothing on this host.
+chmod -R u=rwX,go=rX "$work/.vercel/output"
 
 say "Deploy: vercel deploy --prebuilt, a preview (token from the environment only)."
 export VERCEL_TELEMETRY_DISABLED=1 NO_UPDATE_NOTIFIER=1

@@ -34,8 +34,16 @@ py-test:
 py-build:
 	uv build --wheel
 
+# dbt sees only these variables, as in the daily run (DBT_ENV_NAMES in pipeline/dagster/
+# definitions.py): no RPC URL, webhook, backup credential or deploy token. Names are picked from
+# make's environment or command line; the values are read by the shell inside uv run, so dbt gets uv's PATH.
+DBT_ENV_NAMES := PATH HOME LANG LANGUAGE TZ TMPDIR TERM NO_COLOR OUSD_DB_PATH OUSD_MARTS_DB_PATH
+DBT_ENV = $(strip $(foreach name,$(sort $(DBT_ENV_NAMES) \
+	$(filter-out DBT_ENV_SECRET_%,$(filter DBT_% LC_%,$(.VARIABLES)))),\
+	$(if $(filter environment% command%,$(origin $(name))),$(name)="$$$(name)")))
+
 models:
-	uv run --locked dbt build --project-dir dbt --profiles-dir dbt
+	uv run --locked sh -c 'exec env -i $(DBT_ENV) dbt build --project-dir dbt --profiles-dir dbt'
 
 # One self-contained HTML page of the models, sources, exposures and lineage, at
 # dbt/target/docs/static_index.html (dbt/target/ is ignored). --target-path is relative to the dbt

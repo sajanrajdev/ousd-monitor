@@ -11,7 +11,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends make ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Volumes mount as root, so the run stays root (no RAILWAY_RUN_UID needed).
+# The run stays root: Railway mounts the volume as root, and its documented fix for an image that
+# runs as another user is RAILWAY_RUN_UID=0, which is root again. The run is narrowed instead:
+# umask 077 in scripts/daily.sh, and an allowlisted environment for each step. See docs/deploy.md.
 ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python \
     UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \

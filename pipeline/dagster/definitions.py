@@ -21,7 +21,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -95,6 +95,24 @@ RATE_LIMIT_WAIT_VARIABLE = "OUSD_RATE_LIMIT_WAIT_SECONDS"
 RATE_LIMIT_WAIT = 3600
 # The exit status `timeout` uses, for a dbt build stopped at its limit.
 DBT_TIMED_OUT = 124
+# What the dbt build may see, by name and by prefix. The labels path is the dbt var labels_path,
+# not a variable. `make models` keeps the same list in the Makefile.
+DBT_ENV_NAMES = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "LANG",
+        "LANGUAGE",
+        "TZ",
+        "TMPDIR",
+        "TERM",
+        "NO_COLOR",
+        "OUSD_DB_PATH",
+        "OUSD_MARTS_DB_PATH",
+    }
+)
+# Secrets must never use a DBT_ prefix: only DBT_ENV_SECRET_* is excluded below.
+DBT_ENV_PREFIXES = ("DBT_", "LC_")
 # The sync facts an alert or a heartbeat repeats for each chain.
 SUMMARY_SYNC_FIELDS = ("cursor", "tip", "lag", "reorg_depth", "rows_added")
 # Once the run limit has fired, it fires again this often until the run ends, in case a broad
@@ -128,12 +146,26 @@ def _dbt_executable() -> str:
     return str(beside_python) if beside_python.exists() else "dbt"
 
 
+def dbt_environment(environ: Mapping[str, str] = os.environ) -> dict[str, str]:
+    """The only variables the dbt build sees: what a process needs to run, the two database paths
+    and dbt's own settings. No RPC URL, webhook, backup credential or deploy token can reach it.
+    The project reads no secret, so dbt's DBT_ENV_SECRET_ variables are left out too."""
+    return {
+        name: value
+        for name, value in environ.items()
+        if name in DBT_ENV_NAMES
+        or (name.startswith(DBT_ENV_PREFIXES) and not name.startswith("DBT_ENV_SECRET_"))
+    }
+
+
 def run_dbt_build(timeout: float = DBT_TIMEOUT) -> int:
-    """`dbt build` over the project, in the repo root, where every command runs. A build past its
-    time limit is killed and reported as DBT_TIMED_OUT."""
+    """`dbt build` over the project, in the repo root, where every command runs, with only the
+    allowlisted environment. A build past its time limit is killed and reported as DBT_TIMED_OUT."""
     command = [_dbt_executable(), "build", "--project-dir", "dbt", "--profiles-dir", "dbt"]
     try:
-        return subprocess.run(command, check=False, timeout=timeout).returncode
+        return subprocess.run(
+            command, check=False, timeout=timeout, env=dbt_environment()
+        ).returncode
     except subprocess.TimeoutExpired:
         return DBT_TIMED_OUT
 
