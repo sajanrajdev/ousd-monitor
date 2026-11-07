@@ -704,10 +704,13 @@ async function checkTap(browser, origin, folder, markup, where, options) {
   await context.close();
 }
 
+// Every card's toggle sits at its top right, just left of the info icon on the title row, and keeps
+// that box, to the pixel, whether it says Table or Chart.
 async function checkToggle(page, where) {
   for (const [name, cardSelector] of [
     ["#harness-plain", "#harness-plain"],
     ...FILTERED_CARDS.map((box) => [box, `${box} > [data-chain-panel] > .chart-card:visible`]),
+    ...[CARDS.velocity, CARDS.chainRoles].map((id) => [`#${id}`, `#${id}`]),
   ]) {
     const card = page.locator(cardSelector).first();
     const toggle = card.locator(".data-toggle");
@@ -717,7 +720,34 @@ async function checkToggle(page, where) {
     const closedWidth = (await page.locator(name).boundingBox()).width;
 
     await summary.focus();
+    const place = () =>
+      summary.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const icon = element
+          .closest(".chart-card")
+          .querySelector(":scope > .chart-card__head > .tip--info")
+          .getBoundingClientRect();
+        return {
+          box: [box.left, box.top, box.width, box.height].map((value) => Math.round(value)),
+          beside: box.right <= icon.left && box.right >= icon.left - 16,
+          level: box.top < icon.bottom && box.bottom > icon.top,
+        };
+      });
+    const closed = await place();
+    check(
+      "the toggle sits on the title row, just left of the info icon",
+      where,
+      closed.beside && closed.level,
+      name,
+    );
     await page.keyboard.press("Enter");
+    const opened = await place();
+    check(
+      "the toggle keeps its box when it opens",
+      where,
+      opened.box.join() === closed.box.join(),
+      `${name}: ${closed.box} to ${opened.box}`,
+    );
     check("the toggle swaps the chart for the table", where, !(await plot.isVisible()));
     check("the table shows", where, await table.isVisible());
     check(
@@ -738,6 +768,13 @@ async function checkToggle(page, where) {
     check("an open toggle's card keeps its width", where, Math.abs(openWidth - closedWidth) <= 1);
 
     await page.keyboard.press("Enter");
+    const shut = await place();
+    check(
+      "and when it closes",
+      where,
+      shut.box.join() === closed.box.join(),
+      `${name}: ${closed.box} to ${shut.box}`,
+    );
     check("the toggle swaps back", where, await plot.isVisible());
     check(
       "the summary says Table again",
@@ -1693,14 +1730,15 @@ async function checkFootnotes(page, where, js) {
   const list = details.locator(".footnotes__list");
   await summary.scrollIntoViewIfNeeded();
   check("a card's footnotes start closed", where, !(await list.isVisible()));
-  const [summaryBox, tableBox] = await Promise.all([
+  const [summaryBox, asOfBox] = await Promise.all([
     summary.boundingBox(),
-    card.locator(".data-toggle > summary").boundingBox(),
+    card.locator(".chart-card__meta").boundingBox(),
   ]);
   check(
-    "its Footnotes toggle is on the row with Table, at the right",
+    "its Footnotes toggle is on the row with the as-of date, at the right",
     where,
-    Math.abs(summaryBox.y - tableBox.y) < 8 && summaryBox.x > tableBox.x,
+    Math.abs(summaryBox.y + summaryBox.height / 2 - (asOfBox.y + asOfBox.height / 2)) < 8 &&
+      summaryBox.x > asOfBox.x,
   );
   await summary.focus();
   await page.keyboard.press("Enter");

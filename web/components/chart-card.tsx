@@ -58,7 +58,7 @@ type CardFrameProps = Pick<
   | "id"
   | "detail"
   | "level"
-> & { children: ReactNode; notes?: PinnedNote[]; footnotes?: string };
+> & { children: ReactNode; notes?: PinnedNote[]; footnotes?: string; toggle?: boolean };
 
 function cardAsOf(asOf: string | AsOfRange): { dateTime: string; text: string } {
   const dateTime = typeof asOf === "string" ? asOf : asOf.to;
@@ -84,6 +84,7 @@ function CardFrame({
   children,
   notes = [],
   footnotes,
+  toggle = false,
 }: CardFrameProps) {
   const headingId = useId();
   const ownPrefix = useId();
@@ -97,7 +98,7 @@ function CardFrame({
       aria-labelledby={headingId}
       data-frame={frameWord ?? undefined}
     >
-      <div className="chart-card__head explain-head">
+      <div className="chart-card__head explain-head" data-has-toggle={toggle ? "" : undefined}>
         <Heading id={headingId}>{takeaway}</Heading>
         <NoteMarks notes={notes} prefix={prefix} />
         <InfoTip label={`About: ${takeaway}`}>
@@ -159,7 +160,13 @@ export function ChartCard({
   ...frame
 }: ChartCardProps) {
   return (
-    <CardFrame {...frame} notes={notes}>
+    <CardFrame {...frame} notes={notes} toggle>
+      {/* First after the title, in reading and focus order, and drawn at the card's top right,
+          beside the info icon, where it stays whichever it shows. */}
+      <DataToggle label={frame.takeaway}>
+        <HairlineTable {...table} />
+        {moreTables}
+      </DataToggle>
       <div className="chart-card__body">
         <div className="chart-card__plot" data-beside={beside ? "" : undefined}>
           {/* aria-hidden and nothing focusable inside; not inert, so hover tooltips still work. */}
@@ -180,10 +187,6 @@ export function ChartCard({
           {beside ? <div className="chart-card__beside">{beside}</div> : null}
         </div>
       </div>
-      <DataToggle label={frame.takeaway}>
-        <HairlineTable {...table} />
-        {moreTables}
-      </DataToggle>
     </CardFrame>
   );
 }

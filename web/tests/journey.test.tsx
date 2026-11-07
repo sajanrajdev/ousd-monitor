@@ -544,7 +544,8 @@ describe("journey view", () => {
     expect(drawn()).toEqual(["base"]);
   });
 
-  it("has no axe violations", async () => {
+  // Each option has its own supply card now, so this takes seconds when the suite runs in parallel.
+  it("has no axe violations", { timeout: 20_000 }, async () => {
     // All and one chain, as every chain's panel is the same markup, and axe is slow on the whole
     // view. acceptance.mjs runs axe on every panel in a browser.
     const { dataset, ui } = view();

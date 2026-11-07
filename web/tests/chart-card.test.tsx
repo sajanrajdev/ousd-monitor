@@ -101,6 +101,24 @@ describe("chart card", () => {
     );
   });
 
+  // CSS draws it at the card's top right, beside the info icon, so it comes straight after the title
+  // in reading and focus order, and the title keeps room for it. A table card has no toggle.
+  it("puts its data toggle straight after the title, which keeps room for it", () => {
+    const { container } = render(<ChartCard {...props} />);
+    const head = container.querySelector(".chart-card > .chart-card__head")!;
+    expect(head.hasAttribute("data-has-toggle")).toBe(true);
+    const after = [...container.querySelectorAll(".chart-card > *")].filter(
+      (element) => !element.classList.contains("sr-only"),
+    );
+    expect(after.indexOf(container.querySelector(".chart-card > .data-toggle")!)).toBe(
+      after.indexOf(head) + 1,
+    );
+    const table = render(<TableCard {...props} table={props.table} />).container.querySelector(
+      ".chart-card__head",
+    )!;
+    expect(table.hasAttribute("data-has-toggle")).toBe(false);
+  });
+
   it("has source and definition in the noscript note, as verify-output parses it", () => {
     const note = parsed(<ChartCard {...props} />).querySelector(
       "noscript .chart-card__source-note",
