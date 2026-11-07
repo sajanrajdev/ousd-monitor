@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 from datetime import datetime, timedelta
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import duckdb
@@ -573,9 +574,13 @@ def test_dbt_tests_fails_when_vars_claim_what_the_build_did_not_compile(world):
     assert "other values of placed_days" in world.run_checks()["dbt_tests"].detail
 
 
-def test_thresholds_are_read_from_what_the_build_compiled(world):
-    results = json.loads(world.sources.run_results.read_text())
-    assert checks.built_thresholds(results) == {
+def built(world):
+    with world.marts() as marts:
+        return checks.built_thresholds(marts, json.loads(world.sources.run_results.read_text()))
+
+
+def test_thresholds_are_read_from_the_marts_build_params(world):
+    assert built(world) == {
         "placed_days": 14,
         "placed_min_base_units": 10**12,
         "large_transfer_base_units": 10**12,
@@ -583,75 +588,120 @@ def test_thresholds_are_read_from_what_the_build_compiled(world):
         "active_dust_base_units": 10**6,
         "active_secondary_base_units": 10**8,
     }
-
-
-def edit_build_params(world, compiled_code):
-    """dbt's record says the build compiled mart_build_params to this, or has no record of it."""
-    path = world.sources.run_results
-    results = json.loads(path.read_text())
-    nodes = results["results"]
-    node = next(n for n in nodes if n["unique_id"] == "model.ousd_monitor.mart_build_params")
-    if compiled_code is None:
-        nodes.remove(node)
-    else:
-        node["compiled_code"] = compiled_code
-    path.write_text(json.dumps(results))
-    return results
-
-
-def test_thresholds_do_not_depend_on_how_the_compiled_sql_is_laid_out(world):
-    results = json.loads(world.sources.run_results.read_text())
-    node = next(
-        n for n in results["results"] if n["unique_id"] == "model.ousd_monitor.mart_build_params"
-    )
-    code = node["compiled_code"]
-    reformatted = re.sub(r"\s+", " ", re.sub(r"--[^\n]*", "", code)).replace(", ", "\n  ,  ")
-    assert reformatted != code
-    expected = checks.built_thresholds(results)
-    edited = edit_build_params(world, reformatted.upper().replace(" AS ", "\n\tAS "))
-    assert checks.built_thresholds(edited) == expected
     assert world.run_checks()["dbt_tests"].status == "passed"
 
 
-@pytest.mark.parametrize(
-    "compiled_code,word",
-    [
-        (None, "does not show one mart_build_params"),
-        ("select 1 as placed_days", "does not hold one row of every threshold"),
-        (
-            "select * from (values (14, 1, 1, 1, 1, 1), (20, 1, 1, 1, 1, 1)) as t(placed_days, "
-            "placed_min_base_units, large_transfer_base_units, clean_tx_min_base_units, "
-            "active_dust_base_units, active_secondary_base_units)",
-            "does not hold one row of every threshold",
-        ),
-        ("select * from mart_supply_journey", "mart_build_params does not run"),
-    ],
-)
-def test_a_record_without_one_row_of_thresholds_fails_rather_than_guesses(
-    world, compiled_code, word
-):
-    edit_build_params(world, compiled_code)
+def test_the_build_params_carry_the_invocation_dbt_recorded(world):
+    results = json.loads(world.sources.run_results.read_text())
+    with world.marts() as marts:
+        (invocation,) = marts.execute("SELECT invocation_id FROM mart_build_params").fetchone()
+    assert invocation == results["metadata"]["invocation_id"]
+
+
+def test_marts_from_another_build_than_the_record_fail(world):
+    """A build that left the marts alone, say a narrowed or failed one, writes a new record with a
+    new invocation id. The marts' row still names the old one."""
+    path = world.sources.run_results
+    results = json.loads(path.read_text())
+    results["metadata"]["invocation_id"] = "00000000-0000-0000-0000-000000000000"
+    path.write_text(json.dumps(results))
     result = world.run_checks()["dbt_tests"]
     assert result.status == "failed"
-    assert word in result.detail
+    assert "mart_build_params is not from the build dbt recorded" in result.detail
 
 
-def test_the_build_record_is_run_where_it_cannot_read_a_file(world):
-    results = edit_build_params(
-        world, f"select * from read_csv('{world.sources.labels}', all_varchar = true)"
-    )
-    with pytest.raises(ValueError, match="does not run"):
-        checks.built_thresholds(results)
+def test_a_record_without_an_invocation_id_fails(world):
+    path = world.sources.run_results
+    results = json.loads(path.read_text())
+    del results["metadata"]["invocation_id"]
+    path.write_text(json.dumps(results))
+    assert "not from the build dbt recorded" in world.run_checks()["dbt_tests"].detail
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "DELETE FROM mart_build_params",
+        "INSERT INTO mart_build_params SELECT * FROM mart_build_params",
+        "UPDATE mart_build_params SET invocation_id = NULL",
+        "UPDATE mart_build_params SET invocation_id = ''",
+        "UPDATE mart_build_params SET active_dust_base_units = NULL",
+        "ALTER TABLE mart_build_params DROP COLUMN invocation_id",
+        "ALTER TABLE mart_build_params DROP COLUMN placed_days",
+    ],
+    ids=["missing", "duplicate", "null-id", "empty-id", "null-threshold", "no-id", "no-threshold"],
+)
+def test_build_params_without_one_whole_row_fail_rather_than_guess(world, query):
+    world.mart_sql(query)
+    result = world.run_checks()["dbt_tests"]
+    assert result.status == "failed"
+    assert "the marts' mart_build_params does not hold one row of every threshold" in result.detail
 
 
 def test_dbt_tests_fails_when_the_marts_hold_other_thresholds(world):
     world.mart_sql("UPDATE mart_build_params SET placed_days = 20")
-    assert "marts hold other thresholds" in world.run_checks()["dbt_tests"].detail
+    assert "built with other values of placed_days" in world.run_checks()["dbt_tests"].detail
 
 
 def test_dbt_tests_fails_when_the_marts_have_no_thresholds(world):
     world.mart_sql("DROP TABLE mart_build_params")
     assert "marts have no mart_build_params" in world.run_checks()["dbt_tests"].detail
+
+
+PARAM_COLUMNS = ["invocation_id", *checks._THRESHOLDS]
+PARAM_ROW = ("an-invocation", 14, 10**12, 10**12, 10**6, 10**6, 10**8)
+
+
+def test_a_row_of_exact_values_is_read():
+    invocation, thresholds = checks._threshold_row(PARAM_COLUMNS, [PARAM_ROW])
+    assert invocation == "an-invocation"
+    assert thresholds == dict(zip(checks._THRESHOLDS, PARAM_ROW[1:], strict=True))
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["14", 14.0, True, Decimal(14), None],
+    ids=["str", "float", "bool", "decimal", "null"],
+)
+def test_a_threshold_that_is_not_an_exact_int_is_refused(value):
+    row = (PARAM_ROW[0], value, *PARAM_ROW[2:])
+    with pytest.raises(ValueError, match="does not hold one row of every threshold"):
+        checks._threshold_row(PARAM_COLUMNS, [row])
+
+
+@pytest.mark.parametrize("value", [1, None, ""], ids=["int", "null", "empty"])
+def test_an_invocation_id_that_is_not_text_is_refused(value):
+    with pytest.raises(ValueError, match="does not hold one row of every threshold"):
+        checks._threshold_row(PARAM_COLUMNS, [(value, *PARAM_ROW[1:])])
+
+
+def test_two_columns_named_alike_whatever_their_case_are_refused():
+    columns = [*PARAM_COLUMNS, "PLACED_DAYS"]
+    with pytest.raises(ValueError, match="does not hold one row of every threshold"):
+        checks._threshold_row(columns, [(*PARAM_ROW, 20)])
+
+
+def test_column_names_are_read_whatever_their_case():
+    columns = [name.upper() for name in PARAM_COLUMNS]
+    assert checks._threshold_row(columns, [PARAM_ROW])[1]["placed_days"] == 14
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "UPDATE mart_build_params SET placed_days = 20",
+        "UPDATE mart_build_params SET invocation_id = 'another'",
+    ],
+    ids=["threshold", "invocation"],
+)
+def test_the_fingerprint_changes_with_the_build_params(world, query):
+    def fingerprint():
+        with world.store() as store, world.marts() as marts:
+            return checks.data_fingerprint(store, marts, world.sources)
+
+    before = fingerprint()
+    world.mart_sql(query)
+    assert fingerprint() != before
 
 
 DAY_S = 86_400
@@ -687,7 +737,7 @@ def test_an_overridden_var_changes_the_models_and_what_the_checks_read_alike(tmp
     marts = build_marts(tmp_path, rows, [], {"base": 3}, dbt_vars=OVERRIDES)
     try:
         results = json.loads((tmp_path / "target" / "run_results.json").read_text())
-        assert checks.built_thresholds(results) == OVERRIDES
+        assert checks.built_thresholds(marts, results) == OVERRIDES
         assert checks._threshold_problems(results, DBT_DIR / "dbt_project.yml", marts) == []
 
         def one(query):
@@ -725,12 +775,6 @@ def test_a_fractional_threshold_fails_the_build(tmp_path):
     can't be recorded as another value."""
     result = run_dbt(tmp_path, [], [], {}, dbt_vars={"placed_min_base_units": 1_000_000_000_000.5})
     assert "assert_build_params_are_whole" in failed_tests(result)
-
-
-def test_an_empty_threshold_in_the_marts_is_not_read_as_any_value(world):
-    world.mart_sql("UPDATE mart_build_params SET active_dust_base_units = NULL")
-    detail = world.run_checks()["dbt_tests"].detail
-    assert "the marts' mart_build_params does not hold one row of every threshold" in detail
 
 
 def test_dbt_tests_fails_with_no_record_of_a_build(world):

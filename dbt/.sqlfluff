@@ -1,5 +1,9 @@
 # sqlfluff stands in a placeholder word for dbt's var(), which can't take part in Jinja arithmetic
-# such as the placed window. Inside the dbt project the linter renders every var as 1 instead. This
-# is for linting only: dbt reads the values from dbt_project.yml and any --vars.
+# such as the placed window. Inside the dbt project the linter renders every var as 1 instead, and
+# dbt's invocation id as a fixed word. This is for linting only: dbt reads the values from
+# dbt_project.yml and any --vars, and gives each run its own invocation id.
 [sqlfluff:templater:jinja:macros]
 var = {% macro var(name, default=none) %}1{% endmacro %}
+
+[sqlfluff:templater:jinja:context]
+invocation_id = lint

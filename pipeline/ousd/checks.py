@@ -44,9 +44,9 @@ MARTS = (
 # Any of these in dbt's arguments means the build covered less than the whole project.
 _NARROWING_ARGS = ("select", "exclude", "selector", "resource_types", "exclude_resource_types")
 _PASSING_NODE = ("success", "pass")
-# The model that records a build's thresholds as one row, and the thresholds it records. Its
-# compiled SQL in dbt's record is what a build used: dbt_project.yml can change afterwards, with
-# nothing rebuilt. The model selects one column for each name here, from the var of that name.
+# The model that records a build's thresholds as one row, with the dbt invocation that built it.
+# dbt_project.yml can change after a build, with nothing rebuilt, so this row is what a build used.
+# The model selects one column for each name here, from the var of that name.
 _BUILD_PARAMS_MODEL = "mart_build_params"
 _THRESHOLDS = (
     "placed_days",
@@ -56,15 +56,6 @@ _THRESHOLDS = (
     "active_dust_base_units",
     "active_secondary_base_units",
 )
-# Where that compiled SQL runs: no files, no extensions, and limits the SQL itself can't raise.
-_SANDBOX: dict[str, str | bool | int | float | list[str]] = {
-    "enable_external_access": False,
-    "autoinstall_known_extensions": False,
-    "autoload_known_extensions": False,
-    "threads": 1,
-    "memory_limit": "64MB",
-    "lock_configuration": True,
-}
 # Day-over-day change, in percent, above which a person should look. They never block.
 _SUPPLY_WARNING_PERCENT = 25
 _EVERYDAY_WARNING_PERCENT = 100
@@ -318,70 +309,61 @@ def sampled_balances(
     )
 
 
-def _threshold_row(connection: duckdb.DuckDBPyConnection, query: str, where: str) -> dict[str, int]:
-    """The one row of thresholds a query returns. It raises rather than guess at any other shape,
-    or at an empty value. Names are matched whatever their case, as a formatter may change that."""
-    cursor = connection.execute(query)
-    rows = cursor.fetchall()
-    columns = [column[0].lower() for column in cursor.description or ()]
-    problem = f"{where} does not hold one row of every threshold"
-    if len(rows) != 1 or not set(_THRESHOLDS) <= set(columns):
+def _threshold_row(
+    columns: Sequence[str], rows: Sequence[Sequence[Any]]
+) -> tuple[str, dict[str, int]]:
+    """The one mart_build_params row: the invocation that built it, and its thresholds. It raises
+    rather than guess at any other shape, or at an empty or inexact value. Names are matched
+    whatever their case, as a formatter may change that, so two that differ only in case are
+    refused."""
+    names = [column.lower() for column in columns]
+    problem = f"the marts' {_BUILD_PARAMS_MODEL} does not hold one row of every threshold"
+    if len(rows) != 1 or len(set(names)) != len(names):
         raise ValueError(problem)
-    row = dict(zip(columns, rows[0], strict=True))
-    try:
-        return {name: int(row[name]) for name in _THRESHOLDS}
-    except (TypeError, ValueError) as exc:
-        raise ValueError(problem) from exc
+    row = dict(zip(names, rows[0], strict=True))
+    invocation = row.get("invocation_id")
+    thresholds = {name: row.get(name) for name in _THRESHOLDS}
+    if type(invocation) is not str or not invocation:
+        raise ValueError(problem)
+    # A bool is an int to Python, and a string or float would be a guess at the number.
+    exact = {name: value for name, value in thresholds.items() if type(value) is int}
+    if len(exact) != len(_THRESHOLDS):
+        raise ValueError(problem)
+    return invocation, exact
 
 
-def built_thresholds(results: Mapping[str, Any]) -> dict[str, int]:
-    """The thresholds a build really used: its mart_build_params SQL as dbt compiled it, run on its
-    own. That SQL selects only the project's vars, so it needs no data, and how it is laid out
-    can't change what it returns. It runs where it can't read or write a file, or load anything."""
-    compiled = [
-        node.get("compiled_code") or ""
-        for node in results.get("results", [])
-        if node["unique_id"].startswith("model.")
-        and node["unique_id"].split(".")[-1] == _BUILD_PARAMS_MODEL
-    ]
-    if len(compiled) != 1:
-        raise ValueError(f"the dbt build record does not show one {_BUILD_PARAMS_MODEL}")
-    record = f"the dbt build record of {_BUILD_PARAMS_MODEL}"
-    sandbox = duckdb.connect(":memory:", config=_SANDBOX)
+def built_thresholds(
+    marts: duckdb.DuckDBPyConnection, results: Mapping[str, Any]
+) -> dict[str, int]:
+    """The thresholds the marts were built with: their mart_build_params row, which must come from
+    the build that dbt's record describes, so a later build that left the marts alone can't vouch
+    for them."""
     try:
-        return _threshold_row(sandbox, compiled[0], record)
-    except duckdb.Error as exc:
-        raise ValueError(f"{record} does not run") from exc
-    finally:
-        sandbox.close()
+        cursor = marts.execute(f"SELECT * FROM {_BUILD_PARAMS_MODEL}")
+    except duckdb.CatalogException as exc:
+        raise ValueError(f"marts have no {_BUILD_PARAMS_MODEL}") from exc
+    columns = [column[0] for column in cursor.description or ()]
+    invocation, thresholds = _threshold_row(columns, cursor.fetchall())
+    if invocation != results.get("metadata", {}).get("invocation_id"):
+        raise ValueError(f"marts' {_BUILD_PARAMS_MODEL} is not from the build dbt recorded")
+    return thresholds
 
 
 def _threshold_problems(
     results: Mapping[str, Any], project: Path, marts: duckdb.DuckDBPyConnection
 ) -> list[str]:
-    """The project's thresholds, with any --vars on the build, must be the ones it compiled, and
-    the marts must hold that same build's thresholds."""
+    """The marts must hold the thresholds of the build dbt recorded, and those must be the
+    project's, with any --vars on that build."""
     try:
-        built = built_thresholds(results)
+        built = built_thresholds(marts, results)
     except ValueError as exc:
         return [str(exc)]
-    try:
-        stored = _threshold_row(
-            marts, f"SELECT * FROM {_BUILD_PARAMS_MODEL}", f"the marts' {_BUILD_PARAMS_MODEL}"
-        )
-    except duckdb.CatalogException:
-        return [f"marts have no {_BUILD_PARAMS_MODEL}"]
-    except ValueError as exc:
-        return [str(exc)]
-    problems = []
-    if stored != built:
-        problems.append("marts hold other thresholds than the dbt build record")
     configured = yaml.safe_load(project.read_text())["vars"]
     expected = {**configured, **results.get("args", {}).get("vars", {})}
     differing = [name for name, value in built.items() if int(expected[name]) != value]
     if differing:
-        problems.append(f"marts were built with other values of {', '.join(sorted(differing))}")
-    return problems
+        return [f"marts were built with other values of {', '.join(sorted(differing))}"]
+    return []
 
 
 def _dbt_problems(sources: Sources, marts: duckdb.DuckDBPyConnection) -> list[str]:
@@ -536,14 +518,16 @@ def present_chains(store: Store) -> list[str]:
     ]
 
 
+def _table_rows(marts: duckdb.DuckDBPyConnection, table: str) -> list[dict[str, Any]]:
+    """A table's rows, in a stable order, whatever order the file holds them in."""
+    cursor = marts.execute(f"SELECT * FROM {table} ORDER BY ALL")
+    names = [column[0] for column in cursor.description or ()]
+    return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
+
+
 def mart_rows(marts: duckdb.DuckDBPyConnection) -> dict[str, list[dict[str, Any]]]:
-    """Every published mart, in a stable order, whatever order the file holds them in."""
-    tables: dict[str, list[dict[str, Any]]] = {}
-    for table in MARTS:
-        cursor = marts.execute(f"SELECT * FROM {table} ORDER BY ALL")
-        names = [column[0] for column in cursor.description or ()]
-        tables[table] = [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
-    return tables
+    """Every published mart, in a stable order."""
+    return {table: _table_rows(marts, table) for table in MARTS}
 
 
 def _plain(value: object) -> str:
@@ -555,8 +539,8 @@ def _plain(value: object) -> str:
 
 
 def data_fingerprint(store: Store, marts: duckdb.DuckDBPyConnection, sources: Sources) -> str:
-    """Identifies the raw state, the marts, the labels, dbt's record and the project's thresholds
-    that the checks saw."""
+    """Identifies the raw state, the marts, the labels, dbt's record, the project's thresholds and
+    the thresholds the marts were built with, as the checks saw them."""
     raw = {
         chain: [
             cursor := store.synced_through(chain),
@@ -569,7 +553,8 @@ def data_fingerprint(store: Store, marts: duckdb.DuckDBPyConnection, sources: So
         hashlib.sha256(path.read_bytes()).hexdigest()
         for path in (sources.labels, sources.run_results, sources.dbt_project)
     ]
-    payload = json.dumps([raw, files, mart_rows(marts)], default=_plain, sort_keys=True)
+    built = _table_rows(marts, _BUILD_PARAMS_MODEL)
+    payload = json.dumps([raw, files, mart_rows(marts), built], default=_plain, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 
 

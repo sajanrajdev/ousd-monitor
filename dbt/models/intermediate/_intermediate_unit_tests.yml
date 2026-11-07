@@ -6,7 +6,10 @@ unit_tests:
     description: >
       Each class in its order of precedence: mint and burn, the tempo fee (the last transfer of a
       transaction, to the fee manager), other tempo fee-manager movements, issuer flows, transfers
-      within one named entity, and the rest. The fee manager means nothing off tempo.
+      within one named entity, and the rest. The fee manager means nothing off tempo. The rows
+      after e_manager each match two rules, so the earlier rule has to win: a mint to the fee
+      manager as the last transfer, a burn out of it, a fee from an issuer, a fee-manager movement
+      to an issuer, a mint to an issuer, and an issuer-route transfer within the issuer's entity.
     model: int_transfer_classes
     given:
       - input: ref('stg_transfers')
@@ -20,9 +23,19 @@ unit_tests:
           - {chain: ethereum, tx_hash: e_issuer, log_index: 0, from_address: "0xa", to_address: "0x1551", value: 10}
           - {chain: ethereum, tx_hash: e_same, log_index: 0, from_address: "0xe1", to_address: "0xe2", value: 10}
           - {chain: ethereum, tx_hash: e_manager, log_index: 0, from_address: "0xa", to_address: "0xfeec000000000000000000000000000000000000", value: 10}
+          - {chain: tempo, tx_hash: t_mint_fee, log_index: 0, from_address: "0x0000000000000000000000000000000000000000", to_address: "0xfeec000000000000000000000000000000000000", value: 10}
+          - {chain: tempo, tx_hash: t_burn_manager, log_index: 0, from_address: "0xfeec000000000000000000000000000000000000", to_address: "0x0000000000000000000000000000000000000000", value: 10}
+          - {chain: tempo, tx_hash: t_issuer_fee, log_index: 0, from_address: "0x1551", to_address: "0xfeec000000000000000000000000000000000000", value: 1}
+          - {chain: tempo, tx_hash: t_manager_issuer, log_index: 0, from_address: "0xfeec000000000000000000000000000000000000", to_address: "0x1551", value: 5}
+          - {chain: tempo, tx_hash: t_manager_issuer, log_index: 1, from_address: "0xa", to_address: "0xb", value: 10}
+          - {chain: ethereum, tx_hash: e_mint_issuer, log_index: 0, from_address: "0x0000000000000000000000000000000000000000", to_address: "0x1551", value: 10}
+          - {chain: ethereum, tx_hash: e_route, log_index: 0, from_address: "0x2001", to_address: "0x2002", value: 10}
       - input: ref('stg_labels')
         rows:
           - {chain: ethereum, address: "0x1551", category: issuer, entity: Issuer}
+          - {chain: ethereum, address: "0x2001", category: issuer_route, entity: Issuer}
+          - {chain: ethereum, address: "0x2002", category: issuer_route, entity: Issuer}
+          - {chain: tempo, address: "0x1551", category: issuer, entity: Issuer}
           - {chain: ethereum, address: "0xe1", category: exchange, entity: Venue}
           - {chain: ethereum, address: "0xe2", category: exchange_linked, entity: Venue}
     expect:
@@ -36,6 +49,13 @@ unit_tests:
         - {chain: ethereum, tx_hash: e_issuer, log_index: 0, transfer_class: issuer_flow}
         - {chain: ethereum, tx_hash: e_same, log_index: 0, transfer_class: same_entity}
         - {chain: ethereum, tx_hash: e_manager, log_index: 0, transfer_class: remaining}
+        - {chain: tempo, tx_hash: t_mint_fee, log_index: 0, transfer_class: mint}
+        - {chain: tempo, tx_hash: t_burn_manager, log_index: 0, transfer_class: burn}
+        - {chain: tempo, tx_hash: t_issuer_fee, log_index: 0, transfer_class: fee}
+        - {chain: tempo, tx_hash: t_manager_issuer, log_index: 0, transfer_class: fee_liquidity}
+        - {chain: tempo, tx_hash: t_manager_issuer, log_index: 1, transfer_class: remaining}
+        - {chain: ethereum, tx_hash: e_mint_issuer, log_index: 0, transfer_class: mint}
+        - {chain: ethereum, tx_hash: e_route, log_index: 0, transfer_class: issuer_flow}
 
   - name: tx_decomposition_splits_gross_into_netting_venues_and_clean
     description: >

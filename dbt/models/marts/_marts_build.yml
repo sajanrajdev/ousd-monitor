@@ -5,11 +5,17 @@ models:
       contract: {enforced: true}
     description: >
       The thresholds the marts were built with, from the project's vars and any `--vars` on the
-      build. The blocking checks and publish run this model's compiled SQL from dbt's record of
-      the build, so neither has to read a threshold out of another model's SQL, and the checks
-      also need this table to hold the same row. Not published as a table. Grain: exactly one
-      row.
+      build, and the dbt invocation that built them. The blocking checks and publish read this
+      row, so neither has to read a threshold out of another model's SQL. They need its
+      invocation id to equal the one in `run_results.json`, which shows the marts came from the
+      build that record describes. Not published as a table. Grain: exactly one row.
     columns:
+      - name: invocation_id
+        data_type: varchar
+        description: >
+          dbt's id for the build that wrote this row, as `run_results.json` records it under
+          `metadata.invocation_id`.
+        data_tests: [not_null]
       - name: placed_days
         data_type: integer
         description: >

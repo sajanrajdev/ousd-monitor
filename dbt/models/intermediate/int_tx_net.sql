@@ -8,10 +8,10 @@ with legs as (
     where transfer_class = 'remaining'
 )
 
--- The category is grouped on, not picked: a label is unique per chain and address
--- (assert_unique_label), so every leg of one address carries the same category, and grouping keeps
--- one row per address. A label duplicated with two categories would show as two rows here, not as
--- an arbitrary pick of one.
+-- The category is grouped on, not picked. A label duplicated with two categories would join each
+-- leg of that address twice, giving two rows that both carry its full net value, so amounts
+-- downstream would double. assert_unique_label keeps a label unique per chain and address, which
+-- prevents it.
 select
     l.chain,
     l.tx_hash,

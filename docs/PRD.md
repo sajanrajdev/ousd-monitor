@@ -110,7 +110,7 @@ Tested against real data on 2026-11-03 for Tempo and part of Ethereum: see `docs
 | **Venue flow** | Net flow to and from DEX and lending contracts, shown separately and including seeding. It isn't trading volume |
 | **Tempo fee** | A transfer to the fee manager that is the last OUSD transfer in its transaction. Other transfers to or from the fee manager are fee liquidity |
 | **Velocity** | Rolling 7-day clean volume divided by 7, then by circulating supply. Differs from the common definition (transfer volume over total supply). Show ours, the everyday version and the common one, as they differ widely |
-| **Active wallets** | Sent at least $1 of clean volume in the period, net per transaction, excluding issuer, venue and system wallets. Also published at $100. Wallets, not people |
+| **Active wallets** | Sent at least $1 of clean volume in the period, net per transaction. Unlabeled, exchange and exchange-linked wallets count. Issuer, issuer route, system, DEX and lending wallets don't. Also published at $100. Wallets, not people |
 | **Concentration** | Top-10 share and holders above and below set sizes, per chain |
 | **Implied reserve income** | Treasury share of reserves times a stated yield, plus cash at a stated rate. Illustrative example: 872M at 4% is about $35M a year. The management fee is undisclosed, so show a range |
 
