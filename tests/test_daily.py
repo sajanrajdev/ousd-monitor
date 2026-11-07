@@ -377,3 +377,49 @@ def test_a_bad_setting_alerts_before_anything_runs(root):
     assert result.returncode != 0
     assert uv_calls(root) == [alert_call("config", "OUSD_DEPLOY must be 0 or 1.")]
     assert calls(root) == []
+
+
+def test_an_unexpected_exit_raises_exactly_one_alert_and_keeps_its_status(root):
+    # A command failing under set -e, here mktemp before the deploy, stops the script where no
+    # step alerts. The exit trap alerts instead, once.
+    _executable(root / "fakes" / "bin" / "mktemp", "#!/bin/sh\nexit 3\n")
+    result = daily(root)
+    assert result.returncode == 3
+    assert calls(root) == ["run", "web-release"]
+    assert uv_calls(root) == [
+        alert_call("daily", "scripts/daily.sh stopped unexpectedly with status 3.")
+    ]
+
+
+def test_an_exit_after_alert_and_fail_is_not_alerted_again_and_cleans_up(root):
+    (root / "fakes" / "deploy-fails").touch()
+    tmp = root / "tmp"
+    tmp.mkdir()
+    result = daily(root, TMPDIR=str(tmp))
+    assert result.returncode != 0
+    assert uv_calls(root) == [
+        alert_call("deploy", "vercel deploy did not make a preview (see the run's log).")
+    ]
+    # The same trap removed the deploy's work folder.
+    assert list(tmp.iterdir()) == []
+
+
+def test_an_unexpected_exit_whose_alert_fails_still_exits_non_zero(root):
+    _executable(root / "fakes" / "bin" / "mktemp", "#!/bin/sh\nexit 3\n")
+    _executable(root / "fakes" / "bin" / "uv", "#!/bin/sh\nexit 1\n")
+    result = daily(root)
+    assert result.returncode == 3
+    assert "The alert could not be raised." in result.stdout
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any folder")
+def test_an_unreadable_alerts_folder_does_not_stop_the_run(root):
+    locked = root / "data" / "alerts" / "locked"
+    locked.mkdir(parents=True)
+    locked.chmod(0)
+    try:
+        result = daily(root)
+    finally:
+        locked.chmod(0o700)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert uv_calls(root) == [HEARTBEAT_CALL]

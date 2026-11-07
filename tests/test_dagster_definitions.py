@@ -18,6 +18,7 @@ import dagster as dg
 import httpx
 import pytest
 from conftest import FakeRpc, make_chain, rows
+from dagster._core.execution.plan.active import ActiveExecution
 from dbt_helpers import invoke_dbt
 from ousd import checks as ousd_checks
 from ousd.chains import REQUIRED_CHAINS
@@ -672,17 +673,51 @@ def test_the_run_time_limit_fires_stops_the_step_without_a_retry_and_alerts(
     assert outbound.to(HEARTBEAT) == []
 
 
-def test_a_time_limit_that_fires_between_steps_still_alerts(module, world, calls):
-    # The limit lands in Dagster's own wait before a retry, outside any step.
+def test_a_time_limit_that_fires_between_steps_still_alerts(
+    module, world, calls, outbound, monkeypatch
+):
+    # The limit lands in Dagster's own wait before a retry, outside any step. The signal is sent
+    # from inside that wait instead of timed to arrive there, so a busy machine can't move it.
+    # The limit itself is an hour, so the timer never fires on its own here.
+    waiting = ActiveExecution.sleep_til_ready
+
+    def expire_while_waiting(self):
+        if self.sleep_interval() > 0:
+            signal.raise_signal(signal.SIGALRM)
+        waiting(self)
+
+    monkeypatch.setattr(ActiveExecution, "sleep_til_ready", expire_while_waiting)
+    timers = []
+
+    def recording(label):
+        timers.append(signal.getitimer(signal.ITIMER_REAL))
+        return outbound(label)
+
     calls.fail_sync_times = 99
-    # A limit long enough for the first attempt to fail even on a busy machine.
-    result = run_job(module, pipeline_for(module, world, calls, retry_delay=120, max_runtime=3))
+    result = run_job(
+        module,
+        pipeline_for(module, world, calls, retry_delay=120, max_runtime=3600, outbound=recording),
+    )
     assert not result.success
     assert calls.sync == 1
     [alert] = alerts_in(world)
     assert alert["run_id"] == result.run_id
     assert alert["step"] == "run"
-    assert alert["reason"] == "RunTimeout: the run passed its 3s time limit"
+    assert alert["reason"] == "RunTimeout: the run passed its 3600s time limit"
+    assert len(outbound.to(WEBHOOK)) == 1
+    # The teardown stopped the timer before it alerted, so it couldn't cut the alert short.
+    assert timers == [(0.0, 0.0)]
+
+
+def test_once_fired_the_time_limit_fires_again_until_the_run_ends(module):
+    # A broad handler can swallow the first RunTimeout. The kernel re-arms the timer, so the
+    # next one lands within a minute, until the limit is lifted.
+    with module._time_limit(module.LONGEST_LIMIT, None):
+        assert signal.getitimer(signal.ITIMER_REAL)[1] == module.REFIRE_INTERVAL == 60
+        for _ in range(2):
+            with pytest.raises(module.RunTimeout):
+                signal.raise_signal(signal.SIGALRM)
+    assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
 
 
 @pytest.mark.parametrize("ending", ["success", "failure", "timeout"])
@@ -704,7 +739,8 @@ def test_the_limits_are_lifted_however_the_run_ends(module, world, calls, ending
     assert math.isinf(RATE_LIMIT_WAITS.remaining)
 
 
-def test_a_rate_limit_wait_past_the_runs_cap_fails_instead_of_sleeping(module, world, calls):
+@pytest.mark.parametrize("step", ["raw_transfers", "chain_reconciliations"])
+def test_a_spent_rate_limit_budget_fails_the_step_once_without_a_retry(module, world, calls, step):
     slept: list[float] = []
     client = PoliteClient(
         label="rpc",
@@ -714,18 +750,37 @@ def test_a_rate_limit_wait_past_the_runs_cap_fails_instead_of_sleeping(module, w
         ),
         sleep=slept.append,
     )
+    attempts = []
 
-    def sync(chain, store):
-        calls.sync += 1
-        client.request_json("POST", "http://rpc.invalid", json={})
-        return "never"
+    def spend(*args):
+        attempts.append(step)
+        client.request_json("POST", KEYED_URL, json={})
 
+    overrides = {"sync": spend} if step == "raw_transfers" else {"probes": spend}
+    # A retry would wait five minutes and meet the same spent budget. The run limit is far
+    # shorter, so a retry fails this test as a timeout instead of hanging it.
     result = run_job(
-        module, pipeline_for(module, world, calls, sync=sync, rate_limit_wait=600, retry_delay=0)
+        module,
+        pipeline_for(
+            module,
+            world,
+            calls,
+            rate_limit_wait=600,
+            retry_delay=300,
+            max_runtime=120,
+            **overrides,
+        ),
     )
     assert not result.success
+    assert attempts == [step]
     assert slept == []
-    assert "rate limit wait would pass the run's limit" in alerts_in(world)[0]["reason"]
+    [alert] = alerts_in(world)
+    assert alert["step"] == step
+    assert "Failure: " in alert["reason"]
+    assert "RateLimitBudgetSpent: rpc: a 1800s rate limit wait would pass" in alert["reason"]
+    for text in (everything_logged(result), json.dumps(alert)):
+        assert KEY not in text
+        assert "base-rpc.provider.invalid" not in text
 
 
 def test_the_job_carries_the_max_runtime_tag_for_the_daemon(module, monkeypatch):

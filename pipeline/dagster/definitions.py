@@ -45,7 +45,12 @@ from ousd.checks import (
     run_checks,
     unacceptable,
 )
-from ousd.http import PoliteClient, rate_limit_waits_capped, scrubbed_traceback
+from ousd.http import (
+    PoliteClient,
+    RateLimitBudgetSpent,
+    rate_limit_waits_capped,
+    scrubbed_traceback,
+)
 from ousd.ingest import sync_chain
 from ousd.migrations import SchemaOutOfDate
 from ousd.probes import build_probes, history_for, rpc_for, solana_rpc_for
@@ -79,6 +84,9 @@ RATE_LIMIT_WAIT_VARIABLE = "OUSD_RATE_LIMIT_WAIT_SECONDS"
 RATE_LIMIT_WAIT = 3600
 # The exit status `timeout` uses, for a dbt build stopped at its limit.
 DBT_TIMED_OUT = 124
+# Once the run limit has fired, it fires again this often until the run ends, in case a broad
+# handler swallowed the first one.
+REFIRE_INTERVAL = 60
 # No limit may be longer than a week. A larger value is a typo, and setitimer refuses huge ones.
 LONGEST_LIMIT = 7 * 24 * 3600
 
@@ -187,8 +195,9 @@ class RunTimeout(dg.Failure):
 
 @contextmanager
 def _time_limit(seconds: float, log: Any) -> Iterator[Callable[[], bool]]:
-    """Raise RunTimeout wherever the run is once `seconds` pass. It interrupts a sleep, and
-    subprocess.run kills its child when interrupted. Yields whether the limit fired.
+    """Raise RunTimeout wherever the run is once `seconds` pass, and again every REFIRE_INTERVAL
+    after that. It interrupts a sleep, and subprocess.run kills its child when interrupted.
+    Yields whether the limit fired.
 
     A signal only reaches the main thread, which is where `dagster job execute` runs. Anywhere
     else only the dagster/max_runtime tag applies, and only with the daemon's run monitoring on.
@@ -206,7 +215,7 @@ def _time_limit(seconds: float, log: Any) -> Iterator[Callable[[], bool]]:
         raise RunTimeout(seconds)
 
     previous = signal.signal(signal.SIGALRM, expire)
-    signal.setitimer(signal.ITIMER_REAL, seconds)
+    signal.setitimer(signal.ITIMER_REAL, seconds, REFIRE_INTERVAL)
     try:
         yield lambda: fired
     finally:
@@ -256,6 +265,8 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
                     raise dg.Failure(f"{chain.name}: {conflict}", allow_retries=False) from None
                 except RunTimeout:
                     raise
+                except RateLimitBudgetSpent as exc:
+                    raise _final(context, f"{chain.name}: sync failed", exc) from None
                 except Exception as exc:
                     raise _scrubbed(context, f"{chain.name}: sync failed", exc) from None
         finally:
@@ -278,6 +289,8 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
             raise dg.Failure(str(conflict), allow_retries=False) from None
         except RunTimeout:
             raise
+        except RateLimitBudgetSpent as exc:
+            raise _final(context, "reconciliation failed", exc) from None
         except Exception as exc:
             raise _scrubbed(context, "reconciliation failed", exc) from None
         finally:
@@ -353,16 +366,19 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
     def run_limits(init_context: dg.InitResourceContext) -> Iterator[None]:
         """Set up once for the whole run by the in-process executor, and torn down at its end,
         however it ends."""
-        with (
-            _time_limit(run.max_runtime, init_context.log) as timed_out,
-            rate_limit_waits_capped(run.rate_limit_wait),
-        ):
-            try:
+        fired: Callable[[], bool] | None = None
+        try:
+            with (
+                _time_limit(run.max_runtime, init_context.log) as timed_out,
+                rate_limit_waits_capped(run.rate_limit_wait),
+            ):
+                fired = timed_out
                 yield
-            finally:
-                # A limit that fired outside a step leaves no step failure for the hook to see.
-                if timed_out() and init_context.run:
-                    _alert(init_context.run.run_id, "run", RunTimeout(run.max_runtime))
+        finally:
+            # The timer is off by now, so it can't interrupt this alert. A limit that fired
+            # outside a step leaves no step failure for the hook to see.
+            if fired is not None and fired() and init_context.run:
+                _alert(init_context.run.run_id, "run", RunTimeout(run.max_runtime))
 
     def _alert(run_id: str, step: str, exc: BaseException | None) -> Path | None:
         try:
@@ -426,6 +442,12 @@ def _scrubbed(context: dg.AssetExecutionContext, what: str, exc: Exception) -> R
     Dagster records a raised error's causes as they are, so the caller raises it from None."""
     context.log.error(f"{what}:\n{scrubbed_traceback(exc)}")
     return RuntimeError(f"{what}: {describe(exc)}")
+
+
+def _final(context: dg.AssetExecutionContext, what: str, exc: Exception) -> dg.Failure:
+    """The same, as a failure the retry policy skips: a retry would meet the same spent budget."""
+    context.log.error(f"{what}:\n{scrubbed_traceback(exc)}")
+    return dg.Failure(f"{what}: {describe(exc)}", allow_retries=False)
 
 
 defs = build_definitions()

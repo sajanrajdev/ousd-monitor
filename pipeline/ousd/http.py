@@ -29,6 +29,9 @@ MAX_SERVER_WAIT = 3600.0
 # Longest one attempt may run. The read timeout only limits the gap between bytes, so without
 # this a server trickling data could hold a request open indefinitely.
 REQUEST_DEADLINE = 120.0
+# httpx's limit on connecting, and on each wait for bytes. The deadline above is only checked
+# between chunks, so this alone bounds a server that connects and then says nothing.
+REQUEST_TIMEOUT = 60.0
 # Shortest URL part worth hiding on its own. Shorter parts are words like "v2" or "base".
 MIN_SECRET_PART = 8
 # Largest response body read by default. A client can set its own limit.
@@ -147,6 +150,11 @@ class HttpError(RuntimeError):
     """A response that retrying will not fix, or the last failure after all retries."""
 
 
+class RateLimitBudgetSpent(HttpError):
+    """A server asked for a wait the run can no longer afford. Retrying the run's step would meet
+    the same spent budget, so callers treat it as final."""
+
+
 class WaitBudget:
     """Seconds every client together may still spend waiting out servers' rate limits.
 
@@ -158,7 +166,7 @@ class WaitBudget:
 
     def spend(self, seconds: float, label: str) -> None:
         if seconds > self.remaining:
-            raise HttpError(
+            raise RateLimitBudgetSpent(
                 f"{label}: a {seconds:.0f}s rate limit wait would pass the run's limit"
                 f" ({self.remaining:.0f}s left)"
             )
@@ -191,13 +199,14 @@ class PoliteClient:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         deadline: float = REQUEST_DEADLINE,
+        timeout: float = REQUEST_TIMEOUT,
         max_bytes: int = MAX_RESPONSE_BYTES,
         rng: random.Random | None = None,
         wall_clock: Callable[[], float] = time.time,
         waits: WaitBudget = RATE_LIMIT_WAITS,
     ) -> None:
         self._client = httpx.Client(
-            headers={"User-Agent": USER_AGENT}, timeout=60.0, transport=transport
+            headers={"User-Agent": USER_AGENT}, timeout=timeout, transport=transport
         )
         self._label = label
         self._min_interval = min_interval

@@ -2,13 +2,16 @@
 
 import json
 import logging
+import time
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import httpx
 import pytest
 from ousd import alerts, cli
 from ousd.alerts import Alert, describe, new_alert, ping_heartbeat, post_alert, raise_alert
 from ousd.http import PoliteClient
+from test_http import silent_server
 
 NOW = datetime(2026, 11, 4, 6, 0, tzinfo=UTC)
 KEY = "k3y9aZ7QwErTyUiOpAsDfGhJkLzXcVbNm1234567890"
@@ -151,6 +154,16 @@ def test_a_partly_written_alert_never_claims_the_run(tmp_path):
     assert [path.name for path in tmp_path.iterdir()] == ["run-1.json"]
 
 
+def test_a_failed_write_leaves_no_temporary_file(tmp_path, monkeypatch):
+    def disk_full(*args, **kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(alerts, "json", SimpleNamespace(dumps=disk_full))
+    with pytest.raises(OSError, match="No space left"):
+        alerts.write_alert(tmp_path, an_alert())
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_an_unwritable_alerts_folder_is_logged_and_the_webhook_still_posts(tmp_path, caplog):
     blocked = tmp_path / "alerts"
     blocked.write_text("a file where the folder should be")
@@ -197,6 +210,22 @@ def test_the_real_outbound_client_never_waits_out_a_rate_limit(monkeypatch):
     assert ping_heartbeat(env={"OUSD_HEARTBEAT_URL": HEARTBEAT}) is False
     assert sleeps == []
     assert len(requests) == 2
+
+
+def test_the_outbound_deadline_bounds_a_server_that_never_answers(monkeypatch, caplog):
+    monkeypatch.setattr(alerts, "OUTBOUND_DEADLINE", 0.2)
+    real = alerts.PoliteClient
+    # The real client as outbound_client builds it, without the backoff between attempts.
+    monkeypatch.setattr(
+        alerts, "PoliteClient", lambda **options: real(sleep=lambda seconds: None, **options)
+    )
+    with silent_server(monkeypatch) as url:
+        started = time.monotonic()
+        assert post_alert(an_alert(), env={"OUSD_ALERT_WEBHOOK_URL": url}) is False
+    # Three attempts of 0.2 s, where each used to wait a minute for the first byte.
+    assert time.monotonic() - started < 10
+    assert "alert webhook: not delivered" in caplog.text
+    assert "ReadTimeout" in caplog.text
 
 
 def mock_outbound(monkeypatch, status: int) -> list[httpx.Request]:

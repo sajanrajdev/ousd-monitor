@@ -1,7 +1,11 @@
+import _socket
 import logging
 import math
 import random
 import socket
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import httpx
@@ -11,6 +15,7 @@ from ousd.http import (
     RATE_LIMIT_WAITS,
     HttpError,
     PoliteClient,
+    RateLimitBudgetSpent,
     WaitBudget,
     rate_limit_waits_capped,
     scrub_secrets,
@@ -202,6 +207,39 @@ def test_a_trickling_response_is_cut_off_at_the_deadline_and_retried():
     assert clock.now == 1_000 + 65  # Stopped at the first chunk past the deadline.
 
 
+@contextmanager
+def silent_server(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """A URL on this machine that takes connections and never answers.
+
+    The kernel completes each connection from the listen backlog, so a client connects, sends its
+    request and then hears nothing. The suite refuses every connection, so this lets loopback
+    through and nothing else.
+    """
+
+    def loopback_only(self: socket.socket, address: Any) -> None:
+        if address[0] != "127.0.0.1":
+            raise RuntimeError(f"a test tried to open a connection to {address}")
+        _socket.socket.connect(self, address)
+
+    monkeypatch.setattr(socket.socket, "connect", loopback_only)
+    for name in ("ALL_PROXY", "HTTP_PROXY", "all_proxy", "http_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    with socket.create_server(("127.0.0.1", 0), backlog=16) as server:
+        yield f"http://127.0.0.1:{server.getsockname()[1]}/never"
+
+
+def test_a_server_that_connects_and_never_answers_is_cut_off_at_the_timeout(monkeypatch):
+    client = PoliteClient(
+        label="silent", min_interval=0, max_attempts=2, sleep=lambda _: None, timeout=0.2
+    )
+    with silent_server(monkeypatch) as url:
+        started = time.monotonic()
+        with pytest.raises(HttpError, match="silent: gave up after 2 attempts: ReadTimeout"):
+            client.request("GET", url)
+    # Two attempts of 0.2 s, where the old fixed timeout made each one a minute.
+    assert time.monotonic() - started < 10
+
+
 def test_a_slow_response_inside_the_deadline_succeeds():
     clock = FakeClock()
     stream = Trickle(clock, [b'{"ok":', b" true}"], seconds_per_chunk=25)
@@ -377,8 +415,10 @@ def test_server_waits_are_spent_from_the_budget_and_refused_past_it():
     )
     assert client.request_json("GET", "http://api.invalid") == {"ok": True}
     assert budget.remaining == 40
-    with pytest.raises(HttpError, match="60s rate limit wait would pass the run's limit"):
+    with pytest.raises(RateLimitBudgetSpent, match="60s rate limit wait would pass the run"):
         client.request_json("GET", "http://api.invalid")
+    # Still an HttpError, for callers that catch any failed request.
+    assert issubclass(RateLimitBudgetSpent, HttpError)
     # The refused wait is never slept.
     assert sleeps == [60]
 
@@ -390,7 +430,7 @@ def test_a_spent_window_counts_against_the_budget():
     spent = {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "30000"}
     client = client_for([httpx.Response(200, json={}, headers=spent)], sleeps, waits=budget)
     client.request_json("GET", "http://api.invalid")
-    with pytest.raises(HttpError, match="30s rate limit wait"):
+    with pytest.raises(RateLimitBudgetSpent, match="30s rate limit wait"):
         client.request_json("GET", "http://api.invalid")
     assert sleeps == []
 

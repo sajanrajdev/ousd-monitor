@@ -26,8 +26,9 @@ WEBHOOK_VARIABLE = "OUSD_ALERT_WEBHOOK_URL"
 HEARTBEAT_VARIABLE = "OUSD_HEARTBEAT_URL"
 # Enough to say what broke. The traceback is in the run's log.
 REASON_LIMIT = 500
-# An alert must not hold up a run that has already failed for long: a few short attempts, and
-# no waiting out a server's rate limit, however long it asks for.
+# An alert must not hold up a run that has already failed for long: a few short attempts, each
+# bounded from connecting to the last byte, and no waiting out a server's rate limit, however
+# long it asks for.
 OUTBOUND_ATTEMPTS = 3
 OUTBOUND_DEADLINE = 15.0
 
@@ -38,7 +39,11 @@ def outbound_client(label: str) -> PoliteClient:
     no_waits = WaitBudget()
     no_waits.remaining = 0
     return PoliteClient(
-        label=label, max_attempts=OUTBOUND_ATTEMPTS, deadline=OUTBOUND_DEADLINE, waits=no_waits
+        label=label,
+        max_attempts=OUTBOUND_ATTEMPTS,
+        deadline=OUTBOUND_DEADLINE,
+        timeout=OUTBOUND_DEADLINE,
+        waits=no_waits,
     )
 
 
@@ -88,15 +93,17 @@ def write_alert(alerts_dir: Path, alert: Alert) -> Path | None:
     alerts_dir.mkdir(parents=True, exist_ok=True)
     path = alerts_dir / f"{alert.run_id}.json"
     # Written whole, then linked into place, so a crash never leaves a partial file that would
-    # claim the run. The link fails if the run already has one.
+    # claim the run. The link fails if the run already has one. The temporary file goes however
+    # this ends, a failed write included.
     with tempfile.NamedTemporaryFile("w", dir=alerts_dir, suffix=".tmp", delete=False) as handle:
-        handle.write(json.dumps(asdict(alert), indent=2) + "\n")
-    try:
-        os.link(handle.name, path)
-    except FileExistsError:
-        return None
-    finally:
-        os.unlink(handle.name)
+        try:
+            handle.write(json.dumps(asdict(alert), indent=2) + "\n")
+            handle.close()
+            os.link(handle.name, path)
+        except FileExistsError:
+            return None
+        finally:
+            os.unlink(handle.name)
     return path
 
 

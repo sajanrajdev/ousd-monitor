@@ -14,9 +14,9 @@
 # On Railway a missing token fails the run. The deploy is a preview: a deployment that lands in
 # production fails the run. It never prints a variable's value.
 #
-# A failure the pipeline didn't alert on raises an alert (`ousd alert`), and only a run that got
-# all the way through pings the heartbeat (`ousd heartbeat`). Both read their URLs from the
-# environment, so no URL is ever on a command line here.
+# A failure the pipeline didn't alert on raises an alert (`ousd alert`), an unexpected exit
+# included, and only a run that got all the way through pings the heartbeat (`ousd heartbeat`).
+# Both read their URLs from the environment, so no URL is ever on a command line here.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,21 +36,40 @@ ousd() {
   env -u VERCEL_TOKEN -u VERCEL_ORG_ID -u VERCEL_PROJECT_ID \
     uv run --locked ${ENV_FILE[@]+"${ENV_FILE[@]}"} ousd "$@"
 }
+# Set once this run has an alert, raised here or by the pipeline, so the exit trap adds none.
+alerted=0
 alert_and_fail() {
   local step="$1"
   shift
+  alerted=1
   ousd alert --step "$step" --reason "$*" || say "The alert could not be raised."
   fail "$@"
 }
+# The number of alert files. Never fails: a missing or unreadable folder counts what it can.
 alerts_in() {
-  [ -d data/alerts ] || { echo 0; return; }
-  find data/alerts -name '*.json' | wc -l | tr -d ' '
+  local count
+  count="$(find data/alerts -name '*.json' 2>/dev/null | wc -l)" || true
+  echo $((count))
 }
 finish() {
   ousd heartbeat || say "The heartbeat was not delivered."
   say "Done in $((SECONDS - started))s."
   exit 0
 }
+# The one exit trap: it removes the deploy's work folder, and alerts on an exit nothing alerted
+# on, such as a command failing under set -e. The alert is best effort and keeps the status.
+work=""
+on_exit() {
+  local status=$?
+  [ -z "$work" ] || rm -rf "$work" || true
+  if [ "$status" -ne 0 ] && [ "$alerted" = 0 ]; then
+    alerted=1
+    ousd alert --step daily --reason "scripts/daily.sh stopped unexpectedly with status $status." ||
+      say "The alert could not be raised."
+  fi
+  exit "$status"
+}
+trap on_exit EXIT
 
 # What the site build and the Vercel CLI may see. Nothing that can hold a provider URL or key.
 SAFE_VARS=(PATH HOME LANG LC_ALL TZ TMPDIR TERM NO_COLOR CI
@@ -114,6 +133,8 @@ if ! env -u VERCEL_TOKEN -u VERCEL_ORG_ID -u VERCEL_PROJECT_ID OUSD_HEARTBEAT_UR
   # The pipeline alerts on a failed step. One that failed before any step ran alerts here.
   [ "$(alerts_in)" != "$alerts_before" ] ||
     alert_and_fail pipeline "make run exited non-zero, so nothing is released or deployed."
+  # The pipeline's own alert covers this exit.
+  alerted=1
   fail "make run exited non-zero, so nothing is released or deployed."
 fi
 
@@ -146,7 +167,6 @@ done
 # The verified folder, as the Build Output API wants it: static/ and config.json, nothing else.
 # No vercel build, which would run next build again without the release gate.
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/.vercel/output"
 cp -RL "$release_dir/." "$work/.vercel/output/static"
 printf '{"version": 3}\n' >"$work/.vercel/output/config.json"
