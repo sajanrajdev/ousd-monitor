@@ -1,6 +1,8 @@
 name: ousd_monitor
 version: "1.0"
 profile: ousd_monitor
+# The locked dbt-core line (uv.lock). Raise it with the lock, not before.
+require-dbt-version: [">=1.12.0", "<1.13.0"]
 model-paths: ["models"]
 test-paths: ["tests"]
 models:

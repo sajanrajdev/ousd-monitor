@@ -1,62 +1,167 @@
 version: 2
 models:
   - name: mart_activity_waterfall
+    config:
+      contract: {enforced: true}
+    description: >
+      Per chain and UTC day, headline volume broken into the parts that are removed to reach clean
+      volume. Every day of the chain's calendar has a row, a quiet day as zeros. Grain: one row
+      per `chain` and `day_utc`. The parts add back to headline volume.
     columns:
       - name: chain
+        data_type: varchar
+        description: >
+          {{ doc("chain") }}
         data_tests: [not_null]
       - name: day_utc
-        data_tests: [not_null]
-      - name: transfer_count
+        data_type: date
+        description: >
+          {{ doc("utc_day") }}
         data_tests: [not_null]
       - name: headline_value
+        data_type: hugeint
+        description: >
+          All transfer value that day, mints and burns included. {{ doc("base_units") }}
+        data_tests: [not_null]
+      - name: transfer_count
+        data_type: bigint
+        description: How many transfers that day, fees included.
         data_tests: [not_null]
       - name: minted
+        data_type: hugeint
+        description: >
+          Value minted that day. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: burned
+        data_type: hugeint
+        description: >
+          Value burned that day. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: fees
+        data_type: hugeint
+        description: >
+          Tempo fee value that day. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: fee_count
+        data_type: bigint
+        description: How many transfers were Tempo fees that day.
         data_tests: [not_null]
       - name: fee_liquidity
+        data_type: hugeint
+        description: >
+          Other transfers to or from Tempo's fee manager that day. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: issuer_flows
+        data_type: hugeint
+        description: >
+          Transfers to or from an issuer or issuer-route wallet that day. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: same_entity
+        data_type: hugeint
+        description: >
+          Transfers between two wallets of one named entity that day. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: same_tx_netting
+        data_type: hugeint
+        description: >
+          Value that cancels within a transaction that day, such as loops and multi-hop routes. {{
+          doc("base_units") }}
         data_tests: [not_null]
       - name: dex_flow
+        data_type: hugeint
+        description: >
+          Net flow to and from DEX pools that day. Not trading volume, as no swaps are ingested. {{
+          doc("base_units") }}
         data_tests: [not_null]
       - name: lending_flow
+        data_type: hugeint
+        description: >
+          Net flow to and from lending markets that day. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: clean_large
+        data_type: hugeint
+        description: >
+          Clean volume from transactions of $1M or more that day. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: clean_everyday
+        data_type: hugeint
+        description: >
+          Clean volume from transactions under $1M that day. Nothing more is implied about who sent
+          it. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: clean_tx_count
+        data_type: bigint
+        description: >
+          How many transactions carried at least $1 of clean volume that day.
         data_tests: [not_null]
   - name: mart_activity_kpis
+    config:
+      contract: {enforced: true}
+    description: >
+      Per chain and UTC day with supply: rolling 7-day volume, velocity and active wallets. Grain:
+      one row per `chain` and `day_utc`, over the days the supply journey has a row. A velocity is
+      empty until the chain has a full 7-day window.
     columns:
       - name: chain
+        data_type: varchar
+        description: >
+          {{ doc("chain") }}
         data_tests: [not_null]
       - name: day_utc
+        data_type: date
+        description: >
+          {{ doc("utc_day") }} The last day of the 7-day window.
         data_tests: [not_null]
       - name: total_supply
+        data_type: hugeint
+        description: >
+          Supply held by all wallets at the close of the day. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: circulating_supply
+        data_type: hugeint
+        description: >
+          Total supply less issuer inventory and placed supply. It includes venue supply. {{
+          doc("base_units") }}
         data_tests: [not_null]
       - name: headline_7d
+        data_type: hugeint
+        description: >
+          Headline volume over the 7 days to this day. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: clean_7d
+        data_type: hugeint
+        description: >
+          Clean volume over the 7 days to this day. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: clean_everyday_7d
+        data_type: hugeint
+        description: >
+          Everyday clean volume over the 7 days to this day. {{ doc("base_units") }}
         data_tests: [not_null]
+      # Velocity is null when the window is short or the denominator is zero.
+      - name: velocity_bps
+        data_type: integer
+        description: >
+          Clean volume per day as a share of circulating supply. {{ doc("bps") }} Empty before a full
+          window.
+      - name: velocity_everyday_bps
+        data_type: integer
+        description: >
+          Everyday clean volume per day as a share of circulating supply. {{ doc("bps") }} Empty
+          before a full window.
+      - name: headline_velocity_bps
+        data_type: integer
+        description: >
+          Headline volume per day as a share of total supply, the common definition. {{ doc("bps") }}
+          Empty before a full window.
       - name: active_wallets_7d
+        data_type: bigint
+        description: >
+          Wallets that sent at least $1 of clean volume in the 7 days to this day. Counts wallets, not
+          people.
         data_tests: [not_null]
       - name: active_wallets_over_100_7d
+        data_type: bigint
+        description: >
+          Wallets that sent at least $100 of clean volume in the 7 days to this day.
         data_tests: [not_null]
-      # Velocity is null when the window is short or circulating supply is zero.
-      - name: velocity_bps
-      - name: velocity_everyday_bps
-      - name: headline_velocity_bps
