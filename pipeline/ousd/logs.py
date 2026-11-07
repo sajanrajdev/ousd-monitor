@@ -17,6 +17,8 @@ from ousd.http import scrub_secrets
 
 FORMAT_VARIABLE = "OUSD_LOG_FORMAT"
 PLAIN_FORMAT = "%(asctime)s %(levelname)s %(message)s"
+# Set on the handler configure_logging installs, so a later call replaces that one and no other.
+OWN_HANDLER_MARK = "_ousd_log_handler"
 
 # Set by whoever knows them, read by the formatter. Both are absent from a line until then.
 run_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("ousd_run_id", default=None)
@@ -76,11 +78,14 @@ def formatter(env: Mapping[str, str] | None = None) -> logging.Formatter:
 
 
 def configure_logging(verbose: bool, env: Mapping[str, str] | None = None) -> None:
-    """Install one stderr handler on the root logger, replacing what basicConfig would."""
+    """Install one stderr handler on the root logger, replacing only the one this function put
+    there before. Handlers someone else added stay."""
     handler = logging.StreamHandler()
     handler.setFormatter(formatter(env))
+    setattr(handler, OWN_HANDLER_MARK, True)
     root = logging.getLogger()
     for existing in list(root.handlers):
-        root.removeHandler(existing)
+        if getattr(existing, OWN_HANDLER_MARK, False):
+            root.removeHandler(existing)
     root.addHandler(handler)
     root.setLevel(logging.INFO if verbose else logging.WARNING)

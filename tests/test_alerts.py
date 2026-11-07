@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
+import dagster as dg
 import httpx
 import pytest
 from ousd import alerts, cli
@@ -356,6 +357,41 @@ def test_a_heartbeat_endpoint_that_refuses_a_post_still_gets_its_get():
     outbound = GetOnly()
     assert ping_heartbeat(outbound, {"OUSD_HEARTBEAT_URL": HEARTBEAT}, chains=SUMMARY)
     assert [r.method for r in outbound.requests][-1] == "GET"
+
+
+def test_a_post_that_raises_something_other_than_a_delivery_failure_sends_nothing(caplog):
+    class TimedOut(dg.Failure):
+        pass
+
+    class Raising(Outbound):
+        def handle(self, request):
+            self.requests.append(request)
+            raise TimedOut("the run passed its time limit")
+
+    outbound = Raising()
+    assert ping_heartbeat(outbound, {"OUSD_HEARTBEAT_URL": HEARTBEAT}, chains=SUMMARY) is False
+    assert [r.method for r in outbound.requests] == ["POST"]
+    assert "heartbeat: not delivered: TimedOut" in caplog.text
+
+
+def test_a_refused_post_is_logged_before_the_get_goes_out(caplog):
+    class GetOnly(Outbound):
+        def handle(self, request):
+            self.requests.append(request)
+            return httpx.Response(200 if request.method == "GET" else 405, text="x")
+
+    assert ping_heartbeat(GetOnly(), {"OUSD_HEARTBEAT_URL": HEARTBEAT}, chains=SUMMARY)
+    assert "heartbeat: POST not delivered" in caplog.text
+    assert "5f0e1d2c-3b4a-4968-8776-655443322110" not in caplog.text
+
+
+def test_summary_keys_are_cut_and_scrubbed():
+    cleaned = alerts.clean_summary(
+        {"a": {"k" * 500: 1, f"at {KEYED_URL}": 2}}, {"BASE_RPC_URL": KEYED_URL}
+    )
+    [(first, _), (second, _)] = cleaned["a"].items()
+    assert len(first) == alerts.SUMMARY_TEXT
+    assert KEY not in second
 
 
 def test_non_finite_numbers_are_dropped_from_the_summary():

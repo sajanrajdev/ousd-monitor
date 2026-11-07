@@ -4,7 +4,9 @@ throwaway database. The module is loaded as a file, the way `dagster -f` loads i
 import csv
 import hashlib
 import importlib.util
+import io
 import json
+import logging
 import math
 import os
 import shutil
@@ -26,6 +28,7 @@ from ousd.chains import REQUIRED_CHAINS
 from ousd.checks import CHECK_NAMES, CheckResult
 from ousd.http import RATE_LIMIT_WAITS, SECRET_URL_VARIABLES, PoliteClient
 from ousd.ingest import SyncResult, sync_chain
+from ousd.logs import JsonFormatter, configure_logging
 from ousd.reconcile import (
     BridgeComparison,
     BridgeFigures,
@@ -719,6 +722,8 @@ def test_a_time_limit_that_fires_between_steps_still_alerts(
     assert alert["run_id"] == result.run_id
     assert alert["step"] == "run"
     assert alert["reason"] == "RunTimeout: the run passed its 3600s time limit"
+    # The run's summary is still there when the teardown raises this alert.
+    assert alert["chains"]["tempo"]["sync"] == "failed"
     assert len(outbound.to(WEBHOOK)) == 1
     # The teardown stopped the timer before it alerted, so it couldn't cut the alert short.
     assert timers == [(0.0, 0.0)]
@@ -1108,11 +1113,118 @@ def test_a_json_run_logs_json_lines_without_the_key(module, world, calls, monkey
     assert "base-rpc.provider.invalid" not in err
 
 
+def test_module_logs_are_json_during_a_json_run_and_the_handler_is_removed_after(
+    module, world, calls, monkeypatch
+):
+    monkeypatch.setenv("OUSD_LOG_FORMAT", "json")
+    package = logging.getLogger("ousd")
+    seen: list[str] = []
+
+    def sync(chain, store):
+        # Checked on the handler itself, not on what pytest captures. Without the run's handler
+        # these lines would reach Python's fallback handler as plain text.
+        [handler] = [
+            h
+            for h in package.handlers
+            if isinstance(h, logging.StreamHandler) and isinstance(h.formatter, JsonFormatter)
+        ]
+        handler.setStream(stream := io.StringIO())
+        logging.getLogger("ousd.ingest").warning("hello from %s", chain.name)
+        seen.append(stream.getvalue())
+        raise ConnectionError("stop here")
+
+    before = list(package.handlers)
+    run_job(module, pipeline_for(module, world, calls, sync=sync))
+    entry = json.loads(seen[0])
+    assert entry["message"] == "hello from tempo"
+    assert entry["logger"] == "ousd.ingest"
+    assert entry["run_id"]
+    assert package.handlers == before
+
+
+def test_module_logs_are_not_doubled_when_the_root_logger_already_writes_json(monkeypatch):
+    monkeypatch.setenv("OUSD_LOG_FORMAT", "json")
+    configure_logging(verbose=False)
+    package = logging.getLogger("ousd")
+    before = list(package.handlers)
+    module = load_definitions()
+    undo = module._json_module_logs()
+    assert package.handlers == before
+    undo()
+    monkeypatch.delenv("OUSD_LOG_FORMAT")
+    logging.getLogger().handlers.clear()
+    module._json_module_logs()()
+    assert package.handlers == before
+
+
+def test_the_json_console_logger_logs_from_debug_unless_told_otherwise(module):
+    def made(config):
+        context = dg.build_init_logger_context(logger_config=config)
+        return module.json_console_logger.logger_fn(context)
+
+    assert made({"log_level": "DEBUG"}).level == logging.DEBUG
+    assert made({"log_level": "warning"}).level == logging.WARNING
+    # The job's run config leaves the level out, which means the default.
+    assert (
+        module.json_console_logger.config_schema.config_type.fields["log_level"].default_value
+        == "DEBUG"
+    )
+
+
+def test_a_failing_cursor_read_is_a_scrubbed_sync_failure_not_a_crash(
+    module, world, calls, monkeypatch
+):
+    monkeypatch.setenv("BASE_RPC_URL", KEYED_URL)
+
+    def broken(self, name):
+        raise RuntimeError(f"cannot read {KEYED_URL}")
+
+    monkeypatch.setattr(Store, "synced_through", broken)
+    result = run_job(module, pipeline_for(module, world, calls))
+    assert not result.success
+    [alert] = alerts_in(world)
+    assert alert["step"] == "raw_transfers"
+    assert KEY not in json.dumps(alert)
+    assert alert["chains"]["tempo"]["sync"] == "failed"
+
+
+def test_reconciliation_metadata_that_cannot_be_built_never_fails_the_asset(
+    module, world, calls, monkeypatch
+):
+    def broken(result, figures):
+        raise KeyError("figures")
+
+    def reconcile(probes, store, report, **kwargs):
+        latest = store.latest_reconciliation()
+        assert latest
+        return RunResult(latest.run_id, "full", "pass", 0, {"tempo": "pass"}, "pass", [])
+
+    monkeypatch.setattr(module, "run_reconciliation", reconcile)
+    monkeypatch.setattr(module, "_reconciliation_facts", broken)
+    result = run_job(module, pipeline_for(module, world, calls))
+    assert result.success
+    recon = metadata_of(result, "chain_reconciliations")
+    assert recon["chains"]["tempo"] == {"status": "pass", "checked": None, "difference": None}
+    assert recon["bridge"] == {"status": "pass"}
+
+
 def test_malformed_run_results_and_manifest_never_fail_the_asset(module, tmp_path):
     path = tmp_path / "run_results.json"
     path.write_text(json.dumps({"results": ["not a dict", 3]}))
     assert module._dbt_metadata(path, 1.0)["run_results"] == "missing or unreadable"
     (tmp_path / "manifest.json").write_text("{not json")
+    assert module._published_metadata(tmp_path) == {"manifest": "missing or unreadable"}
+
+
+def test_metadata_read_after_the_work_never_raises_whatever_the_file_holds(module, tmp_path):
+    # Nesting deep enough to exhaust the parser raises RecursionError, which no narrower list of
+    # errors would have named.
+    deep = tmp_path / "deep.json"
+    deep.write_text("[" * 100_000)
+    assert module._dbt_metadata(deep, 1.0)["run_results"] == "missing or unreadable"
+    (tmp_path / "manifest.json").write_text("[" * 100_000)
+    assert module._published_metadata(tmp_path) == {"manifest": "missing or unreadable"}
+    (tmp_path / "manifest.json").write_text(json.dumps({"dataset_version": 1, "files": []}))
     assert module._published_metadata(tmp_path) == {"manifest": "missing or unreadable"}
 
 

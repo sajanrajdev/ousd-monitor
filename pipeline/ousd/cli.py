@@ -597,8 +597,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command not in ("alert", "heartbeat"):
             parser.error(str(exc))
         # A typo must not silence the alert of a run that has failed.
-        os.environ.pop("OUSD_LOG_FORMAT", None)
-        configure_logging(args.verbose)
+        configure_logging(args.verbose, env={})
         logging.getLogger(__name__).warning("%s: using plain logs", exc)
 
     if args.command in ("alert", "heartbeat"):

@@ -2,6 +2,7 @@
 
 import dataclasses
 import hashlib
+import logging
 import socket
 
 import pytest
@@ -20,6 +21,17 @@ def no_network(monkeypatch):
         raise RuntimeError(f"a test tried to open a connection to {address}")
 
     monkeypatch.setattr(socket.socket, "connect", refuse)
+
+
+@pytest.fixture(autouse=True)
+def restore_root_logging():
+    """configure_logging installs a handler on the root logger. Put the handlers and level back, so
+    none outlives its test bound to a stream pytest has closed."""
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    yield
+    root.handlers[:] = handlers
+    root.setLevel(level)
 
 
 def make_chain(**overrides) -> Chain:

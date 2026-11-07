@@ -67,10 +67,11 @@ def clean_summary(
         for key, value in list(facts.items())[:SUMMARY_FIELDS]:
             if isinstance(value, float) and not math.isfinite(value):
                 continue
+            label = scrub_secrets(str(key), env)[:SUMMARY_TEXT]
             if isinstance(value, bool) or value is None or isinstance(value, int | float):
-                kept[str(key)] = value
+                kept[label] = value
             elif isinstance(value, str):
-                kept[str(key)] = scrub_secrets(value, env)[:SUMMARY_TEXT]
+                kept[label] = scrub_secrets(value, env)[:SUMMARY_TEXT]
         cleaned[scrub_secrets(str(name), env)[:SUMMARY_TEXT]] = kept
     return cleaned
 
@@ -215,9 +216,10 @@ def ping_heartbeat(
             try:
                 client("heartbeat").request("POST", url, json={"chains": summary})
                 return True
-            except Exception:
-                # A dead-man endpoint that takes only GET still gets its ping.
-                pass
+            except HttpError as exc:
+                # A dead-man endpoint that takes only GET still gets its ping, but only after a
+                # delivery failure. Any other error, such as the run's time limit, is not one.
+                log.warning("heartbeat: POST not delivered: %s", _undelivered(exc, env))
         client("heartbeat").request("GET", url)
     except Exception as exc:
         log.warning("heartbeat: not delivered: %s", _undelivered(exc, env))

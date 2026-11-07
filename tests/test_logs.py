@@ -12,15 +12,6 @@ KEY = "k3y9aZ7QwErTyUiOpAsDfGhJkLzXcVbNm1234567890"
 KEYED_URL = f"https://base-rpc.provider.invalid/v2/{KEY}"
 
 
-@pytest.fixture(autouse=True)
-def restore_root_logging():
-    root = logging.getLogger()
-    handlers, level = list(root.handlers), root.level
-    yield
-    root.handlers[:] = handlers
-    root.setLevel(level)
-
-
 def emit(formatter: logging.Formatter, message: str, *args, exc: BaseException | None = None):
     record = logging.LogRecord(
         "ousd.test",
@@ -121,6 +112,18 @@ def test_configure_logging_writes_json_to_stderr(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert json.loads(captured.err.strip())["message"] == "hello"
     assert captured.out == ""
+
+
+def test_configure_logging_replaces_only_its_own_handler():
+    root = logging.getLogger()
+    other = logging.NullHandler()
+    root.addHandler(other)
+    configure_logging(verbose=False, env={})
+    configure_logging(verbose=False, env={"OUSD_LOG_FORMAT": "json"})
+    ours = [h for h in root.handlers if getattr(h, logs.OWN_HANDLER_MARK, False)]
+    assert len(ours) == 1
+    assert isinstance(ours[0].formatter, JsonFormatter)
+    assert other in root.handlers
 
 
 def test_configure_logging_keeps_plain_text_without_the_variable(monkeypatch, capsys):

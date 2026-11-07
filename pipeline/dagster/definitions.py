@@ -291,15 +291,37 @@ def _refuse(pipeline: Pipeline, context: dg.AssetExecutionContext, reason: str) 
         context.log.warning("the last published dataset is marked stale")
 
 
-@dg.logger
+@dg.logger(
+    config_schema={"log_level": dg.Field(str, is_required=False, default_value="DEBUG")},
+)
 def json_console_logger(init_context: dg.InitLoggerContext) -> logging.Logger:
-    """Dagster's console logger with one JSON object per line, scrubbed before it is encoded."""
+    """Dagster's console logger with one JSON object per line, scrubbed before it is encoded.
+    Like Dagster's own, it logs from DEBUG unless `log_level` says otherwise."""
     logger = logging.Logger("ousd_json_console")
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
     logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(str(init_context.logger_config["log_level"]).upper())
     return logger
+
+
+def _json_module_logs() -> Callable[[], None]:
+    """In JSON mode, send the `ousd` loggers' lines through the JSON formatter for the run.
+    Under `dagster job execute` nothing else configures Python logging, so they would reach
+    Python's fallback handler as plain text. Returns what undoes it. Nothing is added when the
+    root logger already has a JSON handler, as the CLI installs, so no line is written twice."""
+    try:
+        if log_format() != "json":
+            return lambda: None
+    except UnknownLogFormat:
+        return lambda: None
+    if any(isinstance(h.formatter, JsonFormatter) for h in logging.getLogger().handlers):
+        return lambda: None
+    handler = logging.StreamHandler()
+    handler.setFormatter(JsonFormatter())
+    package = logging.getLogger("ousd")
+    package.addHandler(handler)
+    return lambda: package.removeHandler(handler)
 
 
 def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
@@ -322,9 +344,9 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
             for chain in chains:
                 note(context.run.run_id, chain.name, sync="failed")
                 began = time.monotonic()
-                cursor_before = store.synced_through(chain.name)
-                rows_before = store.transfer_count(chain.name)
                 try:
+                    cursor_before = store.synced_through(chain.name)
+                    rows_before = store.transfer_count(chain.name)
                     with chain_context(chain.name):
                         result = run.sync(chain, store)
                         context.log.info(_sync_line(chain, result))
@@ -384,7 +406,19 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
         for name, status in result.chains.items():
             context.log.info(f"{name}: {status}")
         context.log.info(f"bridge: {result.bridge}")
-        per_chain = _reconciliation_facts(result, bridge_figures[-1] if bridge_figures else None)
+        try:
+            per_chain = _reconciliation_facts(
+                result, bridge_figures[-1] if bridge_figures else None
+            )
+        except Exception:
+            # Metadata is best effort: it must not turn a finished reconciliation into a retry.
+            per_chain = {
+                "chains": {
+                    name: {"status": status, "checked": None, "difference": None}
+                    for name, status in result.chains.items()
+                },
+                "bridge": {"status": result.bridge},
+            }
         for name, facts in per_chain["chains"].items():
             note(context.run.run_id, name, reconciliation=facts["status"], checked=facts["checked"])
         note(context.run.run_id, "bridge", reconciliation=result.bridge)
@@ -476,6 +510,7 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
         # Lines logged during the run carry its id, and only this run's.
         before = run_id_var.get()
         run_id_var.set(init_context.run.run_id if init_context.run else None)
+        stop_json_logs = _json_module_logs()
         try:
             with (
                 _time_limit(run.max_runtime, init_context.log) as timed_out,
@@ -484,13 +519,15 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
                 fired = timed_out
                 yield
         finally:
-            run_id_var.set(before)
-            if init_context.run:
-                summaries.pop(init_context.run.run_id, None)
             # The timer is off by now, so it can't interrupt this alert. A limit that fired
             # outside a step leaves no step failure for the hook to see.
             if fired is not None and fired() and init_context.run:
                 _alert(init_context.run.run_id, "run", RunTimeout(run.max_runtime))
+            # After the alert, so one for a limit that fired outside a step carries the summary.
+            if init_context.run:
+                summaries.pop(init_context.run.run_id, None)
+            stop_json_logs()
+            run_id_var.set(before)
 
     def _alert(run_id: str, step: str, exc: BaseException | None) -> Path | None:
         try:
@@ -595,17 +632,13 @@ def _reconciliation_facts(result: RunResult, figures: BridgeFigures | None) -> d
 def _dbt_metadata(run_results: Path, seconds: float) -> dict[str, Any]:
     """Each model's status and seconds, and how many tests passed and failed, from the build's own
     run_results.json. A file that is missing or unreadable is said so, and left to the checks,
-    which are what decide whether the build counts."""
+    which are what decide whether the build counts. This runs after the build, so whatever goes
+    wrong here is metadata lost, never a failed run."""
     metadata: dict[str, Any] = {"duration_seconds": seconds}
     try:
         report = json.loads(run_results.read_text())
-        results = report["results"]
-    except (OSError, ValueError, KeyError, TypeError):
-        metadata["run_results"] = "missing or unreadable"
-        return metadata
-    try:
-        return {**metadata, **_dbt_counts(report, results)}
-    except (AttributeError, TypeError, ValueError):
+        return {**metadata, **_dbt_counts(report, report["results"])}
+    except Exception:
         metadata["run_results"] = "missing or unreadable"
         return metadata
 
@@ -642,7 +675,7 @@ def _published_metadata(folder: Path) -> dict[str, Any]:
         manifest_bytes = (folder / "manifest.json").read_bytes()
         manifest = json.loads(manifest_bytes)
         return _manifest_metadata(manifest, manifest_bytes)
-    except (OSError, ValueError, KeyError, TypeError):
+    except Exception:
         # The dataset is published already. Say the record could not be read, and fail nothing.
         return {"manifest": "missing or unreadable"}
 
