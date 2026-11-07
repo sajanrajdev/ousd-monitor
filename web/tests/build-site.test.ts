@@ -109,6 +109,18 @@ describe("make web-release", () => {
     expect(readlinkSync(join(root, "latest"))).toBe("previous");
   });
 
+  it("refuses a dataset published from a tree with uncommitted changes", () => {
+    const root = releaseRootWithLastGood();
+    const dir = releaseGrade();
+    editJson(dir, "manifest.json", (manifest) => {
+      manifest.provenance.tree_state = "dirty";
+    });
+    expect(() => buildRelease(releaseOptions(dir, root))).toThrow(
+      /isn't release grade[\s\S]*published from a tree with uncommitted changes/,
+    );
+    expect(readlinkSync(join(root, "latest"))).toBe("previous");
+  });
+
   it("a mismatched dataset fails, and latest doesn't move", () => {
     const root = releaseRootWithLastGood();
     const dir = releaseGrade();

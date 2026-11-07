@@ -10,7 +10,7 @@ import Reconciliation from "@/app/reconciliation/page";
 import Home from "@/app/page";
 import { TableCard } from "@/components/chart-card";
 import { CARD_ANCHORS, DEFINITION_ANCHORS } from "@/lib/definitions";
-import { copySample, editJson, releaseGrade } from "./dataset-helpers";
+import { copySample, editJson, markStale, releaseGrade } from "./dataset-helpers";
 
 const SECTIONS = [
   "trust-strip",
@@ -266,13 +266,7 @@ describe("a real dataset", () => {
 
 describe("the stale note on every page", () => {
   function stale() {
-    const dir = releaseGrade();
-    editJson(dir, "manifest.json", (manifest) => {
-      manifest.stale = true;
-      manifest.stale_since = "2026-11-04T07:00:00Z";
-      manifest.stale_reason = "a check failed";
-    });
-    vi.stubEnv("OUSD_DATASET_DIR", dir);
+    vi.stubEnv("OUSD_DATASET_DIR", markStale(releaseGrade()));
   }
 
   it("comes from the layout, so the methodology page and 404 have it", () => {
@@ -305,7 +299,7 @@ describe("a preview dataset", () => {
     const dir = copySample("partial");
     rmSync(join(dir, "FIXTURE"));
     editJson(dir, "manifest.json", (manifest) => {
-      manifest.git_commit = "abc1234";
+      manifest.git_commit = "abc1234".padEnd(40, "0");
     });
     vi.stubEnv("OUSD_DATASET_DIR", dir);
   }

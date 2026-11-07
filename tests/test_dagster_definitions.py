@@ -209,8 +209,7 @@ def test_happy_path_runs_ingest_to_publish(module, world, calls):
     assert result.success
     assert materialized(result) == set(KEYS)
     assert (world.out / "latest" / "manifest.json").exists()
-    manifest = json.loads((world.out / "latest" / "manifest.json").read_text())
-    assert manifest["stale"] is False
+    assert not (world.out / "latest" / "stale.json").exists()
     assert calls.reconcile == 1
     assert calls.checks == 1
     with world.store() as store:
@@ -236,11 +235,9 @@ def test_a_failed_blocking_check_stops_publishing_and_marks_the_last_dataset_sta
     assert "published_dataset" not in materialized(result)
     assert calls.checks == 1
     after = latest_files(world)
-    assert {k: v for k, v in after.items() if k != "manifest.json"} == {
-        k: v for k, v in before.items() if k != "manifest.json"
-    }
+    assert {k: v for k, v in after.items() if k != "stale.json"} == before
+    assert "stale.json" in after
     manifest = json.loads(after["manifest.json"])
-    assert manifest["stale"] is True
     assert manifest["dataset_version"] == before_manifest["dataset_version"]
     with world.store() as store:
         recorded = {c.check_name: c.status for c in store.check_results(result.run_id)}
@@ -270,7 +267,7 @@ def test_a_reconciliation_that_is_not_a_pass_fails_the_asset_once_and_runs_nothi
     assert calls.dbt == 0
     assert calls.checks == 0
     assert materialized(result) == {"raw_transfers"}
-    assert json.loads(latest_files(world)["manifest.json"])["stale"] is True
+    assert "stale.json" in latest_files(world)
 
 
 def test_unchecked_reconciliation_is_not_a_pass_either(module, world, calls):
@@ -289,9 +286,7 @@ def test_a_dbt_failure_stops_everything_downstream(module, world, calls):
     assert not result.success
     assert materialized(result) == {"raw_transfers", "chain_reconciliations"}
     assert calls.checks == 0
-    assert {k: v for k, v in latest_files(world).items() if k != "manifest.json"} == {
-        k: v for k, v in before.items() if k != "manifest.json"
-    }
+    assert {k: v for k, v in latest_files(world).items() if k != "stale.json"} == before
 
 
 def test_a_negative_balance_makes_the_real_dbt_build_fail_the_asset(module, world, calls, tmp_path):
@@ -867,7 +862,7 @@ def test_a_dbt_build_past_its_timeout_is_reported_as_timed_out(module, world, ca
     assert seen == [42]
     assert not result.success
     assert alerts_in(world)[0]["reason"] == "Failure: dbt build timed out"
-    assert json.loads(latest_files(world)["manifest.json"])["stale"] is True
+    assert "stale.json" in latest_files(world)
 
 
 def test_dagster_job_execute_writes_the_alert_file(tmp_path):

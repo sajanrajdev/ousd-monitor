@@ -23,7 +23,7 @@ function preview(): Dataset {
   const dir = copySample("partial");
   rmSync(join(dir, "FIXTURE"));
   editJson(dir, "manifest.json", (manifest) => {
-    manifest.git_commit = "abc1234";
+    manifest.git_commit = "abc1234".padEnd(40, "0");
   });
   editJson(dir, "summary.json", (summary) => {
     summary.verdict.text = `Local preview, not a finding. ${summary.verdict.text}`;

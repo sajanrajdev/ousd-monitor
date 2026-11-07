@@ -119,6 +119,10 @@ export function releaseProblems(files: DatasetFiles): string[] {
   const { manifest, summary, journey, activity, chain_roles: roles } = files;
   const problems: string[] = [];
   if (manifest.preview) problems.push("the manifest says preview");
+  // Unknown passes, as an image has no checkout to read. A version 2 manifest recorded no tree.
+  if (manifest.schema_version === 3 && manifest.provenance.tree_state === "dirty") {
+    problems.push("it was published from a tree with uncommitted changes");
+  }
   if (!manifest.coverage.complete) problems.push("coverage isn't complete");
   for (const chain of REQUIRED_CHAINS) {
     if (!manifest.coverage.chains_included.includes(chain)) {
@@ -212,6 +216,7 @@ export function deriveState(
   nowMs: number,
 ): DatasetState {
   const { manifest, summary } = files;
+  const stale = files.stale !== null;
   const problems = releaseProblems(files);
   const kind: DatasetKind = isSample(manifest, placement)
     ? "sample"
@@ -219,11 +224,11 @@ export function deriveState(
       ? "preview"
       : "real";
   const clock = freshnessClock(manifest);
-  const freshness: Freshness = !manifest.stale && isFreshAt(clock, nowMs) ? "fresh" : "stale";
+  const freshness: Freshness = !stale && isFreshAt(clock, nowMs) ? "fresh" : "stale";
   const isFresh = freshness === "fresh";
 
   const dataTime = formatUtcDateTime(manifest.generated_at);
-  const reason = manifest.stale
+  const reason = stale
     ? "A newer run did not pass its checks."
     : "Nothing newer has reached this page, so it may be out of date.";
   const dataAsOf = dayRange(Object.values(summary.verdict.as_of));
@@ -231,11 +236,11 @@ export function deriveState(
   const reconciledTime = reconciledAt ? formatUtcDateTime(reconciledAt) : null;
 
   const passing = kind === "real" && isFresh;
-  const staleInFooter = kind === "real" && !manifest.stale;
+  const staleInFooter = kind === "real" && !stale;
   const reconciledDay = reconciledAt
     ? formatUtcDate(reconciledAt).replace(/ \d{4} UTC$/, "")
     : UNKNOWN_TEXT;
-  const asOfStale = manifest.stale
+  const asOfStale = stale
     ? `${reason} Data from ${dataTime}.`
     : `Data from ${dataTime}. Nothing newer has reached this page, so it may be out of date.`;
 
@@ -268,7 +273,7 @@ export function deriveState(
       kind === "real"
         ? {
             fresh: isFresh ? `Last run ${reconciledTime}: every check passed.` : null,
-            stale: manifest.stale
+            stale: stale
               ? `Last passing run ${reconciledTime}. ${reason}`
               : `Last run ${reconciledTime}: every check passed. ${reason}`,
           }

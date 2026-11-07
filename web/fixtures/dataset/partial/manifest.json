@@ -1,14 +1,20 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "dataset_version": "preview-20261104T060000Z",
   "generated_at": "2026-11-04T06:00:00Z",
   "time_zone": "UTC",
-  "git_commit": "000000000000",
+  "git_commit": "0000000000000000000000000000000000000000",
+  "provenance": {
+    "tree_state": "clean",
+    "uv_lock_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "python_version": "3.12.13",
+    "dbt_core_version": "1.12.6",
+    "dbt_duckdb_version": "1.11.1",
+    "raw_schema_version": 1,
+    "dbt_manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
   "preview": true,
   "notice": "Local preview only, never for public release. It was published with --allow-partial, so chains may be missing and the full reconciliation may not have been checked.",
-  "stale": false,
-  "stale_since": null,
-  "stale_reason": null,
   "check_run_id": "sample-check-run",
   "reconciliation": {
     "run_id": "00000000000000000000000000000001",

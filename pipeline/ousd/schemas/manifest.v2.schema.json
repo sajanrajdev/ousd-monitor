@@ -1,0 +1,799 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "manifest.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dataset_version",
+    "generated_at",
+    "time_zone",
+    "git_commit",
+    "preview",
+    "notice",
+    "stale",
+    "stale_since",
+    "stale_reason",
+    "check_run_id",
+    "reconciliation",
+    "coverage",
+    "checks",
+    "warnings",
+    "definitions",
+    "labels_sha256",
+    "files"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "dataset_version": {
+      "type": "string",
+      "pattern": "^(preview-)?[0-9]{8}T[0-9]{6}Z$"
+    },
+    "generated_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "time_zone": {
+      "const": "UTC"
+    },
+    "git_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$"
+    },
+    "preview": {
+      "type": "boolean"
+    },
+    "notice": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stale": {
+      "type": "boolean"
+    },
+    "stale_since": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "stale_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "check_run_id": {
+      "type": "string"
+    },
+    "reconciliation": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "scope",
+        "status",
+        "finished_at"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finished_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chains_expected",
+        "chains_included",
+        "chains_missing",
+        "complete",
+        "data_as_of",
+        "last_transfer_at",
+        "synced_through",
+        "chains_without_issuer_row"
+      ],
+      "properties": {
+        "chains_expected": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          }
+        },
+        "chains_included": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          }
+        },
+        "chains_missing": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          }
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "data_as_of": {
+          "type": "object",
+          "additionalProperties": false,
+          "propertyNames": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          },
+          "patternProperties": {
+            "^(tempo|ethereum|base|solana)$": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            }
+          }
+        },
+        "last_transfer_at": {
+          "type": "object",
+          "additionalProperties": false,
+          "propertyNames": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          },
+          "patternProperties": {
+            "^(tempo|ethereum|base|solana)$": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+            }
+          }
+        },
+        "synced_through": {
+          "type": "object",
+          "additionalProperties": false,
+          "propertyNames": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          },
+          "patternProperties": {
+            "^(tempo|ethereum|base|solana)$": {
+              "type": "integer"
+            }
+          }
+        },
+        "chains_without_issuer_row": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          }
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": false,
+      "prefixItems": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "status",
+            "blocking",
+            "detail",
+            "checked_at"
+          ],
+          "properties": {
+            "name": {
+              "const": "chain_supply"
+            },
+            "status": {
+              "enum": [
+                "passed",
+                "skipped"
+              ]
+            },
+            "blocking": {
+              "const": true
+            },
+            "detail": {
+              "type": "string"
+            },
+            "checked_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "status",
+            "blocking",
+            "detail",
+            "checked_at"
+          ],
+          "properties": {
+            "name": {
+              "const": "cross_chain_supply"
+            },
+            "status": {
+              "enum": [
+                "passed",
+                "skipped"
+              ]
+            },
+            "blocking": {
+              "const": true
+            },
+            "detail": {
+              "type": "string"
+            },
+            "checked_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "status",
+            "blocking",
+            "detail",
+            "checked_at"
+          ],
+          "properties": {
+            "name": {
+              "const": "sampled_balances"
+            },
+            "status": {
+              "enum": [
+                "passed",
+                "skipped"
+              ]
+            },
+            "blocking": {
+              "const": true
+            },
+            "detail": {
+              "type": "string"
+            },
+            "checked_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "status",
+            "blocking",
+            "detail",
+            "checked_at"
+          ],
+          "properties": {
+            "name": {
+              "const": "dbt_tests"
+            },
+            "status": {
+              "enum": [
+                "passed",
+                "skipped"
+              ]
+            },
+            "blocking": {
+              "const": true
+            },
+            "detail": {
+              "type": "string"
+            },
+            "checked_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "status",
+            "blocking",
+            "detail",
+            "checked_at"
+          ],
+          "properties": {
+            "name": {
+              "const": "volume_waterfall"
+            },
+            "status": {
+              "enum": [
+                "passed",
+                "skipped"
+              ]
+            },
+            "blocking": {
+              "const": true
+            },
+            "detail": {
+              "type": "string"
+            },
+            "checked_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "status",
+            "blocking",
+            "detail",
+            "checked_at"
+          ],
+          "properties": {
+            "name": {
+              "const": "reconciliation_gate"
+            },
+            "status": {
+              "enum": [
+                "passed",
+                "skipped"
+              ]
+            },
+            "blocking": {
+              "const": true
+            },
+            "detail": {
+              "type": "string"
+            },
+            "checked_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "status",
+            "blocking",
+            "detail",
+            "checked_at"
+          ],
+          "properties": {
+            "name": {
+              "const": "freshness"
+            },
+            "status": {
+              "enum": [
+                "passed",
+                "skipped"
+              ]
+            },
+            "blocking": {
+              "const": true
+            },
+            "detail": {
+              "type": "string"
+            },
+            "checked_at": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+            }
+          }
+        }
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "chain",
+          "metric",
+          "day",
+          "previous",
+          "current"
+        ],
+        "properties": {
+          "chain": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          },
+          "metric": {
+            "type": "string"
+          },
+          "day": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "previous": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "current": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          }
+        }
+      }
+    },
+    "definitions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "placed_days",
+        "placed_min_base_units",
+        "large_transfer_base_units",
+        "active_dust_base_units",
+        "active_secondary_base_units",
+        "clean_tx_min_base_units",
+        "journey_first_day",
+        "velocity"
+      ],
+      "properties": {
+        "placed_days": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "placed_min_base_units": {
+          "type": "string",
+          "pattern": "^-?[0-9]+$"
+        },
+        "large_transfer_base_units": {
+          "type": "string",
+          "pattern": "^-?[0-9]+$"
+        },
+        "active_dust_base_units": {
+          "type": "string",
+          "pattern": "^-?[0-9]+$"
+        },
+        "active_secondary_base_units": {
+          "type": "string",
+          "pattern": "^-?[0-9]+$"
+        },
+        "clean_tx_min_base_units": {
+          "type": "string",
+          "pattern": "^-?[0-9]+$"
+        },
+        "journey_first_day": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "velocity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "velocity_bps",
+            "velocity_everyday_bps",
+            "headline_velocity_bps"
+          ],
+          "properties": {
+            "velocity_bps": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "numerator",
+                "denominator"
+              ],
+              "properties": {
+                "numerator": {
+                  "type": "string"
+                },
+                "denominator": {
+                  "type": "string"
+                }
+              }
+            },
+            "velocity_everyday_bps": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "numerator",
+                "denominator"
+              ],
+              "properties": {
+                "numerator": {
+                  "type": "string"
+                },
+                "denominator": {
+                  "type": "string"
+                }
+              }
+            },
+            "headline_velocity_bps": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "numerator",
+                "denominator"
+              ],
+              "properties": {
+                "numerator": {
+                  "type": "string"
+                },
+                "denominator": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "labels_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "files": {
+      "type": "object",
+      "required": [
+        "summary.json",
+        "journey.json",
+        "journey.csv",
+        "activity.json",
+        "activity.csv",
+        "chain_roles.json",
+        "chain_roles.csv",
+        "reconciliation.json",
+        "labels.json"
+      ],
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sha256",
+          "rows"
+        ],
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "rows": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "preview": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "dataset_version": {
+            "pattern": "^[0-9]{8}T[0-9]{6}Z$"
+          },
+          "notice": {
+            "const": null
+          },
+          "reconciliation": {
+            "type": "object"
+          },
+          "coverage": {
+            "properties": {
+              "complete": {
+                "const": true
+              },
+              "chains_missing": {
+                "maxItems": 0
+              },
+              "chains_included": {
+                "minItems": 4
+              },
+              "data_as_of": {
+                "required": [
+                  "tempo",
+                  "ethereum",
+                  "base",
+                  "solana"
+                ]
+              },
+              "last_transfer_at": {
+                "required": [
+                  "tempo",
+                  "ethereum",
+                  "base",
+                  "solana"
+                ]
+              },
+              "synced_through": {
+                "required": [
+                  "tempo",
+                  "ethereum",
+                  "base",
+                  "solana"
+                ]
+              }
+            }
+          },
+          "checks": {
+            "prefixItems": [
+              {
+                "properties": {
+                  "status": {
+                    "const": "passed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "status": {
+                    "const": "passed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "status": {
+                    "const": "passed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "status": {
+                    "const": "passed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "status": {
+                    "const": "passed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "status": {
+                    "const": "passed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "status": {
+                    "const": "passed"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "preview": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "dataset_version": {
+            "pattern": "^preview-[0-9]{8}T[0-9]{6}Z$"
+          },
+          "notice": {
+            "const": "Local preview only, never for public release. It was published with --allow-partial, so chains may be missing and the full reconciliation may not have been checked."
+          },
+          "stale": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stale": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stale_since": {
+            "const": null
+          },
+          "stale_reason": {
+            "const": null
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "stale_since": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+          },
+          "stale_reason": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}

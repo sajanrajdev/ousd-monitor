@@ -13,12 +13,14 @@ import io
 import json
 import logging
 import os
+import platform
 import re
 import shutil
 import subprocess
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -41,7 +43,7 @@ from ousd.checks import (
     utc_moment,
     utc_text,
 )
-from ousd.migrations import SchemaOutOfDate
+from ousd.migrations import SchemaOutOfDate, applied
 from ousd.solana import OUSD_MINT
 from ousd.store import LatestReconciliation, Store, StoredCheck
 from ousd.verdict import ChainFigures, VerdictInputs, build_verdict, known_limits
@@ -49,6 +51,8 @@ from ousd.verdict import ChainFigures, VerdictInputs, build_verdict, known_limit
 logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 2
+# The manifest's own schema moved on alone: provenance came in and stale state moved out.
+MANIFEST_SCHEMA_VERSION = 3
 SCHEMA_DIR = Path(__file__).parent / "schemas"
 DEFAULT_PUBLISHED_DIR = "data/published"
 # A sibling of the real output, so nothing that reads data/published can land on it.
@@ -56,6 +60,11 @@ PREVIEW_DIRNAME = "preview-not-for-release"
 LATEST = "latest"
 LATEST_PREVIEW = "latest-preview"
 KEEP_FOLDERS = 14
+# Written beside a published folder's files once it is no longer current, so they never change.
+STALE_FILE = "stale.json"
+_UTC_TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+# Relative to the repo root, where every command runs, as in Sources.
+UV_LOCK = Path("uv.lock")
 # OUSD's first day. Placed reads artificially low until wallets are placed_days old.
 DAY_ZERO = date(2026, 9, 30)
 INDEPENDENCE_NOTICE = "Independent. Not affiliated with Open Standard or Bridge."
@@ -109,6 +118,8 @@ _KEY_SEGMENT = re.compile(
 )
 # A label's link, the one place a wallet-shaped value may be, and only after its own check.
 _LABEL_LINK_PLACE = re.compile(r"labels\.json/(data|exchange_listings)/\d+/source_url")
+# A full commit hash has an address's shape. Its schema allows 40 hex digits and nothing else.
+_COMMIT_PLACE = "manifest.json/git_commit"
 # Other variables that can hold a provider URL. KEYED_RPC_ENV has the rest.
 _RPC_ENV = ("TEMPO_RPC_URL", "ETHEREUM_RPC_URL", "ETHEREUM_BLOCKSCOUT_URL")
 
@@ -540,7 +551,7 @@ def _refuse_unsafe_dataset(
     providers = _provider_values()
     for filename, payload in payloads.items():
         for place, text in _strings(payload, filename):
-            if not _LABEL_LINK_PLACE.fullmatch(place):
+            if not _LABEL_LINK_PLACE.fullmatch(place) and place != _COMMIT_PLACE:
                 _refuse_unsafe_text(place, text, tokens, providers)
     for filename, data in tabular.items():
         _refuse_unsafe_text(filename, data.decode(), tokens, providers)
@@ -814,38 +825,77 @@ def _validate(filename: str, payload: Mapping[str, Any]) -> None:
         raise PublishRefused(f"{filename} fails its schema at {place or 'top'}: {error.validator}")
 
 
-# A full or abbreviated commit hash, and nothing else, so the variable can't carry other text into
-# the manifest.
-_COMMIT_HASH = re.compile(r"[0-9a-f]{12,40}")
-# What git rev-parse --short prints: at least 12 here, longer only when 12 would be ambiguous.
-_GIT_OUTPUT = re.compile(r"[0-9a-f]{12,40}")
+# A full commit hash, and nothing else, so the variable can't carry other text into the manifest.
+_COMMIT_HASH = re.compile(r"[0-9a-f]{40}")
 COMMIT_ENV = "OUSD_GIT_COMMIT"
 
 
-def _git_commit() -> str:
-    """The checkout's commit, or else OUSD_GIT_COMMIT where there is no checkout, as in an image."""
+def _git(*args: str) -> subprocess.CompletedProcess[str] | None:
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short=12", "HEAD"],
+        return subprocess.run(
+            ["git", "--no-optional-locks", *args],
             capture_output=True,
             text=True,
             check=False,
             timeout=10,
         )
     except (OSError, subprocess.TimeoutExpired):
-        result = None
-    if result is not None and result.returncode == 0:
-        commit = result.stdout.strip()
-        if not _GIT_OUTPUT.fullmatch(commit):
+        return None
+
+
+def _git_commit() -> tuple[str, str]:
+    """The checkout's commit and whether its tree had changes, or else OUSD_GIT_COMMIT where there
+    is no checkout, as in an image. A tree that can't be read is unknown, never assumed clean."""
+    head = _git("rev-parse", "HEAD")
+    if head is not None and head.returncode == 0:
+        commit = head.stdout.strip()
+        if not _COMMIT_HASH.fullmatch(commit):
             raise PublishRefused("git printed something other than a commit hash")
-        return commit
+        # Untracked files count, as dbt reads a new model whether or not git knows it. Named, so a
+        # user's status.showUntrackedFiles can't hide them.
+        status = _git("status", "--porcelain", "--untracked-files=normal")
+        if status is None or status.returncode != 0:
+            return commit, "unknown"
+        return commit, "dirty" if status.stdout.strip() else "clean"
     supplied = os.environ.get(COMMIT_ENV, "")
     if not supplied:
         raise PublishRefused("cannot read the git commit, so this dataset couldn't be traced")
     if not _COMMIT_HASH.fullmatch(supplied):
         # The rule, never the value.
-        raise PublishRefused(f"{COMMIT_ENV} isn't a lowercase commit hash of 12 to 40 characters")
-    return supplied[:12]
+        raise PublishRefused(f"{COMMIT_ENV} isn't a full lowercase commit hash of 40 characters")
+    return supplied, "unknown"
+
+
+def _sha256_of(path: Path, what: str) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise PublishRefused(f"cannot read {what}, so this dataset couldn't be traced") from exc
+
+
+def _installed(package: str) -> str:
+    try:
+        return metadata.version(package)
+    except metadata.PackageNotFoundError as exc:
+        raise PublishRefused(
+            f"{package} isn't installed, so this dataset couldn't be traced"
+        ) from exc
+
+
+def _provenance(tree_state: str, store: Store, sources: Sources) -> dict[str, Any]:
+    """What else built this dataset, beside the commit. The dbt manifest is the one beside
+    run_results, which the checks read."""
+    return {
+        "tree_state": tree_state,
+        "uv_lock_sha256": _sha256_of(UV_LOCK, "uv.lock"),
+        "python_version": platform.python_version(),
+        "dbt_core_version": _installed("dbt-core"),
+        "dbt_duckdb_version": _installed("dbt-duckdb"),
+        "raw_schema_version": max(applied(store.db), default=0),
+        "dbt_manifest_sha256": _sha256_of(
+            sources.run_results.with_name("manifest.json"), "the compiled dbt manifest"
+        ),
+    }
 
 
 def _refuse_unless_checked(
@@ -913,17 +963,16 @@ def _manifest_payload(
             "SELECT chain, max(block_timestamp) FROM transfers GROUP BY chain"
         ).fetchall()
     )
+    commit, tree_state = _git_commit()
     return {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": MANIFEST_SCHEMA_VERSION,
         "dataset_version": version,
         "generated_at": utc_text(moment),
         "time_zone": "UTC",
-        "git_commit": _git_commit(),
+        "git_commit": commit,
+        "provenance": _provenance(tree_state, store, sources),
         "preview": preview,
         "notice": PREVIEW_NOTICE if preview else None,
-        "stale": False,
-        "stale_since": None,
-        "stale_reason": None,
         "check_run_id": run_id,
         "reconciliation": latest_run,
         "coverage": {
@@ -1117,24 +1166,40 @@ def _prune(root: Path, pointer: str) -> None:
             shutil.rmtree(root / name, ignore_errors=True)
 
 
-def mark_stale(out_root: Path, now: datetime | None = None, reason: str = "") -> bool:
-    """Say on the last good dataset that it is no longer current. Only the manifest changes, in
-    one step, so its numbers and hashes stay as published. False when there is nothing to mark.
+def _first_stale_since(folder: Path) -> str | None:
+    """When the folder first went stale: from its stale.json, or else from a version 2 manifest,
+    which held its own mark. Anything unreadable counts as no time, so it can't stop a mark."""
+    for name in (STALE_FILE, "manifest.json"):
+        try:
+            since = json.loads((folder / name).read_text()).get("stale_since")
+        except (OSError, ValueError, AttributeError) as exc:
+            if not isinstance(exc, FileNotFoundError):
+                logger.warning("ignored an unreadable %s: %s", name, type(exc).__name__)
+            continue
+        if isinstance(since, str) and _UTC_TIME.fullmatch(since):
+            return since
+    return None
 
-    It isn't validated against today's schema, which it may predate: that mustn't stop the mark.
+
+def mark_stale(out_root: Path, now: datetime | None = None, reason: str = "") -> bool:
+    """Say beside the last good dataset that it is no longer current. Only stale.json is written,
+    in one step, so the published files never change. False when there is nothing to mark.
+
+    It keeps the first time the dataset went stale, and the newest reason. A damaged stale.json is
+    replaced, so it can't stop this mark or any later one.
     """
     moment = utc_moment(now)
     if not (out_root / LATEST).exists():
         return False
-    # Resolved once, so a pointer that moves can't send this manifest into another folder.
-    path = (out_root / LATEST).resolve() / "manifest.json"
-    manifest = json.loads(path.read_text())
-    manifest["stale_since"] = manifest.get("stale_since") or utc_text(moment)
-    manifest["stale"] = True
-    manifest["stale_reason"] = reason
-    temporary = path.with_name("manifest.json.tmp")
+    # Resolved once, so a pointer that moves can't send this mark into another folder.
+    folder = (out_root / LATEST).resolve()
+    path = folder / STALE_FILE
+    since = _first_stale_since(folder) or utc_text(moment)
+    mark = {"stale_since": since, "stale_reason": reason}
+    _validate(STALE_FILE, mark)
+    temporary = path.with_name(f"{STALE_FILE}.tmp")
     try:
-        temporary.write_bytes(_json_bytes(manifest))
+        temporary.write_bytes(_json_bytes(mark))
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)

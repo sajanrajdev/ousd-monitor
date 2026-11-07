@@ -220,7 +220,8 @@ class World:
         for name in ("ousd.duckdb", "marts.duckdb", "labels.csv", "dbt_project.yml"):
             shutil.copy(self.path / name, destination / name)
         (destination / "target").mkdir(exist_ok=True)
-        shutil.copy(self.path / "target" / "run_results.json", destination / "target")
+        for name in ("run_results.json", "manifest.json"):
+            shutil.copy(self.path / "target" / name, destination / "target")
         return World(destination)
 
 

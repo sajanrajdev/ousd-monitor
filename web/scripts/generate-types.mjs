@@ -9,6 +9,9 @@ const WEB_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 const OUTPUT = join(WEB_DIR, "lib/dataset/types.generated.ts");
 const SCHEMAS = [
   ["manifest", "ManifestFile"],
+  // Datasets published before stale state moved to its own file still load.
+  ["manifest.v2", "ManifestV2File"],
+  ["stale", "StaleFile"],
   ["summary", "SummaryFile"],
   ["journey", "JourneyFile"],
   ["activity", "ActivityFile"],

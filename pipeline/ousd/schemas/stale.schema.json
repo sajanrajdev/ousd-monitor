@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "stale.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "stale_since",
+    "stale_reason"
+  ],
+  "properties": {
+    "stale_since": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "stale_reason": {
+      "type": "string"
+    }
+  }
+}
