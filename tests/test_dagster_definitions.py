@@ -22,7 +22,7 @@ from dbt_helpers import invoke_dbt
 from ousd import checks as ousd_checks
 from ousd.chains import REQUIRED_CHAINS
 from ousd.checks import CHECK_NAMES, CheckResult
-from ousd.http import RATE_LIMIT_WAITS, PoliteClient
+from ousd.http import RATE_LIMIT_WAITS, SECRET_URL_VARIABLES, PoliteClient
 from ousd.ingest import sync_chain
 from ousd.reconcile import RunResult
 from ousd.store import Status, Store
@@ -114,7 +114,7 @@ def pipeline_for(module, world: World, calls: Calls, **overrides):
             raise RuntimeError(f"{LEAK} refused")
         return f"{chain.name}: synced"
 
-    def dbt_build():
+    def dbt_build(timeout):
         calls.dbt += 1
         if calls.dbt_exit:
             return calls.dbt_exit
@@ -299,7 +299,7 @@ def test_a_negative_balance_makes_the_real_dbt_build_fail_the_asset(module, worl
 
     outcome = {}
 
-    def dbt_build():
+    def dbt_build(timeout):
         result = run_dbt(
             tmp_path / "negative",
             transfers("tempo", [at(5, WALLET, SINK, 10)]),
@@ -325,6 +325,8 @@ def test_a_transient_source_error_is_retried_and_then_succeeds(module, world, ca
     assert result.success
     assert calls.sync == 2
     assert materialized(result) == set(KEYS)
+    # A retried attempt is not a failure.
+    assert not (world.path / "alerts").exists()
 
 
 def test_a_source_that_keeps_failing_gives_up_after_two_retries(module, world, calls):
@@ -652,20 +654,20 @@ def test_the_run_time_limit_fires_stops_the_step_without_a_retry_and_alerts(
 ):
     def stuck_sync(chain, store):
         calls.sync += 1
-        time.sleep(30)
+        time.sleep(120)
         return "never"
 
     started = time.monotonic()
     result = run_job(
         module,
-        pipeline_for(module, world, calls, sync=stuck_sync, outbound=outbound, max_runtime=0.5),
+        pipeline_for(module, world, calls, sync=stuck_sync, outbound=outbound, max_runtime=3),
     )
-    assert time.monotonic() - started < 20
+    assert time.monotonic() - started < 60
     assert not result.success
     assert calls.sync == 1
     [alert] = alerts_in(world)
     assert alert["step"] == "raw_transfers"
-    assert alert["reason"] == "RunTimeout: the run passed its 0s time limit"
+    assert alert["reason"] == "RunTimeout: the run passed its 3s time limit"
     assert len(outbound.to(WEBHOOK)) == 1
     assert outbound.to(HEARTBEAT) == []
 
@@ -673,18 +675,30 @@ def test_the_run_time_limit_fires_stops_the_step_without_a_retry_and_alerts(
 def test_a_time_limit_that_fires_between_steps_still_alerts(module, world, calls):
     # The limit lands in Dagster's own wait before a retry, outside any step.
     calls.fail_sync_times = 99
-    result = run_job(module, pipeline_for(module, world, calls, retry_delay=30, max_runtime=0.5))
+    # A limit long enough for the first attempt to fail even on a busy machine.
+    result = run_job(module, pipeline_for(module, world, calls, retry_delay=120, max_runtime=3))
     assert not result.success
     assert calls.sync == 1
     [alert] = alerts_in(world)
     assert alert["run_id"] == result.run_id
     assert alert["step"] == "run"
-    assert alert["reason"] == "RunTimeout: the run passed its 0s time limit"
+    assert alert["reason"] == "RunTimeout: the run passed its 3s time limit"
 
 
-def test_the_limits_are_lifted_once_the_run_ends(module, world, calls):
+@pytest.mark.parametrize("ending", ["success", "failure", "timeout"])
+def test_the_limits_are_lifted_however_the_run_ends(module, world, calls, ending):
+    def stuck_sync(chain, store):
+        time.sleep(30)
+        return "never"
+
+    overrides: dict = {"rate_limit_wait": 5}
+    if ending == "failure":
+        calls.dbt_exit = 1
+    if ending == "timeout":
+        overrides.update(sync=stuck_sync, max_runtime=0.5)
     before = signal.getsignal(signal.SIGALRM)
-    assert run_job(module, pipeline_for(module, world, calls, rate_limit_wait=5)).success
+    result = run_job(module, pipeline_for(module, world, calls, **overrides))
+    assert result.success is (ending == "success")
     assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
     assert signal.getsignal(signal.SIGALRM) == before
     assert math.isinf(RATE_LIMIT_WAITS.remaining)
@@ -718,16 +732,55 @@ def test_the_job_carries_the_max_runtime_tag_for_the_daemon(module, monkeypatch)
     monkeypatch.setenv("OUSD_MAX_RUNTIME_SECONDS", "5400")
     job = module.build_definitions(module.Pipeline()).resolve_job_def("ousd_daily")
     assert job.tags[dg.MAX_RUNTIME_SECONDS_TAG] == "5400"
+    # Rounded up: a 0 would read as no time at all.
+    job = module.build_definitions(module.Pipeline(max_runtime=0.5)).resolve_job_def("ousd_daily")
+    assert job.tags[dg.MAX_RUNTIME_SECONDS_TAG] == "1"
     monkeypatch.delenv("OUSD_MAX_RUNTIME_SECONDS")
     job = module.build_definitions(module.Pipeline()).resolve_job_def("ousd_daily")
     assert job.tags[dg.MAX_RUNTIME_SECONDS_TAG] == str(3 * 3600)
 
 
-@pytest.mark.parametrize("value", ["0", "-5", "soon", "inf", "nan"])
-def test_a_limit_that_is_not_a_positive_number_is_refused_by_name(module, monkeypatch, value):
-    monkeypatch.setenv("OUSD_DBT_TIMEOUT_SECONDS", value)
-    with pytest.raises(ValueError, match="OUSD_DBT_TIMEOUT_SECONDS must be a positive"):
-        module.run_dbt_build()
+@pytest.mark.parametrize(
+    "name",
+    ["OUSD_MAX_RUNTIME_SECONDS", "OUSD_DBT_TIMEOUT_SECONDS", "OUSD_RATE_LIMIT_WAIT_SECONDS"],
+)
+@pytest.mark.parametrize("value", ["0", "-5", "soon", "inf", "nan", "604801", "1e10"])
+def test_a_limit_out_of_range_stops_loading_and_names_the_variable(
+    module, monkeypatch, name, value
+):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError, match=f"{name} must be a number of seconds above 0"):
+        module.Pipeline()
+
+
+def test_the_longest_limit_is_one_setitimer_accepts(module):
+    with module._time_limit(module.LONGEST_LIMIT, None) as timed_out:
+        assert signal.getitimer(signal.ITIMER_REAL)[0] > 0
+    assert not timed_out()
+    assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+
+
+def test_off_the_main_thread_the_limit_is_not_set_and_says_so(module):
+    import threading
+
+    seen: dict = {}
+
+    class Log:
+        def warning(self, message):
+            seen["warning"] = message
+
+    def body():
+        with module._time_limit(0.1, Log()) as timed_out:
+            time.sleep(0.3)
+            seen["fired"] = timed_out()
+
+    worker = threading.Thread(target=body)
+    worker.start()
+    worker.join()
+    assert seen == {
+        "warning": "the run time limit is not enforced off the main thread",
+        "fired": False,
+    }
 
 
 def test_a_blank_limit_means_the_default(module, monkeypatch):
@@ -737,6 +790,7 @@ def test_a_blank_limit_means_the_default(module, monkeypatch):
 
 def test_a_dbt_build_past_its_timeout_is_reported_as_timed_out(module, world, calls, monkeypatch):
     monkeypatch.setenv("OUSD_DBT_TIMEOUT_SECONDS", "90")
+    assert module.Pipeline().dbt_timeout == 90
 
     def too_slow(command, check, timeout):
         assert timeout == 90
@@ -744,11 +798,18 @@ def test_a_dbt_build_past_its_timeout_is_reported_as_timed_out(module, world, ca
 
     with monkeypatch.context() as patched:
         patched.setattr(module.subprocess, "run", too_slow)
-        assert module.run_dbt_build() == module.DBT_TIMED_OUT
+        assert module.run_dbt_build(90) == module.DBT_TIMED_OUT
 
     publish_once(world)
-    timed_out = pipeline_for(module, world, calls, dbt_build=lambda: module.DBT_TIMED_OUT)
+    seen = []
+
+    def dbt_build(timeout):
+        seen.append(timeout)
+        return module.DBT_TIMED_OUT
+
+    timed_out = pipeline_for(module, world, calls, dbt_build=dbt_build, dbt_timeout=42)
     result = run_job(module, timed_out)
+    assert seen == [42]
     assert not result.success
     assert alerts_in(world)[0]["reason"] == "Failure: dbt build timed out"
     assert json.loads(latest_files(world)["manifest.json"])["stale"] is True
@@ -756,11 +817,7 @@ def test_a_dbt_build_past_its_timeout_is_reported_as_timed_out(module, world, ca
 
 def test_dagster_job_execute_writes_the_alert_file(tmp_path):
     """The scheduled path: `make run` runs exactly this, where no sensor is evaluated."""
-    env = {
-        name: value
-        for name, value in os.environ.items()
-        if name not in {"BASE_RPC_URL", "SOLANA_RPC_URL", "OUSD_ALERT_WEBHOOK_URL"}
-    }
+    env = {name: value for name, value in os.environ.items() if name not in SECRET_URL_VARIABLES}
     env["DAGSTER_HOME"] = str(tmp_path / ".dagster")
     (tmp_path / ".dagster").mkdir()
     dagster = Path(sys.executable).with_name("dagster")
@@ -782,3 +839,31 @@ def test_dagster_job_execute_writes_the_alert_file(tmp_path):
     assert alert["step"] == "raw_transfers"
     assert "BASE_RPC_URL" in alert["reason"]
     assert not (tmp_path / "data" / "ousd.duckdb").exists()
+
+
+def test_an_unwritable_alerts_folder_still_posts_and_never_hides_the_failure(
+    module, world, calls, outbound, caplog
+):
+    blocked = world.path / "alerts"
+    blocked.write_text("a file where the folder should be")
+    calls.dbt_exit = 1
+    result = run_job(module, pipeline_for(module, world, calls, outbound=outbound))
+    assert not result.success
+    assert len(outbound.to(WEBHOOK)) == 1
+    assert "alert file not written" in caplog.text
+
+
+def test_a_failed_check_or_reconciliation_never_pings_the_heartbeat(
+    module, world, calls, outbound, monkeypatch
+):
+    calls.reconcile_status = "fail"
+    assert not run_job(module, pipeline_for(module, world, calls, outbound=outbound)).success
+    calls.reconcile_status = "pass"
+    monkeypatch.setattr(
+        ousd_checks,
+        "freshness",
+        lambda store, chains, now: CheckResult("freshness", "failed", True, "forced"),
+    )
+    assert not run_job(module, pipeline_for(module, world, calls, outbound=outbound)).success
+    assert outbound.to(HEARTBEAT) == []
+    assert len(outbound.to(WEBHOOK)) == 2

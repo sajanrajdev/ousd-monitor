@@ -256,7 +256,8 @@ class PoliteClient:
                 failure = f"HTTP {response.status_code}"
                 server_wait = _server_wait(response, now)
                 continue
-            if response.is_error:
+            # A redirect is not followed, so it is no more an answer than a 4xx.
+            if not response.is_success:
                 # Scrub the whole body first: a cut at 200 bytes could split a key in two.
                 detail = self.scrub(body.decode(errors="replace"), url)[:200]
                 raise HttpError(f"{self._label}: HTTP {response.status_code}: {detail}")

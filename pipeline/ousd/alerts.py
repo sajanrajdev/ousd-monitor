@@ -10,12 +10,13 @@ URL, and scrubbed from any error.
 import json
 import logging
 import os
+import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
-from ousd.http import HttpError, PoliteClient, scrub_secrets
+from ousd.http import HttpError, PoliteClient, WaitBudget, scrub_secrets
 
 log = logging.getLogger(__name__)
 
@@ -23,14 +24,20 @@ WEBHOOK_VARIABLE = "OUSD_ALERT_WEBHOOK_URL"
 HEARTBEAT_VARIABLE = "OUSD_HEARTBEAT_URL"
 # Enough to say what broke. The traceback is in the run's log.
 REASON_LIMIT = 500
-# An alert must not hold up a run that has already failed for long.
+# An alert must not hold up a run that has already failed for long: a few short attempts, and
+# no waiting out a server's rate limit, however long it asks for.
 OUTBOUND_ATTEMPTS = 3
+OUTBOUND_DEADLINE = 15.0
 
 type ClientFactory = Callable[[str], PoliteClient]
 
 
 def outbound_client(label: str) -> PoliteClient:
-    return PoliteClient(label=label, max_attempts=OUTBOUND_ATTEMPTS)
+    no_waits = WaitBudget()
+    no_waits.remaining = 0
+    return PoliteClient(
+        label=label, max_attempts=OUTBOUND_ATTEMPTS, deadline=OUTBOUND_DEADLINE, waits=no_waits
+    )
 
 
 @dataclass(frozen=True)
@@ -78,11 +85,16 @@ def write_alert(alerts_dir: Path, alert: Alert) -> Path | None:
     cause, and anything after it is a consequence."""
     alerts_dir.mkdir(parents=True, exist_ok=True)
     path = alerts_dir / f"{alert.run_id}.json"
+    # Written whole, then linked into place, so a crash never leaves a partial file that would
+    # claim the run. The link fails if the run already has one.
+    with tempfile.NamedTemporaryFile("w", dir=alerts_dir, suffix=".tmp", delete=False) as handle:
+        handle.write(json.dumps(asdict(alert), indent=2) + "\n")
     try:
-        with path.open("x") as handle:
-            handle.write(json.dumps(asdict(alert), indent=2) + "\n")
+        os.link(handle.name, path)
     except FileExistsError:
         return None
+    finally:
+        os.unlink(handle.name)
     return path
 
 
@@ -104,10 +116,18 @@ def post_alert(
     payload = {"text": alert.summary(), **asdict(alert)}
     try:
         client("alert webhook").request("POST", url, json=payload)
-    except HttpError as exc:
-        log.warning("alert webhook: not delivered: %s", scrub_secrets(str(exc), env))
+    except Exception as exc:
+        log.warning("alert webhook: not delivered: %s", _undelivered(exc, env))
         return False
     return True
+
+
+def _undelivered(exc: Exception, env: Mapping[str, str] | None) -> str:
+    """PoliteClient's own errors are scrubbed against the URL already. Anything else may quote
+    it, so only its class is shown."""
+    if isinstance(exc, HttpError):
+        return scrub_secrets(str(exc), env)
+    return type(exc).__name__
 
 
 def raise_alert(
@@ -117,8 +137,14 @@ def raise_alert(
     env: Mapping[str, str] | None = None,
 ) -> Path | None:
     """Write the alert and post it, once per run. A run that already alerted is left alone, so a
-    second failure, or the sensor after the hook, sends nothing more."""
-    path = write_alert(alerts_dir, alert)
+    second failure, or the sensor after the hook, sends nothing more. A file that can't be
+    written is logged and the alert still posted: the webhook is the copy someone reads."""
+    try:
+        path = write_alert(alerts_dir, alert)
+    except OSError as exc:
+        log.error("alert file not written: %s", type(exc).__name__)
+        post_alert(alert, client, env)
+        return None
     if path is not None:
         post_alert(alert, client, env)
     return path
@@ -134,7 +160,7 @@ def ping_heartbeat(
         return False
     try:
         client("heartbeat").request("GET", url)
-    except HttpError as exc:
-        log.warning("heartbeat: not delivered: %s", scrub_secrets(str(exc), env))
+    except Exception as exc:
+        log.warning("heartbeat: not delivered: %s", _undelivered(exc, env))
         return False
     return True

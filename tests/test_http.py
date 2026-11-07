@@ -413,3 +413,10 @@ def test_the_shared_budget_is_unlimited_outside_a_run_and_capped_inside_one():
 def test_scrub_secrets_removes_any_url_even_one_not_configured():
     text = "redirected to https://elsewhere.invalid/k/abc?token=1 then gave up"
     assert scrub_secrets(text, {}) == "redirected to <url> then gave up"
+
+
+@pytest.mark.parametrize("status", [301, 304, 308])
+def test_a_redirect_is_not_followed_and_not_taken_as_an_answer(status):
+    client = client_for([httpx.Response(status, text="moved")])
+    with pytest.raises(HttpError, match=f"HTTP {status}"):
+        client.request("GET", "http://hc.invalid/ping")

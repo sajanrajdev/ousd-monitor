@@ -144,3 +144,56 @@ def test_a_failed_heartbeat_is_logged_without_its_url_and_never_raises(caplog):
     assert ping_heartbeat(Outbound(status=503), {"OUSD_HEARTBEAT_URL": HEARTBEAT}) is False
     assert "heartbeat: not delivered" in caplog.text
     assert "655443322110" not in caplog.text
+
+
+def test_a_partly_written_alert_never_claims_the_run(tmp_path):
+    alerts.write_alert(tmp_path, an_alert())
+    assert [path.name for path in tmp_path.iterdir()] == ["run-1.json"]
+
+
+def test_an_unwritable_alerts_folder_is_logged_and_the_webhook_still_posts(tmp_path, caplog):
+    blocked = tmp_path / "alerts"
+    blocked.write_text("a file where the folder should be")
+    outbound = Outbound()
+    path = raise_alert(blocked, an_alert(), outbound, {"OUSD_ALERT_WEBHOOK_URL": WEBHOOK})
+    assert path is None
+    assert len(outbound.requests) == 1
+    assert "alert file not written: FileExistsError" in caplog.text
+
+
+@pytest.mark.parametrize("status", [301, 302, 307])
+def test_a_redirect_is_not_a_delivery(status):
+    outbound = Outbound(status=status)
+    assert post_alert(an_alert(), outbound, {"OUSD_ALERT_WEBHOOK_URL": WEBHOOK}) is False
+    assert ping_heartbeat(outbound, {"OUSD_HEARTBEAT_URL": HEARTBEAT}) is False
+
+
+def test_an_unexpected_error_quoting_the_url_shows_only_its_class(caplog):
+    def broken(label):
+        raise RuntimeError(f"cannot build a client for {WEBHOOK}")
+
+    env = {"OUSD_ALERT_WEBHOOK_URL": WEBHOOK, "OUSD_HEARTBEAT_URL": HEARTBEAT}
+    assert post_alert(an_alert(), broken, env) is False
+    assert ping_heartbeat(broken, env) is False
+    assert "not delivered: RuntimeError" in caplog.text
+    assert "w3bh00kS3cr3tT0k3n" not in caplog.text
+
+
+def test_the_real_outbound_client_never_waits_out_a_rate_limit(monkeypatch):
+    sleeps: list[float] = []
+    requests: list[httpx.Request] = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(429, headers={"retry-after": "3600"})
+
+    real = alerts.PoliteClient
+
+    def mocked(**options):
+        return real(transport=httpx.MockTransport(handle), sleep=sleeps.append, **options)
+
+    monkeypatch.setattr(alerts, "PoliteClient", mocked)
+    assert post_alert(an_alert(), env={"OUSD_ALERT_WEBHOOK_URL": WEBHOOK}) is False
+    assert ping_heartbeat(env={"OUSD_HEARTBEAT_URL": HEARTBEAT}) is False
+    assert sleeps == []
+    assert len(requests) == 2

@@ -11,6 +11,8 @@ only after every configured URL, and any other URL, is scrubbed from it.
 itself: a failure hook writes the alert, and a run resource enforces the time limits.
 """
 
+import logging
+import math
 import os
 import signal
 import subprocess
@@ -52,6 +54,8 @@ from ousd.solana import SolanaChain, load_solana, sync_solana
 from ousd.sources import BridgeSnapshot, bridge_snapshot
 from ousd.store import Store, StoreConflict
 
+log = logging.getLogger(__name__)
+
 JOB_NAME = "ousd_daily"
 CRON = "0 6 * * *"
 DEFAULT_ALERTS_DIR = Path("data/alerts")
@@ -75,12 +79,17 @@ RATE_LIMIT_WAIT_VARIABLE = "OUSD_RATE_LIMIT_WAIT_SECONDS"
 RATE_LIMIT_WAIT = 3600
 # The exit status `timeout` uses, for a dbt build stopped at its limit.
 DBT_TIMED_OUT = 124
+# No limit may be longer than a week. A larger value is a typo, and setitimer refuses huge ones.
+LONGEST_LIMIT = 7 * 24 * 3600
 
 type AnyChain = Chain | SolanaChain
 
 
 def limit_from_env(name: str, default: float) -> float:
-    """A positive number of seconds from the environment. Blank means the default."""
+    """Seconds from the environment, up to a week. Blank means the default.
+
+    Read when the definitions load, so a bad value stops `make run` at once, naming the variable,
+    rather than hours into a run."""
     text = os.environ.get(name, "").strip()
     if not text:
         return default
@@ -88,8 +97,8 @@ def limit_from_env(name: str, default: float) -> float:
         seconds = float(text)
     except ValueError:
         seconds = 0.0
-    if not 0 < seconds < float("inf"):
-        raise ValueError(f"{name} must be a positive number of seconds")
+    if not 0 < seconds <= LONGEST_LIMIT:
+        raise ValueError(f"{name} must be a number of seconds above 0 and at most {LONGEST_LIMIT}")
     return seconds
 
 
@@ -98,11 +107,10 @@ def _dbt_executable() -> str:
     return str(beside_python) if beside_python.exists() else "dbt"
 
 
-def run_dbt_build() -> int:
+def run_dbt_build(timeout: float = DBT_TIMEOUT) -> int:
     """`dbt build` over the project, in the repo root, where every command runs. A build past its
     time limit is killed and reported as DBT_TIMED_OUT."""
     command = [_dbt_executable(), "build", "--project-dir", "dbt", "--profiles-dir", "dbt"]
-    timeout = limit_from_env(DBT_TIMEOUT_VARIABLE, DBT_TIMEOUT)
     try:
         return subprocess.run(command, check=False, timeout=timeout).returncode
     except subprocess.TimeoutExpired:
@@ -155,12 +163,15 @@ class Pipeline:
     sync: Callable[[AnyChain, Store], str] = _sync_one
     probes: Callable[[Sequence[AnyChain], Store], list[ChainProbe]] = build_probes
     bridge: Callable[[], BridgeSnapshot] = _fetch_bridge
-    dbt_build: Callable[[], int] = run_dbt_build
+    dbt_build: Callable[[float], int] = run_dbt_build
     now: Callable[[], datetime] = _now
     retry_delay: int = RETRY_DELAY
     outbound: ClientFactory = outbound_client
     max_runtime: float = field(
         default_factory=lambda: limit_from_env(MAX_RUNTIME_VARIABLE, MAX_RUNTIME)
+    )
+    dbt_timeout: float = field(
+        default_factory=lambda: limit_from_env(DBT_TIMEOUT_VARIABLE, DBT_TIMEOUT)
     )
     rate_limit_wait: float = field(
         default_factory=lambda: limit_from_env(RATE_LIMIT_WAIT_VARIABLE, RATE_LIMIT_WAIT)
@@ -171,7 +182,7 @@ class RunTimeout(dg.Failure):
     """The run passed its time limit. Never retried: a retry would only run longer."""
 
     def __init__(self, seconds: float) -> None:
-        super().__init__(f"the run passed its {seconds:.0f}s time limit", allow_retries=False)
+        super().__init__(f"the run passed its {seconds:g}s time limit", allow_retries=False)
 
 
 @contextmanager
@@ -284,7 +295,7 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
 
     @dg.asset(deps=[chain_reconciliations], required_resource_keys={RUN_LIMITS})
     def dbt_marts(context: dg.AssetExecutionContext) -> None:
-        status = run.dbt_build()
+        status = run.dbt_build(run.dbt_timeout)
         if status != 0:
             reason = "dbt build timed out" if status == DBT_TIMED_OUT else "dbt build failed"
             _refuse(run, context, reason)
@@ -353,16 +364,24 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
                 if timed_out() and init_context.run:
                     _alert(init_context.run.run_id, "run", RunTimeout(run.max_runtime))
 
-    def _alert(run_id: str, step: str, exc: BaseException | None) -> None:
-        alert = new_alert(run_id, JOB_NAME, step, describe(exc), run.now())
-        raise_alert(run.alerts_dir, alert, run.outbound)
+    def _alert(run_id: str, step: str, exc: BaseException | None) -> Path | None:
+        try:
+            alert = new_alert(run_id, JOB_NAME, step, describe(exc), run.now())
+            return raise_alert(run.alerts_dir, alert, run.outbound)
+        except Exception as error:
+            # Never in place of the run's own failure, which Dagster has recorded already.
+            log.error("alert not raised: %s", type(error).__name__)
+            return None
 
     @dg.failure_hook
     def alert_on_step_failure(context: dg.HookContext) -> None:
         # In the run itself, so `dagster job execute` alerts too. A retried attempt is not a
         # failure: only the last one is.
-        _alert(context.run_id, context.step_key or "run", context.op_exception)
-        context.log.error(f"run {context.run_id} of {JOB_NAME} failed at {context.step_key}")
+        path = _alert(context.run_id, context.step_key or "run", context.op_exception)
+        written = f", alert in {path}" if path else ""
+        context.log.error(
+            f"run {context.run_id} of {JOB_NAME} failed at {context.step_key}{written}"
+        )
 
     @dg.success_hook
     def heartbeat_on_publish(context: dg.HookContext) -> None:
@@ -378,7 +397,7 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
         hooks={alert_on_step_failure, heartbeat_on_publish},
         # Only the daemon's run monitoring reads this, under `dagster dev`. `job execute` relies
         # on the run_limits resource.
-        tags={dg.MAX_RUNTIME_SECONDS_TAG: str(int(run.max_runtime))},
+        tags={dg.MAX_RUNTIME_SECONDS_TAG: str(math.ceil(run.max_runtime))},
     )
     schedule = dg.ScheduleDefinition(job=job, cron_schedule=CRON, execution_timezone="UTC")
 

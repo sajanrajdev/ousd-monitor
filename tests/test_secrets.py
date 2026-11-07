@@ -3,9 +3,11 @@ may the object storage credentials backups use."""
 
 import json
 import logging
+import re
 import subprocess
 import sys
 import traceback
+from pathlib import Path
 
 import httpx
 import pytest
@@ -15,7 +17,13 @@ from ousd import backup, checks, cli, probes
 from ousd.backup import BackupError
 from ousd.chains import Chain, missing_rpc_keys
 from ousd.decode import TRANSFER_TOPIC
-from ousd.http import HttpError, PoliteClient, scrub_secrets, scrubbed_traceback
+from ousd.http import (
+    SECRET_URL_VARIABLES,
+    HttpError,
+    PoliteClient,
+    scrub_secrets,
+    scrubbed_traceback,
+)
 from ousd.solana import SolanaChain, SolanaDataError, SolanaRpc, SolanaRpcError
 from ousd.sources import BlockscoutClient, RpcClient, RpcError
 from test_backup import refuse_every_request
@@ -1112,3 +1120,14 @@ def test_a_check_that_cannot_run_logs_a_scrubbed_traceback_and_publishes_the_cla
 def test_the_alert_and_heartbeat_urls_are_scrubbed_like_rpc_urls(name, url, monkeypatch):
     monkeypatch.setenv(name, url)
     assert scrub_secrets(f"posting to {url} with {KEY}") == f"posting to <{name}> with <{name}>"
+
+
+def test_every_url_variable_the_pipeline_reads_is_scrubbed():
+    root = Path(__file__).resolve().parent.parent / "pipeline"
+    named = {
+        name
+        for path in root.rglob("*.py")
+        for name in re.findall(r'"([A-Z][A-Z0-9_]*_URL)"', path.read_text())
+    }
+    assert named
+    assert named <= set(SECRET_URL_VARIABLES)
