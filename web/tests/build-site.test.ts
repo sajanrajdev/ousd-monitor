@@ -18,6 +18,7 @@ import {
   plantedFooter,
   plantedRealMain,
   plantedReconciliationMain,
+  ICON_LINKS,
   PLANTED_HEADER,
   plantedBack,
 } from "./planted-first-screen";
@@ -35,7 +36,7 @@ const STALE_RUN =
 // data that's only old, so the footer says so with its clock, never "Reconciled", and nothing sits
 // at the top.
 function realPage(body: string) {
-  return `<!doctype html><html data-dataset-kind="real" data-dataset-version="${VERSION}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
+  return `<!doctype html><html data-dataset-kind="real" data-dataset-version="${VERSION}" data-freshness="stale"><head><title>Open USD Monitor</title>${ICON_LINKS}</head><body>
     ${PLANTED_HEADER}${plantedFlight([])}${body}
     ${plantedFooter(false, { fresh: null, stale: STALE_TRUST, short: "Last reconciled 4 Nov" })}</body></html>`;
 }
@@ -44,6 +45,8 @@ const realMain = () => plantedRealMain(expectedFromDataset(at(releaseGrade())), 
 
 function goodRealBuild(_webRoot: string, target: string) {
   plantFile(target, "index.html", realPage(realMain()));
+  plantFile(target, "favicon.ico", "ico");
+  plantFile(target, "icon.svg", "<svg/>");
   plantFile(target, "methodology/index.html", plantedBack(realPage("<main>Fine</main>")));
   plantFile(target, "reconciliation/index.html", realPage(plantedReconciliationMain(STALE_RUN)));
 }

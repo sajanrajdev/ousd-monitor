@@ -21,6 +21,7 @@ import {
   plantedHeadline,
   plantedKpis,
   plantedReconciliationMain,
+  ICON_LINKS,
   PLANTED_HEADER,
   plantedBack,
 } from "./planted-first-screen";
@@ -108,7 +109,7 @@ export function page(
   body: string,
   attrs = 'data-dataset-kind="sample" data-dataset-version="20261104T060000Z" data-frame="Sample" data-freshness="stale"',
   title = "[Sample] Open USD Monitor",
-  head = '<meta name="robots" content="noindex, nofollow"/>',
+  head = `<meta name="robots" content="noindex, nofollow"/>${ICON_LINKS}`,
   footer = SAMPLE_FOOTER,
 ) {
   return `<!doctype html><html ${attrs}><head><title>${title}</title>${head}</head><body>
@@ -143,7 +144,7 @@ export function reconciliationLike(methodology: string): string {
       plantedReconciliationMain(line),
       attrs,
       frame ? `[${frame}] Open USD Monitor` : "Open USD Monitor",
-      frame ? '<meta name="robots" content="noindex, nofollow"/>' : "",
+      `${frame ? '<meta name="robots" content="noindex, nofollow"/>' : ""}${ICON_LINKS}`,
       footer,
     ),
   );
@@ -171,6 +172,8 @@ export function site(
   const dir = tempDir();
   const methodology = overrides.methodology ?? page("<main>Methodology</main>");
   plantFile(dir, "index.html", overrides.main ?? page(MAIN));
+  plantFile(dir, "favicon.ico", "ico");
+  plantFile(dir, "icon.svg", "<svg/>");
   plantFile(dir, "methodology/index.html", plantedBack(methodology));
   if (overrides.reconciliation !== null) {
     plantFile(
@@ -198,7 +201,7 @@ export const REAL_MAIN = `<main><section data-section="trust-strip">${STALE_TRUS
 export const FRESH_MAIN = `<main><section data-section="verdict">${REAL_HEADLINE}<p>Data as of 3 Nov 2026 UTC.</p><p>${HEAD_STALE}</p></section>${REAL_REST}</main>`;
 
 export function realPage(body: string, footer = REAL_FOOTER) {
-  return page(body, realAttrs, "Open USD Monitor", "", footer).replace(
+  return page(body, realAttrs, "Open USD Monitor", ICON_LINKS, footer).replace(
     "<aside data-dataset-banner>Sample data. Nothing here is real.</aside>",
     "",
   );

@@ -143,6 +143,7 @@ Taken from their tokens:
 | `--chart-height-desktop` | `340px` |
 
 - **Header:** sticky at every width, one row: our mark and the site name, which link home, and the methodology link at the far right. Clear space sits between it and the headline.
+- **Favicon:** the header mark's geometry unchanged (`web/app/icon.svg`, with `web/app/favicon.ico` at 16 and 32 px as the fallback), stroked in `--color-maroon`, and in `--color-off-white` under `prefers-color-scheme: dark` so it stays visible on dark browser chrome. The site has no dark theme, so this is the only place the dark preference applies. `make web-samples` fails if a page's head lacks either icon link.
 - **Footer:** two columns from 768, information on the left and actions on the right, each action level with its line. Left: the independence line in body color, not a subdued one; "Not financial advice. Not an attestation."; the line pointing to Bridge's reports. Right: the reconciliation status level with the independence line, and the methodology link level with the next. One column below 768, in that order.
 - **Stacked tables:** rows stack as label and value pairs, and long exact amounts wrap anywhere, below 768 wide or in any card narrower than 720. This covers every table on the site, so none needs horizontal scroll.
 - **Corners:** `--radius-control` is `4px` for buttons and chips, `--radius-input` is `6px` for inputs, and `--radius-card` is `12px` for chart cards.
