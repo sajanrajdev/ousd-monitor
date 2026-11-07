@@ -26,7 +26,7 @@ exposures:
     maturity: low
     owner:
       name: Open USD Monitor
-    url: https://example.invalid/site  # Placeholder until the site has its public address.
+    url: https://ousd-monitor.vercel.app/
     description: >
       The static site. It reads only the published dataset at build time, so it depends on
       the marts through that dataset.
