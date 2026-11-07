@@ -50,12 +50,12 @@ docs/               PRD, architecture, operations, roadmap, design system, metho
 data/               Local DuckDB and published output. Not in git
 ```
 
-Inside `pipeline/ousd/`, the two modules that decide what gets published are packages, each split by job. Callers import from the package alone, which re-exports every name they use.
+Inside `pipeline/ousd/`, the two modules that decide what gets published are packages, each split by job. Callers import from the package, which re-exports every name the single module offered them; a test that patches a name patches it in the submodule that uses it.
 
 | Module | Holds |
 |---|---|
-| `reconcile/status.py` | What a check can find: outcomes, reasons, exit codes, a run's status, and the probe interface |
-| `reconcile/recorder.py` | The one place a run's check rows are filed |
+| `reconcile/status.py` | What a check can find and a run reports: outcomes, reasons, exit codes, a run's status, the Bridge, balance and group events, and the probe interface |
+| `reconcile/recorder.py` | The one place a run's check rows are filed, and what the checks on one chain share |
 | `reconcile/supply.py` | Blocking check 1, and the `--at-block` diagnostic |
 | `reconcile/balances.py` | Blocking check 3: sampled balances and the census |
 | `reconcile/groups.py` | Same-looking transfer groups, proven from their transactions |
@@ -66,7 +66,7 @@ Inside `pipeline/ousd/`, the two modules that decide what gets published are pac
 | `publish/safety.py` | The label legend and listings, and the refusal of wallets, URLs, keys and non-names |
 | `publish/provenance.py` | The commit, tree, lock file, tool versions and dbt build behind a dataset |
 | `publish/install.py` | The temporary folder, rename, `latest` pointer, pruning and `stale.json` |
-| `publish/schema.py`, `publish/errors.py` | Schema validation, and the two refusals |
+| `publish/schema.py`, `publish/errors.py` | Schema versions, validation and the JSON encoding, and the two refusals |
 
 - **The store boundary (decision):** SQL against the raw database lives in `store.py`, behind a named `Store` method for each query. `tests/test_store_boundary.py` fails on a `.db.execute`, `.db.executemany`, `.db.sql` or `.db.query` anywhere else in `pipeline/`, as ruff has no such rule. `migrations.py` is exempt, as it runs before a `Store` exists. A transaction opened by a caller, as in `reconcile/runner.py`, is not a query and stays where it is.
 - **Shared steps:** `steps.py` holds one chain's sync and the read of Bridge's total, which `cli.py` and the Dagster definitions both call. Each caller keeps its own error handling, output and exit codes.
@@ -182,7 +182,7 @@ Marts map to PRD questions. Definitions are in PRD section 7, and these are the 
 - Keys only in `.env`, which is gitignored. `.env.example` holds public defaults and lists keyed values by name only.
 - Never log or raise an RPC URL or any part of it, because a bare key leaks just the same.
 - The backup credentials, `OUSD_BACKUP_ACCESS_KEY_ID` and `OUSD_BACKUP_SECRET_ACCESS_KEY`, are secrets the same way. A failed object storage call reports only its step and the provider's error code.
-- Changes to `pipeline/ousd/reconcile.py`, `pipeline/ousd/publish.py` and `labels/**` get extra review, because they decide what gets published. `reconcile_solana` and the balance checks in `solana.py` get the same review as `reconcile.py`.
+- Changes to `pipeline/ousd/reconcile/**`, `pipeline/ousd/publish/**` and `labels/**` get extra review, because they decide what gets published. `reconcile_solana` and the balance checks in `solana.py` get the same review as `reconcile/`.
 
 ## Code standards
 
