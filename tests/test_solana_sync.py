@@ -49,8 +49,13 @@ def store():
 
 
 def stored(store: Store) -> list[tuple[Any, ...]]:
+    """Every column of every row. The first four keep their places, which tests index."""
     return store.db.execute(
-        "SELECT block_number, log_index, tx_hash, value FROM transfers ORDER BY 1, 2"
+        """
+        SELECT block_number, log_index, tx_hash, value,
+               chain, block_hash, block_timestamp, from_address, to_address
+        FROM transfers ORDER BY 1, 2
+        """
     ).fetchall()
 
 
