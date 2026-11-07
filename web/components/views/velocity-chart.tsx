@@ -1,5 +1,4 @@
-import { PinMark } from "@/components/pinned-notes";
-import type { ChainName } from "@/lib/dataset";
+import { NoteMarks, type PinnedNote } from "@/components/pinned-notes";
 import { UNKNOWN_TEXT } from "@/lib/format";
 import type { VelocityChart as Chart, VelocityMeasure } from "@/lib/chain-views";
 
@@ -19,15 +18,17 @@ export function measureStyle(measure: VelocityMeasure) {
   return { background, ...(outlined ? { border: "1px solid var(--color-maroon)" } : {}) };
 }
 
-// Hand-built marks, so the chart is in the static HTML and its pins need no script. Each bar has a
-// direct label, on a linear scale from zero to the chart's largest figure. A chain's pin sits beside
-// its name, for the note about that chain.
+// Hand-built marks, so the chart is in the static HTML. Each bar has a direct label, on a linear scale
+// from zero to the chart's largest figure. Each row names its measure, so there's no legend. A
+// chain's note has its footnote marker on the chain's name, so the chart is read by assistive tech.
 export function VelocityChart({
   chart,
-  pins,
+  notes = [],
+  footnotes = "",
 }: {
   chart: Chart;
-  pins: Partial<Record<ChainName, number>>;
+  notes?: PinnedNote[];
+  footnotes?: string;
 }) {
   if (chart.max === null) return <p className="p-4">{UNKNOWN_TEXT}</p>;
   return (
@@ -36,11 +37,7 @@ export function VelocityChart({
         <div key={group.chain} className="velocity-chart__group" data-velocity-chain={group.chain}>
           <p className="velocity-chart__name">
             {group.name}
-            {pins[group.chain] ? (
-              <span className="ml-1 inline-block align-middle">
-                <PinMark number={pins[group.chain]!} />
-              </span>
-            ) : null}
+            <NoteMarks notes={notes} at={group.chain} prefix={footnotes} />
           </p>
           {group.bars.map((bar) => (
             <div key={bar.measure} className="velocity-chart__row" data-measure={bar.measure}>

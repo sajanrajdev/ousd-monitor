@@ -27,12 +27,13 @@ function mount(edit?: (props: Parameters<typeof VelocityCard>[0]) => void) {
   return render(<VelocityCard {...props} />);
 }
 
+// Each marker in reading order, with its number and the words of the footnote it links to.
 const notesOf = (container: HTMLElement) =>
-  [...container.querySelectorAll("[data-pinned-notes] > [data-note]")].map((note) => ({
-    kind: note.getAttribute("data-note"),
-    chain: note.getAttribute("data-chain"),
-    pin: note.querySelector(".pin")!.textContent,
-    text: note.textContent,
+  [...container.querySelectorAll("a[data-fn-ref]")].map((marker) => ({
+    kind: marker.getAttribute("data-note"),
+    chain: marker.getAttribute("data-chain"),
+    pin: marker.textContent,
+    text: container.querySelector(marker.getAttribute("href")!.replace(/:/g, "\\:"))!.textContent,
   }));
 
 afterEach(() => {
@@ -60,7 +61,8 @@ describe("velocity by chain", () => {
     expect(
       base.querySelector('[data-measure="velocity_bps"] [data-velocity-value]')!.textContent,
     ).toBe("42.85%");
-    expect(container.querySelector("svg, canvas, .recharts-wrapper")).toBeNull();
+    // The card's clock is the only drawing outside the chart, and the chart has none.
+    expect(container.querySelector(".chart-area svg, canvas, .recharts-wrapper")).toBeNull();
   });
 
   it("scales every bar on one linear axis from zero to the largest figure", () => {
@@ -76,35 +78,49 @@ describe("velocity by chain", () => {
     }
   });
 
-  it("pins a warning beside its chain, numbered, and moves it with the warning", () => {
+  it("puts a warning's marker on its chain's name, names its chain in words, and moves it with the warning", () => {
     const { container } = mount((props) => {
       props.warnings = [WARNING];
     });
-    const ethereum = container.querySelector('[data-velocity-chain="ethereum"]')!;
-    expect(ethereum.querySelector(".velocity-chart__name .pin")!.textContent).toBe("1");
+    // The footnote markers are the card's one set: nothing in the chart is a pin.
+    expect(container.querySelector(".chart-area .pin")).toBeNull();
     const notes = notesOf(container);
-    expect(notes[0]).toMatchObject({ kind: "velocity-warning", chain: "ethereum", pin: "1" });
-    expect(notes[0].text).toContain("Ethereum, 3 Nov 2026 UTC");
-    expect(notes[0].text).toContain("$6.4M");
-    expect(notes[0].text).toContain("$2.8M");
-    expect(notes[0].text).toContain("unusually high");
-    expect(notes[0].text).toContain("shouldn't be read as a trend");
-    expect(notes[1]).toMatchObject({ kind: "velocity-denominators", pin: "2" });
+    // The note about the whole card is first, on the title, then the chain's.
+    expect(notes[0]).toMatchObject({ kind: "velocity-denominators", pin: "1" });
+    expect(notes[1]).toMatchObject({ kind: "velocity-warning", chain: "ethereum", pin: "2" });
+    expect(notes[1].text).toContain("Ethereum, 3 Nov 2026 UTC");
+    expect(notes[1].text).toContain("$6.4M");
+    expect(notes[1].text).toContain("$2.8M");
+    expect(notes[1].text).toContain("unusually high");
+    expect(notes[1].text).toContain("shouldn't be read as a trend");
+    const name = container.querySelector('[data-velocity-chain="ethereum"] .velocity-chart__name')!;
+    expect(name.querySelector('[data-note="velocity-warning"]')).not.toBeNull();
+    expect(
+      container.querySelector('.chart-card__head [data-note="velocity-denominators"]'),
+    ).not.toBeNull();
+    // The marker is a link inside the chart, so the chart is read, not hidden.
+    expect(container.querySelector(".chart-area")!.hasAttribute("aria-hidden")).toBe(false);
     const moved = mount((props) => {
       props.warnings = [{ ...WARNING, chain: "base" }];
     });
-    expect(notesOf(moved.container)[0]).toMatchObject({ chain: "base", pin: "1" });
-    expect(moved.container.querySelector('[data-velocity-chain="ethereum"] .pin')).toBeNull();
+    expect(notesOf(moved.container)[1]).toMatchObject({ chain: "base", pin: "2" });
+    expect(notesOf(moved.container)[1].text).toContain("Base, 3 Nov 2026 UTC");
+    expect(
+      moved.container.querySelector('[data-velocity-chain="base"] [data-note="velocity-warning"]'),
+    ).not.toBeNull();
   });
 
-  it("has no pin and no gap without a warning, and numbers two warnings in chart order", () => {
+  it("has no gap without a warning, no pin in the chart, and numbers two warnings in chart order", () => {
     const none = mount((props) => {
       props.warnings = [{ ...WARNING, metric: "total_supply" }];
     });
     expect(notesOf(none.container)).toEqual([
       expect.objectContaining({ kind: "velocity-denominators", pin: "1" }),
     ]);
-    expect(none.container.querySelector("[data-velocity-chain] .pin")).toBeNull();
+    expect(none.container.querySelectorAll("[data-velocity-chain] .pin")).toHaveLength(0);
+    expect(none.container.querySelectorAll("a[data-fn-ref]")).toHaveLength(1);
+    expect(none.container.querySelectorAll(".footnotes__list > li")).toHaveLength(1);
+    expect(none.container.querySelector("[data-velocity-legend]")).toBeNull();
     none.unmount();
     const two = mount((props) => {
       props.warnings = [
@@ -113,9 +129,9 @@ describe("velocity by chain", () => {
       ];
     });
     expect(notesOf(two.container).map(({ chain, pin }) => `${chain}:${pin}`)).toEqual([
-      "tempo:1",
-      "solana:2",
-      "null:3",
+      "null:1",
+      "tempo:2",
+      "solana:3",
     ]);
   });
 
@@ -123,7 +139,7 @@ describe("velocity by chain", () => {
     const { container } = mount((props) => {
       props.warnings = [WARNING];
     });
-    const panel = container.querySelector(".info-popover__panel")!;
+    const panel = container.querySelector(".chart-card__head > .tip--info > .tip__panel")!;
     expect(
       panel.querySelector('[data-full-note="velocity-warning"][data-chain="ethereum"]')!
         .textContent,
@@ -135,8 +151,8 @@ describe("velocity by chain", () => {
     expect(panel.querySelector('[data-full-note="velocity-jumpy"]')!.textContent).toMatch(
       /small circulating supply makes velocity jumpy/,
     );
-    const pin = container.querySelector('[data-pinned-notes] [data-note="velocity-denominators"]')!;
-    expect(pin.closest("details, noscript")).toBeNull();
+    const marker = container.querySelector('a[data-fn-ref][data-note="velocity-denominators"]')!;
+    expect(marker.closest("details, noscript")).toBeNull();
   });
 
   it("names the chains where velocity beats headline velocity, or says none do", () => {
@@ -198,7 +214,7 @@ describe("velocity by chain", () => {
     expect(base.textContent).toContain("$200M");
     // Wallets show only in the table, so nothing in view counts them.
     const shown = container.cloneNode(true) as HTMLElement;
-    shown.querySelectorAll("details, .sr-only").forEach((node) => node.remove());
+    shown.querySelectorAll("details, .sr-only, .tip__panel").forEach((node) => node.remove());
     expect(shown.textContent).not.toMatch(/wallets/i);
   });
 });

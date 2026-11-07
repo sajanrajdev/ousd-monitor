@@ -1,60 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { CARD_ANCHORS } from "@/lib/definitions";
-import { expectedFromDataset, verifyOutput } from "@/scripts/verify-output.mjs";
-import { at, plantFile, releaseGrade, tempDir } from "./dataset-helpers";
-import { PLANTED_WALLETS_CAPTION, plantedFlight, plantedRealMain } from "./planted-first-screen";
+import { expectedFromDataset } from "@/scripts/verify-output.mjs";
+import { at } from "./dataset-helpers";
+import { supplyHarness, WHOLE_PAGE_TIMEOUT_MS } from "./verify-output-panels-fixture";
 
-// In a file of their own, so a worker of their own: each test parses a whole planted main page several
-// times, which the heap of a file with hundreds of tests can't also hold. For the same reason they get
-// longer than the default, as a slower machine takes seconds over a test with several such pages.
-const WHOLE_PAGE_TIMEOUT_MS = 30_000;
-const LINE = "Independent. Not affiliated with Open Standard or Bridge.";
-
-function site({ main, methodology }: { main: string; methodology: string }) {
-  const dir = tempDir();
-  plantFile(dir, "index.html", main);
-  plantFile(dir, "methodology/index.html", methodology);
-  return dir;
-}
-
+// The filter, and each supply panel's bars, legend and band. Its figures, notes and tables are in verify-output-supply-figures.test.ts, as one file of both ran out of memory.
 describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
-  const STALE =
-    "Data from 4 Nov 2026, 06:00 UTC. Nothing newer has reached this page, so it may be out of date.";
-  const TRUST =
-    "Last reconciled 4 Nov 2026, 05:30 UTC. Nothing newer has reached this page, so it may be out of date.";
-  const location = at(releaseGrade());
-  const expected = expectedFromDataset(location);
-  const main = plantedRealMain(expected, STALE, TRUST);
-  const realPage = (body: string) =>
-    `<!doctype html><html data-dataset-kind="real" data-dataset-version="${expected.version}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
-    <header><p>${LINE}</p></header><p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
-    <footer><p>${LINE}</p><p>Not financial advice.</p></footer></body></html>`;
-  const check = (body: string, against = expected) =>
-    verifyOutput(
-      site({ main: realPage(body), methodology: realPage("<main>Fine</main>") }),
-      against,
-    );
-  const panelOf = (html: string, id: string, value: string) => {
-    const box = html.indexOf(`id="${id}"`);
-    const start = html.indexOf(`data-chain-panel="${value}"`, box);
-    const next = html.indexOf('<div data-chain-panel="', start + 1);
-    const close = html.indexOf('<div id="', start);
-    const end = Math.min(...[next, close].filter((at) => at !== -1));
-    return { start, end };
-  };
-  // A fault in one panel, so a right answer in another can't hide it.
-  const inPanel = (
-    value: string,
-    change: (panel: string) => string,
-    id: string = CARD_ANCHORS.supply,
-  ) => {
-    const { start, end } = panelOf(main, id, value);
-    return `${main.slice(0, start)}${change(main.slice(start, end))}${main.slice(end)}`;
-  };
-  const faults = (panel: string, value: string) =>
-    check(panel).filter((problem: string) => problem.includes(`the ${value} panel`));
-
-  it("passes the page the dataset calls for, with a panel per option", () => {
+  const {
+    expected,
+    main,
+    check,
+    panelOf,
+    inPanel,
+    faults,
+    S,
+    CARD,
+    rowOf,
+    inRow,
+    inCard,
+    cardFaults,
+    rowFaults,
+  } = supplyHarness();
+  it("passes the page the dataset calls for, with a bar and a step line per option", () => {
     expect(expected.filter.map(({ label }: { label: string }) => label)).toEqual([
       "All",
       "Tempo",
@@ -93,38 +59,91 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     );
   });
 
-  it("refuses a missing panel, or one hidden by its markup", () => {
-    const { start, end } = panelOf(main, CARD_ANCHORS.supply, "base");
-    const gone = `${main.slice(0, start - 5)}${main.slice(end)}`;
-    expect(check(gone)).toEqual(
-      expect.arrayContaining([expect.stringContaining("#where-supply-sits has panels for")]),
+  it("refuses a missing bar row, one hidden by its markup, or a bar marked wrong", () => {
+    const { start, end } = rowOf(main, "base");
+    const gone = `${main.slice(0, start)}${main.slice(end)}`;
+    expect(cardFaults(gone)).toEqual(
+      expect.arrayContaining([expect.stringContaining(`${CARD}: has bars for`)]),
     );
-    const hidden = inPanel("base", (panel) =>
-      panel.replace('data-chain-panel="base"', 'data-chain-panel="base" hidden'),
+    const hidden = inRow("base", (row) =>
+      row.replace('data-supply-row="base"', 'data-supply-row="base" hidden'),
     );
-    expect(faults(hidden, "base")).toEqual(
-      expect.arrayContaining([expect.stringContaining("hidden by its markup")]),
+    expect(rowFaults(hidden, "base")).toContain(`${CARD}, the base bar: it's hidden by its markup`);
+    // On Base's card, Tempo's bar not muted, and on All's, a bar marked as chosen.
+    const loud = inPanel(
+      "base",
+      (panel) => panel.replace('data-supply-row="tempo" data-muted', 'data-supply-row="tempo"'),
+      S,
     );
+    expect(faults(loud, "base")).toContain(
+      `index.html: the base panel of #${S}, the tempo bar: it's none, not muted`,
+    );
+    const marked = inRow("base", (row) =>
+      row.replace('data-supply-row="base"', 'data-supply-row="base" data-selected'),
+    );
+    expect(rowFaults(marked, "base")).toContain(`${CARD}, the base bar: it's selected, not none`);
   });
 
-  it("refuses another chain's heading, even if All's is right", () => {
-    const panel = inPanel("tempo", (html) =>
-      html.replace(/<h2>[^<]*<\/h2>/, "<h2>Another finding.</h2>"),
+  // The bug the maintainer found: choosing a chain left every figure at All's. Base's card with All's
+  // legend, figures and tables is refused by name, against the dataset's own rows.
+  it("refuses a chain's card that shows every chain's figures", () => {
+    const allPanel = main.slice(...Object.values(panelOf(main, S, "all")));
+    const fromLegend = (html: string) => html.slice(html.indexOf('<ul class="chart-legend"'));
+    const allLegend = fromLegend(allPanel);
+    const swapped = inPanel(
+      "base",
+      (panel) => `${panel.slice(0, panel.length - fromLegend(panel).length)}${allLegend}`,
+      S,
     );
-    expect(faults(panel, "tempo")).toContain(
-      "index.html: the tempo panel of #where-supply-sits: its heading isn't the dataset's",
+    expect(swapped).not.toBe(main);
+    const base = `index.html: the base panel of #${S}`;
+    expect(faults(swapped, "base")).toEqual(
+      expect.arrayContaining([
+        `${base}: its placed_supply legend amount isn't Base's in the dataset`,
+        `${base}: its free_floating legend amount isn't Base's in the dataset`,
+        expect.stringContaining(`${base}: its table's chains aren't Base's`),
+        `${base}: its named exchanges aren't the dataset's for it`,
+      ]),
+    );
+    expect(check(main)).toEqual([]);
+  });
+
+  it("refuses a chain's card that loses its names or says nothing of those left to All", () => {
+    const base = `index.html: the base panel of #${S}`;
+    const panel = main.slice(...Object.values(panelOf(main, S, "base")));
+    const unsplit = /<p data-exchanges-unsplit>.*?<\/p>/.exec(panel)?.[0];
+    if (unsplit) {
+      const quiet = inPanel("base", (html) => html.replace(unsplit, ""), S);
+      expect(faults(quiet, "base")).toContain(
+        `${base}: it doesn't say which names aren't split by chain`,
+      );
+    }
+    const lost = inPanel("base", (html) => html.replace(/<li data-exchange-row>.*?<\/li>/, ""), S);
+    if (lost !== main) {
+      expect(faults(lost, "base")).toContain(
+        `${base}: its named exchanges aren't the dataset's for it`,
+      );
+    }
+    expect(Boolean(unsplit) || lost !== main).toBe(true);
+  });
+
+  it("refuses a heading or a row's total that isn't the dataset's", () => {
+    const heading = inCard((card) => card.replace(/<h2>[^<]*<\/h2>/, "<h2>Another finding.</h2>"));
+    expect(cardFaults(heading)).toContain(`${CARD}: its heading isn't the dataset's`);
+    const total = inRow("tempo", (row) => row.replace(/(<span data-row-total>)[^<]*/, "$1$9"));
+    expect(rowFaults(total, "tempo")).toContain(
+      `${CARD}, the tempo bar: its total isn't the dataset's`,
     );
   });
 
   it("refuses a bar part that isn't the dataset's, or parts that don't add up to total", () => {
-    const wrong = inPanel("tempo", (html) =>
+    const wrong = inRow("tempo", (html) =>
       html.replace(
         /data-part="placed_supply" data-amount="\d+"/,
         'data-part="placed_supply" data-amount="1"',
       ),
     );
-    const problems = faults(wrong, "tempo");
-    expect(problems).toEqual(
+    expect(rowFaults(wrong, "tempo")).toEqual(
       expect.arrayContaining([
         expect.stringContaining("its bar's parts add up to"),
         expect.stringContaining("its bar's placed_supply isn't the dataset's"),
@@ -133,272 +152,86 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
   });
 
   it("refuses a bar drawn at another share", () => {
-    const wrong = inPanel("tempo", (html) =>
+    const wrong = inRow("tempo", (html) =>
       html.replace(/(data-part="placed_supply"[^>]*flex-basis:)[\d.]+%/, "$190%"),
     );
-    expect(faults(wrong, "tempo")).toContain(
-      "index.html: the tempo panel of #where-supply-sits: its bar's placed_supply isn't drawn at its share",
+    expect(rowFaults(wrong, "tempo")).toContain(
+      `${CARD}, the tempo bar: its bar's placed_supply isn't drawn at its share`,
     );
   });
 
   it("refuses a direct label that isn't the dataset's", () => {
-    const wrong = inPanel("tempo", (html) =>
+    const wrong = inRow("tempo", (html) =>
       html.replace(
         /(data-part="placed_supply"[^>]*><span data-direct-label>)[^<]*/,
         "$1Placed 99%",
       ),
     );
-    expect(faults(wrong, "tempo")).toContain(
-      "index.html: the tempo panel of #where-supply-sits: its bar's placed_supply doesn't carry the dataset's label",
+    expect(rowFaults(wrong, "tempo")).toContain(
+      `${CARD}, the tempo bar: its bar's placed_supply doesn't carry the dataset's label`,
     );
   });
 
   it("refuses a band that isn't there, or one drawn where there's none", () => {
-    const lost = inPanel("ethereum", (html) =>
+    const lost = inRow("ethereum", (html) =>
       html.replace('<span data-testid="exchange-linked-band"></span>', ""),
     );
-    expect(faults(lost, "ethereum")).toEqual(
+    expect(rowFaults(lost, "ethereum")).toEqual(
       expect.arrayContaining([expect.stringContaining("its placed_supply band doesn't match")]),
     );
-    const added = inPanel("tempo", (html) =>
+    const added = inRow("tempo", (html) =>
       html.replace(
         /(data-part="placed_supply"[^>]*>)/,
         '$1<span data-testid="exchange-linked-band"></span>',
       ),
     );
-    expect(faults(added, "tempo")).toEqual(
+    expect(rowFaults(added, "tempo")).toEqual(
       expect.arrayContaining([expect.stringContaining("its placed_supply band doesn't match")]),
     );
   });
 
   it("refuses a legend that drops a segment or disagrees with the dataset", () => {
-    const dropped = inPanel("base", (html) =>
+    const dropped = inCard((html) =>
       html.replace(/<li data-segment="venue_lending">.*?<\/li>/, ""),
     );
-    expect(faults(dropped, "base")).toContain(
-      "index.html: the base panel of #where-supply-sits: its legend doesn't list every segment",
-    );
-    const share = inPanel("base", (html) =>
+    expect(cardFaults(dropped)).toContain(`${CARD}: its legend doesn't list every segment`);
+    const share = inCard((html) =>
       html.replace(/(data-segment="placed_supply">.*?<span data-segment-share>)[^<]*/, "$199.99%"),
     );
-    expect(faults(share, "base")).toContain(
-      "index.html: the base panel of #where-supply-sits: its placed_supply legend share isn't the dataset's",
+    expect(cardFaults(share)).toContain(
+      `${CARD}: its placed_supply legend share isn't the dataset's`,
     );
-    const amount = inPanel("base", (html) =>
+    const amount = inCard((html) =>
       html.replace(/(data-segment="placed_supply">.*?<span data-segment-amount>)[^<]*/, "$1$1"),
     );
-    expect(faults(amount, "base")).toContain(
-      "index.html: the base panel of #where-supply-sits: its placed_supply legend amount isn't the dataset's",
+    expect(cardFaults(amount)).toContain(
+      `${CARD}: its placed_supply legend amount isn't the dataset's`,
     );
   });
 
   it("refuses an exchange segment that doesn't read as a floor", () => {
-    const words = inPanel("ethereum", (html) =>
-      html.replace("Exchange venues, at least", "Exchange venues"),
+    const words = inCard((html) =>
+      html.replace(
+        /(<li data-segment="venue_exchange"><span data-segment-label>)Exchange venues, at least/,
+        "$1Exchange venues",
+      ),
     );
-    expect(faults(words, "ethereum")).toContain(
-      'index.html: the ethereum panel of #where-supply-sits: its venue_exchange legend row doesn\'t say "Exchange venues, at least"',
+    expect(cardFaults(words)).toContain(
+      `${CARD}: its venue_exchange legend row doesn't say "Exchange venues, at least"`,
     );
-    const mark = inPanel("ethereum", (html) =>
-      html.replace('<span data-coverage="floor">≥</span>', ""),
-    );
-    expect(faults(mark, "ethereum")).toEqual(
+    const mark = inCard((html) => html.replace('<span data-coverage="floor">≥</span>', ""));
+    expect(cardFaults(mark)).toEqual(
       expect.arrayContaining([expect.stringContaining("has the wrong coverage mark")]),
     );
   });
 
   it("refuses a band line that isn't the dataset's", () => {
-    const wrong = inPanel("tempo", (html) =>
-      html.replace(/(<li data-band="placed_supply"><span[^>]*>)[^<]*/, "$1Exchange-linked: lots"),
+    const wrong = inCard((html) =>
+      html.replace(/(<li data-band="placed_supply"[^>]*>)[^<]*/, "$1Exchange-linked: lots"),
     );
-    expect(faults(wrong, "tempo")).toContain(
-      "index.html: the tempo panel of #where-supply-sits: its placed_supply band line isn't the dataset's",
-    );
-  });
-
-  it("refuses a wallet total under All, and a chain without its wallets", () => {
-    const total = inPanel("all", (html) =>
-      html.replace(
-        "</dl>",
-        '<div data-stat="active-wallets"><dt>Active wallets</dt><dd data-stat-value>1,200</dd></div></dl>',
-      ),
-    );
-    expect(faults(total, "all")).toEqual(
-      expect.arrayContaining([expect.stringContaining("beside the bar")]),
-    );
-    const none = inPanel("base", (html) =>
-      html.replace(/<div data-stat="active-wallets">.*?<\/div>/, ""),
-    );
-    expect(faults(none, "base")).toEqual(
-      expect.arrayContaining([expect.stringContaining("beside the bar")]),
-    );
-    const figure = inPanel("base", (html) =>
-      html.replace(/(data-stat="clean-7d"><dt>[^<]*<\/dt><dd data-stat-value>)[^<]*/, "$1$9"),
-    );
-    expect(faults(figure, "base")).toEqual(
-      expect.arrayContaining([expect.stringContaining("its clean-7d isn't the dataset's")]),
-    );
-  });
-
-  it("holds the figures and wallet table to the KPI rows, and refuses wallets across chains", () => {
-    const loose = inPanel("all", (html) =>
-      html.replace("</dl>", "</dl><p>Active wallets, 7 days: 1,740</p>"),
-    );
-    expect(faults(loose, "all")).toContain(
-      "index.html: the all panel of #where-supply-sits: it shows a wallet figure across chains",
-    );
-    const figure = inPanel("all", (html) =>
-      html.replace(/(data-stat="circulating"><dt>[^<]*<\/dt><dd data-stat-value>)[^<]*/, "$1$9"),
-    );
-    expect(faults(figure, "all")).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("its circulating disagrees with the KPI rows"),
-      ]),
-    );
-    const wallets = inPanel("tempo", (html) =>
-      html.replace(/(<td data-label="Active wallets, 7 days">)[^<]*/, "$1999999"),
-    );
-    expect(faults(wallets, "tempo")).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("its table's Active wallets, 7 days isn't the dataset's"),
-      ]),
-    );
-  });
-
-  it("refuses a caveat lost from one panel, hidden, reworded or for another chain", () => {
-    const lost = inPanel("tempo", (html) =>
-      html.replace(/<li data-note="exchange-floor">.*?<\/li>/, ""),
-    );
-    expect(faults(lost, "tempo")).toEqual(
-      expect.arrayContaining([expect.stringContaining("its notes are")]),
-    );
-    const folded = inPanel("tempo", (html) =>
-      html.replace(
-        /(<li data-note="exchange-floor">)(.*?)(<\/li>)/,
-        "$1<details><summary>More</summary>$2</details>$3",
-      ),
-    );
-    expect(faults(folded, "tempo")).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("exchange-floor note doesn't keep its words"),
-      ]),
-    );
-    const reworded = inPanel("tempo", (html) =>
-      html.replace("Exchange venues are a floor", "Exchange venues are about right"),
-    );
-    expect(faults(reworded, "tempo")).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("exchange-floor note doesn't keep its words"),
-      ]),
-    );
-    const other = inPanel("base", (html) =>
-      html.replace(
-        '<li data-note="placed">',
-        '<li data-note="exchange-coverage" data-chain="tempo"><span class="pin">9</span><p>Tempo: no wallet.</p></li><li data-note="placed">',
-      ),
-    );
-    expect(faults(other, "base")).toEqual(
-      expect.arrayContaining([expect.stringContaining("its notes are")]),
-    );
-  });
-
-  it("refuses a note with the wrong number, and a legend pin that points elsewhere", () => {
-    const note = inPanel("base", (html) =>
-      html.replace(
-        '<span class="pin" aria-hidden="true">1</span>',
-        '<span class="pin" aria-hidden="true">7</span>',
-      ),
-    );
-    expect(faults(note, "base")).toEqual(
-      expect.arrayContaining([expect.stringContaining("has the wrong number")]),
-    );
-    const pin = inPanel("base", (html) =>
-      html.replace(/(data-segment="placed_supply">.*?<span class="pin">)\d+/, "$14"),
-    );
-    expect(faults(pin, "base")).toEqual(
-      expect.arrayContaining([expect.stringContaining("placed_supply legend row points at notes")]),
-    );
-  });
-
-  it("refuses a popover that has lost the full note", () => {
-    const panel = inPanel("base", (html) =>
-      html.replace(/<p data-full-note="placed">.*?<\/p>/, ""),
-    );
-    expect(faults(panel, "base")).toEqual(
-      expect.arrayContaining([expect.stringContaining("lost the placed note in full")]),
-    );
-  });
-
-  it("refuses a table row that isn't the dataset's, or a table with another chain's rows", () => {
-    const cell = inPanel("base", (html) => html.replace(/(<td data-label="Total">)[^<]*/, "$1$9"));
-    expect(faults(cell, "base")).toEqual(
-      expect.arrayContaining([expect.stringContaining("its table's Total isn't the dataset's")]),
-    );
-    const extra = inPanel("base", (html) =>
-      html.replace("</tbody>", "<tr><td>Tempo</td></tr></tbody>"),
-    );
-    expect(faults(extra, "base")).toEqual(
-      expect.arrayContaining([expect.stringContaining("its table has 2 rows, not 1")]),
-    );
-  });
-
-  it("refuses a wallet table that doesn't say what a wallet is", () => {
-    const panel = inPanel("base", (html) =>
-      html.replace(`Last 7 days. ${PLANTED_WALLETS_CAPTION}`, "Last 7 days."),
-    );
-    expect(faults(panel, "base")).toEqual(
-      expect.arrayContaining([expect.stringContaining("doesn't say what a wallet is")]),
-    );
-  });
-
-  it("refuses exchange rows that left All's toggle", () => {
-    const moved = main.replace("<div data-labels-table>", "<div>");
-    expect(faults(moved, "all")).toEqual(
-      expect.arrayContaining([expect.stringContaining("exchange rows under its toggle")]),
-    );
-  });
-
-  it("refuses a step line panel that isn't the dataset's", () => {
-    const id = CARD_ANCHORS.series;
-    const heading = inPanel(
-      "tempo",
-      (html) => html.replace(/<h2>[^<]*<\/h2>/, "<h2>Another.</h2>"),
-      id,
-    );
-    expect(faults(heading, "tempo")).toContain(
-      "index.html: the tempo panel of #placed-vs-circulating: its heading isn't the dataset's",
-    );
-    const note = inPanel(
-      "tempo",
-      (html) => html.replace("<p>The series starts", "<p>The line starts"),
-      id,
-    );
-    expect(faults(note, "tempo")).toEqual(
-      expect.arrayContaining([expect.stringContaining("series-start note doesn't keep its words")]),
-    );
-    const full = inPanel(
-      "tempo",
-      (html) => html.replace(/<p data-full-note="series-start">.*?<\/p>/, ""),
-      id,
-    );
-    expect(faults(full, "tempo")).toEqual(
-      expect.arrayContaining([expect.stringContaining("lost the series note in full")]),
-    );
-    const cell = inPanel(
-      "tempo",
-      (html) => html.replace(/(<td data-label="Placed">)[^<]*/, "$1$9"),
-      id,
-    );
-    expect(faults(cell, "tempo")).toEqual(
-      expect.arrayContaining([expect.stringContaining("its table's Placed isn't the dataset's")]),
-    );
-    const figure = inPanel(
-      "tempo",
-      (html) => html.replace(/(<span data-series-value>)[^<]*/, "$1$9"),
-      id,
-    );
-    expect(faults(figure, "tempo")).toEqual(
-      expect.arrayContaining([expect.stringContaining("legend's figures aren't the newest day's")]),
+    expect(cardFaults(wrong)).toContain(`${CARD}: its placed_supply band line isn't the dataset's`);
+    expect(check(wrong)).toContain(
+      "index.html: the exchange-linked line for all isn't the dataset's",
     );
   });
 });

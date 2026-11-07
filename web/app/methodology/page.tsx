@@ -8,6 +8,7 @@ import {
   SourceLegend,
   UnnamedClusters,
 } from "@/components/methodology-tables";
+import { BackLink } from "@/components/back-link";
 import { ExchangeHoldingsCard, ExchangeListingsCard } from "@/components/exchange-holdings";
 import { getDataset, type Dataset } from "@/lib/dataset";
 import {
@@ -40,18 +41,20 @@ function isMirrored(id: string): id is MirroredSection {
   return (MIRRORED_SECTIONS as readonly string[]).includes(id);
 }
 
+// One list, the top-level sections in order. A section's own items sit indented under it, in compact
+// columns of their own, so a long one leaves no gap beside the rest.
 function Contents({ items }: { items: ReturnType<typeof sectionList> }) {
   const list = (
-    <ol className="mt-3 grid gap-1 text-sm md:grid-cols-2 lg:grid-cols-3">
+    <ol className="mt-3 grid gap-1 text-sm" data-contents-list>
       {items.map((item) => (
         <li key={item.id}>
           <a href={`#${item.id}`} className="target-link underline underline-offset-4">
             {item.title}
           </a>
           {item.children.length > 0 ? (
-            <ul className="ml-4 mt-1 grid gap-1 text-[length:var(--text-meta)]">
+            <ul className="mb-1 ml-4 mt-1 max-w-3xl gap-x-6 text-[length:var(--text-meta)] sm:columns-2 lg:columns-3">
               {item.children.map((child) => (
-                <li key={child.id}>
+                <li key={child.id} className="mb-1 break-inside-avoid">
                   <a href={`#${child.id}`} className="target-link underline underline-offset-4">
                     {child.title}
                   </a>
@@ -83,7 +86,8 @@ export default function Methodology() {
   return (
     <main id="main-content" className="page-main">
       <div className="max-w-5xl">
-        <h1 style={{ fontSize: "var(--text-display)" }}>Methodology</h1>
+        <BackLink />
+        <h1 className="page-title">Methodology</h1>
         <div className="mt-6">
           <Contents items={sectionList(chunks)} />
         </div>

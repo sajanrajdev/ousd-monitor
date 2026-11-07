@@ -19,8 +19,7 @@ import {
   seriesProps,
   tooltipProps,
 } from "@/components/chart-theme";
-import { PinMark } from "@/components/pinned-notes";
-import { formatCompact, toChartNumber, UNKNOWN_TEXT } from "@/lib/format";
+import { toChartNumber, UNKNOWN_TEXT } from "@/lib/format";
 import {
   directLabel,
   legendAmount,
@@ -37,11 +36,12 @@ const widthOf = (bps: number | null) => `${(bps ?? 0) / 100}%`;
 export function SupplyBar({
   row,
   segments,
-  pins,
+  bracket = true,
 }: {
   row: BarRow;
   segments: DrawnSegment[];
-  pins: Record<string, number>;
+  // Whether it marks where circulating starts. Once is enough where bars stack.
+  bracket?: boolean;
 }) {
   if (BigInt(row.journey.total_supply) === 0n) {
     return <p data-chart="supply-bar">{UNKNOWN_TEXT}: this chain has no supply on this day.</p>;
@@ -82,11 +82,10 @@ export function SupplyBar({
               {label ? (
                 <span
                   data-testid="part-label"
-                  className="supply-bar__label z-10"
+                  className="supply-bar__label"
                   style={{ background: style.background }}
                 >
                   <span data-direct-label>{label}</span>
-                  {pins[segment.key] ? <PinMark number={pins[segment.key]} /> : null}
                 </span>
               ) : null}
               {segment.band && BigInt(segment.band.amount) > 0n ? (
@@ -104,7 +103,7 @@ export function SupplyBar({
           );
         })}
       </div>
-      {hasCirculating ? (
+      {bracket && hasCirculating ? (
         <div className="supply-bar__bracket">
           <div style={{ marginLeft: widthOf(circulatingStart) }} />
           <span>Circulating</span>
@@ -132,8 +131,8 @@ const LINES = [
   { key: "placed_supply", label: "Placed", stroke: "var(--meaning-idle)", dash: "2 3", width: 4 },
 ] as const;
 
-// Beside the chart, with each line's newest figure. Every one of them is in the table.
-export function SeriesLegend({ latest }: { latest: SeriesPoint }) {
+// Beside the chart, naming each line. Their newest figures are the supply card's, and in the table.
+export function SeriesLegend() {
   return (
     <ul className="chart-legend" data-testid="series-legend" data-series-legend>
       {LINES.map((line) => (
@@ -150,9 +149,6 @@ export function SeriesLegend({ latest }: { latest: SeriesPoint }) {
             />
           </svg>
           <span className="chart-legend__label">{line.label}</span>
-          <span className="chart-legend__values" data-series-value>
-            {formatCompact(latest[line.key])}
-          </span>
         </li>
       ))}
     </ul>
@@ -194,7 +190,7 @@ export function SupplySeries({ series, panel }: { series: SeriesPoint[]; panel: 
         <XAxis
           dataKey="day"
           {...axisProps}
-          minTickGap={64}
+          minTickGap={120}
           tickFormatter={(day: string) => formatUtcDate(day).replace(/ \d{4} UTC$/, "")}
         />
         <YAxis

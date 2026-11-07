@@ -20,20 +20,25 @@ import {
 import {
   EXCHANGE_FLOOR_LINK,
   EXCHANGE_FLOOR_NOTE,
+  EXCHANGE_FLOOR_PIN,
   exchangeCoverageNote,
+  exchangeCoveragePin,
   issuerUnlabeledNote,
+  PLACED_NOTE,
   PLACED_PIN,
+  seriesStartNote,
   seriesStartPin,
-  WALLETS_ACROSS_CHAINS_NOTE,
+  WALLETS_NOTE,
+  WALLETS_TABLE_NOTE,
 } from "./takeaways/caveats.ts";
 import {
   EXCHANGE_LINKED_LABEL,
+  exchangeLinkedFigures,
   exchangeLinkedLine,
   journeyHeading,
   seriesHeading,
   top10ShareBps,
 } from "./takeaways/journey.ts";
-import type { ChipKind } from "../components/status-chip.tsx";
 
 // Meaning colours, plus a pattern where the design system asks for one, so colour is never alone.
 // Only marks in ramp steps 3 and 4 (removed, idle) get the maroon hairline outline the design
@@ -52,11 +57,13 @@ export type SegmentStyle = {
   outlined?: boolean;
 };
 
-// A caveat a segment needs, with the words the views show and verify-output expects.
+// A caveat a segment needs, with the words the views show and verify-output expects. `text` stays in
+// view. `tip` is the caveat in full, in a tooltip on those words, with `link` after it.
 export type SegmentNote = {
   kind: string;
   chain?: ChainName;
   text: string;
+  tip?: string;
   link?: { href: string; text: string };
   segment?: string;
 };
@@ -68,7 +75,6 @@ export type SegmentConfig = {
   key: string;
   label: string;
   style: SegmentStyle;
-  marker: ChipKind;
   definition: DefinitionAnchor;
   // Whether the bracket for circulating covers it.
   circulating: boolean;
@@ -88,7 +94,6 @@ export const SEGMENT_CONFIG: SegmentConfig[] = [
       color: "var(--color-maroon-dark)",
       outlined: true,
     },
-    marker: "inferred",
     definition: "issuer-inventory",
     circulating: false,
     notes: ({ rows }) =>
@@ -108,17 +113,15 @@ export const SEGMENT_CONFIG: SegmentConfig[] = [
       color: "var(--color-maroon-dark)",
       outlined: true,
     },
-    marker: "inferred",
     definition: "placed-supply",
     circulating: false,
     band: { key: "placed_exchange_linked", label: EXCHANGE_LINKED_LABEL, image: BANDS },
-    notes: () => [{ kind: "placed", text: PLACED_PIN }],
+    notes: () => [{ kind: "placed", text: PLACED_PIN, tip: PLACED_NOTE }],
   },
   {
     key: "venue_dex",
     label: "DEX venues",
     style: { background: "var(--meaning-circulating)", color: "var(--color-off-white)" },
-    marker: "inferred",
     definition: "venue-supply",
     circulating: true,
   },
@@ -130,7 +133,6 @@ export const SEGMENT_CONFIG: SegmentConfig[] = [
       image: HATCH,
       color: "var(--color-off-white)",
     },
-    marker: "inferred",
     definition: "venue-supply",
     circulating: true,
   },
@@ -142,13 +144,13 @@ export const SEGMENT_CONFIG: SegmentConfig[] = [
       image: DOTS,
       color: "var(--color-off-white)",
     },
-    marker: "inferred",
     definition: "venue-supply",
     circulating: true,
     notes: ({ rows }) => [
       {
         kind: "exchange-floor",
-        text: EXCHANGE_FLOOR_NOTE,
+        text: EXCHANGE_FLOOR_PIN,
+        tip: EXCHANGE_FLOOR_NOTE,
         link: { href: definitionHref("exchange-linked-placed"), text: EXCHANGE_FLOOR_LINK },
       },
       ...rows
@@ -156,7 +158,8 @@ export const SEGMENT_CONFIG: SegmentConfig[] = [
         .map(({ chain }) => ({
           kind: "exchange-coverage",
           chain,
-          text: exchangeCoverageNote(chain),
+          text: exchangeCoveragePin(chain),
+          tip: exchangeCoverageNote(chain),
         })),
     ],
   },
@@ -164,7 +167,6 @@ export const SEGMENT_CONFIG: SegmentConfig[] = [
     key: "free_floating",
     label: "Free-floating",
     style: { background: "var(--meaning-active)", color: "var(--color-off-white)" },
-    marker: "inferred",
     definition: "free-floating",
     circulating: true,
   },
@@ -179,6 +181,8 @@ export type SegmentBand = {
   amount: string;
   // Of the segment it sits in, for geometry. The line says its share of supply.
   shareOfSegmentBps: number;
+  // Its figure and share of supply, for its legend row, and those words in one line for checks.
+  figures: { amount: string; share: string };
   line: string;
 };
 
@@ -204,6 +208,7 @@ function bandOf(config: SegmentConfig, row: SegmentRow, amount: bigint): Segment
     background: `${config.band.image}, ${config.style.background}`,
     amount: banded,
     shareOfSegmentBps: floorBps(BigInt(banded), amount) ?? 0,
+    figures: exchangeLinkedFigures(row),
     line: exchangeLinkedLine(row),
   };
 }
@@ -218,7 +223,7 @@ export function supplySegments(
 ): SupplySegment[] {
   const total = BigInt(row.total_supply);
   return config.map((segment) => {
-    const { key, label, style, marker, definition, circulating } = segment;
+    const { key, label, style, definition, circulating } = segment;
     const amount = BigInt(String(row[segment.key]));
     const { coverage, entities } = extras[segment.key] ?? {};
     const held = (entities ?? []).reduce((sum, entity) => sum + BigInt(entity.amount), 0n);
@@ -230,7 +235,6 @@ export function supplySegments(
       key,
       label,
       style,
-      marker,
       definition,
       circulating,
       amount: amount.toString(),
@@ -269,8 +273,8 @@ export function legendAmount(segment: Pick<SupplySegment, "amount" | "coverage">
     : formatCompact(segment.amount);
 }
 
-// The exchange venues segment is a floor on every panel. Its named rows add up across chains, so
-// they go only where their sum can sit under the segment: the panel that covers every chain.
+// The exchange venues segment is a floor on every panel. Its named rows are the panel's own, across
+// chains on All and one chain's holdings on a chain, so their sum sits under the segment.
 export function exchangeExtras(entities?: ExchangeRow[]): SegmentExtras {
   return { venue_exchange: { coverage: "floor", ...(entities ? { entities } : {}) } };
 }
@@ -285,6 +289,9 @@ export type SupplyStat = { key: string; label: string; value: string };
 
 export type SupplyPanel = {
   option: ChainOption;
+  // The named exchanges under its table: every one across chains on All, a chain's own holdings on
+  // a chain, and what a chain's list leaves out, said as not split by chain.
+  exchanges: { caption: string; rows: ExchangeRow[]; unsplit: string | null };
   chains: ChainName[];
   rows: JourneyRow[];
   kpis: KpiRow[];
@@ -306,8 +313,35 @@ export type SupplyInputs = {
   kpis: KpiRow[];
   definitions: Definitions;
   exchanges: ExchangeRow[];
+  // Each chain's own named exchanges, from its holdings. A chain missing here has none.
+  chainExchanges?: Partial<Record<ChainName, ExchangeRow[]>>;
   config?: SegmentConfig[];
 };
+
+export const EXCHANGES_UNSPLIT =
+  "Names from a listing, or with nothing held, aren't split by chain, so All lists them.";
+
+// What one option lists by name. A chain shows only what the dataset holds on that chain.
+function panelExchanges(
+  option: ChainOption,
+  exchanges: ExchangeRow[],
+  chainExchanges: Partial<Record<ChainName, ExchangeRow[]>>,
+): SupplyPanel["exchanges"] {
+  if (option.value === "all") {
+    return { caption: "Named exchanges, across chains", rows: exchanges, unsplit: null };
+  }
+  const rows = chainExchanges[option.value] ?? [];
+  const name = CHAIN_NAMES[option.value];
+  const left = exchanges.some((row) => !rows.some((own) => own.entity === row.entity));
+  return {
+    caption:
+      rows.length > 0
+        ? `Named exchanges on ${name}`
+        : `No labeled exchange wallet holds OUSD on ${name}.`,
+    rows,
+    unsplit: left ? EXCHANGES_UNSPLIT : null,
+  };
+}
 
 // Circulating comes from activity, and only from the day the journey row is from, so a figure beside
 // a bar never belongs to another day.
@@ -398,12 +432,21 @@ function supplyColumns(config: SegmentConfig[], extras: SegmentExtras) {
 // Everything one filter option's supply card shows, for the view and for verify-output alike.
 export function supplyPanel(
   option: ChainOption,
-  { journey, activity, kpis, definitions, exchanges, config = SEGMENT_CONFIG }: SupplyInputs,
+  {
+    journey,
+    activity,
+    kpis,
+    definitions,
+    exchanges,
+    chainExchanges = {},
+    config = SEGMENT_CONFIG,
+  }: SupplyInputs,
 ): SupplyPanel {
   const rows = newestByChain(journey).filter((row) => option.chains.includes(row.chain));
   const own = newestByChain(kpis).filter((row) => option.chains.includes(row.chain));
   const circulating = circulatingByChain(rows, activity);
-  const extras = exchangeExtras(option.value === "all" ? exchanges : undefined);
+  const named = panelExchanges(option, exchanges, chainExchanges);
+  const extras = exchangeExtras(named.rows);
   const bar =
     option.value === "all"
       ? allChainsBar(rows, config)
@@ -412,10 +455,11 @@ export function supplyPanel(
     ...config.flatMap((segment) =>
       (segment.notes?.({ rows }) ?? []).map((note) => ({ ...note, segment: segment.key })),
     ),
-    { kind: "wallets-not-people", text: WALLETS_ACROSS_CHAINS_NOTE },
+    { kind: "wallets-not-people", text: WALLETS_NOTE, tip: WALLETS_TABLE_NOTE },
   ];
   return {
     option,
+    exchanges: named,
     chains: option.chains,
     rows,
     kpis: own,
@@ -480,7 +524,13 @@ export function seriesPanel(option: ChainOption, inputs: Parameters<typeof serie
     option,
     series,
     heading: seriesHeading(series, option.chains),
-    notes: [{ kind: "series-start", text: seriesStartPin(inputs.definitions) }],
+    notes: [
+      {
+        kind: "series-start",
+        text: seriesStartPin(inputs.definitions),
+        tip: seriesStartNote(inputs.definitions),
+      },
+    ],
     latest: series.length > 0 ? series[series.length - 1] : null,
     tableRows: series.map((point) => ({
       day: formatUtcDate(point.day),

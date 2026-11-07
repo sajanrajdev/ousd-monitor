@@ -656,6 +656,96 @@ Each PR's scope is `phase-4`, for example `feat(phase-4): add the first screen`.
 
 **Verification:** `## Evidence` has every state at every width, with script output pasted and refusals as text. **No deployment.**
 
+## Maintainer review
+
+<a id="maintainer-review"></a>After U5 the maintainer reviewed the whole page on real data (dataset 20261105T053217Z) and decided the changes below. They replace what this plan says elsewhere where the two differ, and `docs/design-system.md` is updated to match. Measured by `measure-page.mjs` on that dataset.
+
+| Measure | Before the review | After | Target | Pass line |
+|---|---|---|---|---|
+| Words in `main`, at 1440 | 739 | 508 | About 450 | 510 |
+| Words in `main`, at 390 | 739 | 506 | About 450 | 510 |
+| Height at 1440 | 2,906 px | 3,266 px | | Under 3,338 px |
+| Height at 390 | 7,072 px | 6,235 px | | Under 6,429 px |
+
+Height at 1440 went up, as the half-width tiles are now full-width rows, and stays under its line.
+
+| # | Decision | As built |
+|---|---|---|
+| 1 | Explanations are tooltips that float over the page and never push content down | One shared component, `web/components/tooltip.tsx`, replaces every push-down `<details>`: info popovers, "How we read this", the reconciliation detail and the legend's explanations. It opens on hover and keyboard focus, toggles on tap, closes on Escape and when focus or the pointer leaves, and the enhancer keeps it inside the viewport. A panel with a link is a disclosure with `aria-expanded`, and a plain one is `role="tooltip"` with `aria-describedby`. With no script, CSS opens it on `:hover` and `:focus-within`, and the `<noscript>` notes stay. The essential caveats in `web/lib/takeaways/caveats.ts` stay visible as pinned notes, shorter, with the note in full as a tooltip on their words. Data toggles stay `<details>`, as they swap a chart for its table and aren't explanations |
+| 2 | Remove the F, I and E markers, the marker legend and the default "Our reading" tag | `status-chip.tsx` and `marker-legend.tsx` are gone, and so is the `marker` field in the segment config. On sample or preview data the verdict still says "Sample, not a finding." or "Preview, not a finding." beside the headline, in plain text |
+| 3 | "How we read this" stays, as a tooltip, and the subtitle asks the page's question | "How we read this" is a tooltip beside the headline, holding the verdict's groups, `verdict.text` on real four-chain data, and the methodology link. The subtitle now reads "Is Open USD (OUSD) supply turning into money that moves?", in the review's own words, 6 fewer than before |
+| 4 | A slimmer header: no independence line or methodology link in it | The header is the mark and the name, at `--header-height` 48px. The independence line and the methodology link are in the footer of every page, in view with nothing opened. `verify-output` checks the footer's line and drops the header's |
+| 5 | Reconciliation in the footer, its detail on its own page | On a build that passed, the footer shows a green tick and "Reconciled", linked to `/reconciliation/`, with the dated sentence as its tooltip. `/reconciliation/` holds the former disclosure's words, table and checks, with "Back to the dashboard" and the normal header. On a stale, failed, preview or sample build the trust row stays at the top as before, linking to the page, and the footer says "Last reconciled …" or "Not reconciled", never "Reconciled". If a passing page goes stale in the reader's browser, the footer swaps in place and the as-of line at the top adds when supply was last reconciled, so nothing shifts |
+| 6 | The first supply chart shows all chains together, as before U3 | One card, `#where-supply-sits`, with the sum's bar first and then one bar per chain, each with its name and total, and the legend, figures, notes and tables of the sum. The filter stays for the other cards, as it doesn't fight this: on the supply card it highlights the chosen chain's bar by weight and a rule, as on the velocity and chain cards, and hides nothing |
+| 7 | The first chart's numbered notes become short labels, with their explanations in tooltips | "Placed can include unlabelled exchange custody.", "Exchange venues are a floor.", "Tempo: zero only because no exchange wallet is named." and "Wallets, not people.", each with its note in full as a tooltip. The same pattern shortens the step line's, the velocity chart's and the waterfall's notes |
+| 8 | Full-width charts | The two-column grid from 1056 is gone. Every card spans the content width, one per row, and from a card of 860 its notes take a column beside the chart. The velocity chart sets its chains two to a row there, and the card's toggle and as-of line share a row |
+| 9 | Fewer words | See the table above. Beyond items 1 to 8: the findings row is gone, as each finding is its card's heading and stays in view there; the velocity legend is gone, as each bar names its measure; the series legend names its lines and leaves their newest figures to the supply card and the table; card as-of lines show a clock and the date, with "As of" for assistive tech; weekly bars drop the year, which the as-of line has. No number changed and no finding is hidden |
+
+**Decisions made in building it,** for the maintainer to confirm:
+
+- **The findings row is removed.** U2 added it at the maintainer's request, but it repeats the four card headings word for word, 39 words and about 450 px at 390. Without the cut the page stays above the pass line. Undoing it is one component and its checks.
+- **The PRD's "separate fact, estimate and opinion visibly"** now rests on words rather than markers: "How we read this" beside the headline, `verdict.text` with its estimate in view off real four-chain data, the verdict's groups titled by kind, and the methodology page. The PRD isn't changed here.
+- **"Reconciled" carries no date in view.** The review asked for the tick and the word, with the dated sentence in the tooltip. With a script, a page that ages past 36 hours swaps it for "Last reconciled …". A copy kept with no script, such as an archive, keeps the green word at any age, though its as-of line at the top is dated. Putting the date beside the word would close this, at a few words' cost.
+- **Without a script a tooltip can't be measured,** so at 390 a panel can run past the edge of the screen. Its content is still reached by focus and hover.
+- **The word target isn't met.** 508 words against about 450, inside the pass line of 510. The next cuts, each with a cost: drop the per-chain direct labels on the supply bars (8 words, the per-chain placed share leaves the view), the KPI row's chain list on four-chain data (5, partial data still needs it), and everyday velocity from the chart (8, the PRD asks for all three velocities).
+
+**Checks added to `verify-output`,** each proved by planting its fault: an explanation in a push-down `<details>` on the main page; a tooltip whose trigger isn't a native, named button or link, or whose panel doesn't follow it, or a linked panel that isn't a disclosure; the footer's independence line and methodology link; "Reconciled" in the footer on a build that didn't pass; and `/reconciliation/`, with its detail, its state and its link back to `/`. The marker checks are replaced by one that fails if a marker returns.
+
+### Second round
+
+The maintainer reviewed the build on localhost and decided these, which replace the first round where they differ.
+
+| # | Decision | As built |
+|---|---|---|
+| 1 | No subtitle question, and clear space under the header | The question line is gone, and the headline sits clear of the header. `verify-output` fails if it returns |
+| 2 | Methodology in the top bar, at the far right | In the header and the footer, both checked on every page |
+| 3 | A way back from the methodology and reconciliation pages | "Back to the dashboard", to `/`, near the top of each, and the site's name in the header links home. Checked on every page but the dashboard |
+| 4 | One clean "On this page" list | The top-level sections in order, with the Definitions items indented under it in compact columns that read down, not a three-column grid of mixed levels |
+| 5 | Notes as numbered badges only | Every card's notes are numbered badges at the right of its last row, beside Table and the as-of date, and each opens its words, then the note in full, in the shared tooltip. No pin is left in a chart, a legend or the grid's caption, so each card has one set of markers, and the chart and legend take the freed width. This supersedes the rule that essential caveats stay visible as text: `verify-output` and the browser checks now require each essential caveat's badge in view and its words in that badge's tooltip |
+| 6 | The exchange-linked legend row like every other | Swatch, "Exchange-linked, inside placed" in the normal text colour, and "$177.5M 19.38%" in the value column |
+| 7 | A two-column footer | Information on the left, actions on the right, each level with its line, stacked in that order at 390 |
+| 8 | Sticky header and filter stay on top | Each card is its own stacking context, so a bar's label can no longer draw over them while scrolling. A card with an open tooltip rises only above the cards after it |
+
+After this round, by `measure-page.mjs` on the same dataset: 359 words at 1440 and 353 at 390, under the ~450 target, and 3,142 px at 1440 and 5,310 px at 390.
+
+**Decided in building it:** pins inside charts (the waterfall's rows, the velocity chart's chains, the weekly bars' corner) went with the legend's, as the review asked for one set of markers per card. A note names its row or chain in words. The footer's status swaps outright rather than keeping the hidden text's space, as nothing follows it.
+
+### Third round
+
+The maintainer's third review, UI only. It replaces the first two rounds where they differ.
+
+| # | Decision | As built |
+|---|---|---|
+| 1 | "How we read this" as an icon | A "?" button named "How we read this" after the headline's last word, opening the reading in the shared tooltip on hover, focus or tap. At the 320 px reflow width it may take a line of its own |
+| 2 | Every tooltip consistent | One width (20rem, or the viewport less 2rem), padding, type size and line height. Every part of a panel is a paragraph with 0.5rem between them; a note's short words lead in bold and the note in full follows |
+| 3 | No "Across Tempo, Ethereum, Base, Solana." under the KPIs | The line under the row now says only what differs: the chains when one is missing, and the date when it isn't the page's. With nothing to add, there's no line |
+| 4 | Only "Data from {time} UTC." under the headline | On real data that's only old, nothing else: no "Last reconciled" and no out-of-date sentence there, no trust row at the top, and no stale line above any page's title. Sample, preview and a failed newer run keep their banner, trust row and stale note, unchanged |
+| 5 | A compact footer status | Passing: a green tick and "Reconciled". Old: an amber clock (`--meaning-caution`, 5.3:1) and "Last reconciled 5 Nov". The full sentence is the tooltip and both link to `/reconciliation/`. `verify-output` and the browser checks require the clock state, never "Reconciled", on old data, and the tick on a passing build. This supersedes the rule that state text never moves into a tooltip, for real data that's only old |
+| 6 | A concise `/reconciliation/` | Back arrow, title, then one status line ("Last run {time} UTC: every check passed.", with the stale or failed version), one sentence on what a run covers and doesn't check, the table under a short caption, and the checks as a two-column list of check and result |
+| 7 | An arrow back, and the title at the top | On `/methodology/` and `/reconciliation/`, an arrow link named "Back to the dashboard" above the title, both titles in the large page-title style, at the top under the header |
+| 8 | Card notes as footnotes (replacing the round's first item 8, badges by what they qualify) | A quiet superscript number in the body text's style by what each note qualifies: a whole-card note on the title, the rest on their legend row (placed, exchange venues), waterfall row (headline volume, issuer flows, clean large) or chain name (velocity). No tooltip. Numbers run in reading order within the card. A "Footnotes" toggle, a `<details>` at the right of the card's last row beside Table and the as-of date, closed by default, opens the numbered list below the card's content, by keyboard and with JavaScript off; a marker links to its footnote and opens the list. This replaces the round-two badge cluster, so each card has one set of markers and one list. It's the maintainer's choice, and supersedes the rule that essential caveats stay visible: `verify-output` and the browser checks require each essential caveat's marker in its card and its full text in that card's list, marker numbers that match the list, and the list closed at first and reachable by keyboard and with JavaScript off |
+
+After this round, by `measure-page.mjs` on the same dataset, footnotes closed: 345 words at 1440 and 339 at 390, and 3,165 px at 1440 and 5,284 px at 390, with 57,410 bytes gzipped.
+
+**Decided in building it:**
+- **The waterfall and velocity charts are now read by screen readers**, as lists, since a marker is a link and can't sit inside a graphic hidden from them. Their tables still have the same figures.
+- **Real data that was already old when built is treated like a passing page the reader's clock finds old.** It has the same clock state and nothing at the top, as the review moved only staleness. A failed newer run still counts as a failed check and keeps its trust row.
+- **Where the browser can style a details element's content** (`::details-content`), the toggle keeps its place on the last row and the list takes the full width below. A browser that can't puts the open list on a row of its own with the toggle at its right.
+
+### Fourth round
+
+Three items from the maintainer, UI only.
+
+| # | Decision | As built |
+|---|---|---|
+| 1 | The first supply card follows the chain filter | Choosing a chain left the card's heading, legend, figures and table at every chain's values. Each option now has its own supply card, as the other filtered cards do, so it works with JavaScript off. A chain's card has that chain's heading ("71.78% of Base supply stayed 14+ days in $1M-plus wallets."), legend, exchange-linked line, circulating, clean volume, active wallets, footnotes and tables, all from the dataset's per-chain fields as written. Every card keeps every chain's bar, the chosen one marked and the others muted, which was clearer than one bar alone: the bars still compare chains, and nothing moves when the filter changes. "All" is the card as it was. Named exchanges on a chain's card are that chain's holdings from `exchange_holdings`; a name from a listing, or one holding nothing, has no chain, so a chain's card says those "aren't split by chain" and leaves them to All. `verify-output` holds each panel's legend and table to the dataset's own rows, not the page's supply code, and refuses by name a chain's panel that shows every chain's figures |
+| 2 | Footnotes open like a drawer, and a marker doesn't jump the page | With a script, the "Footnotes" toggle and a marker open and close the list by animating its height with a light fade, 220 ms, ease-out, and at once under `prefers-reduced-motion`. A marker cancels the browser's jump to its anchor and leaves the address alone, opens the list where the page is, and scrolls only if the list would end below the viewport, by the least that brings its bottom into view, never aligning it to the top. Focus then moves to the footnote (`preventScroll`) and it lights briefly. Without a script the details element and the marker links work as before, jump included. A browser check clicks a marker on a card in view and requires the page not to move when the list fits, the least scroll when it doesn't, the list's bottom inside the viewport, the address unchanged and focus on the footnote |
+| 3 | The Table/Chart toggle stays put | It moved from the chart's bottom left to the table's top left when pressed. On every card it now sits at the top right of the title row, just left of the info icon, in the same box whether it says Table or Chart, with a fixed width so the label's change never moves the icon. It's straight after the title in the markup, so in reading and focus order too, and stays a native `<details>`, so it works by keyboard and without a script as before. The as-of date and Footnotes stay on the last row. The title's first line keeps clear of the two controls and later lines run under them, which adds 138 px at 390. A browser check holds the toggle's box to the pixel before and after opening and closing, on every card, and next to the info icon |
+
+After this round, by `measure-page.mjs` on the same dataset, filter on All and footnotes closed: 345 words at 1440 and 339 at 390, as before, and 3,168 px at 1440 and 5,422 px at 390, up from 3,165 and 5,284 as titles now share their first line with the toggle, with 65,478 bytes gzipped, up from 57,410 for the four chain copies of the supply card.
+
+The other cards were checked for the same bug in the browser under each option. The step line, waterfall and weekly cards already showed each option's own panel. The velocity chart and the chain grid compare chains, so each figure carries its chain's name and the chosen chain is highlighted; they were left as they are.
+
 ## Maintainer actions
 
 | When | Action |

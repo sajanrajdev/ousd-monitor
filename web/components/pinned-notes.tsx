@@ -1,70 +1,110 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import type { ChainName } from "@/lib/dataset/rows";
-import { StatusChip, type ChipKind } from "./status-chip";
 
 export type PinnedNote = {
   // What the note is, on `data-note`, so a check can find a caveat wherever it is pinned.
   kind: string;
-  // Names its chain or part in words, so it reads without the pin.
+  // Names its chain or part in words, so it reads without the chart.
   text: ReactNode;
   chain?: ChainName;
-  // Only when the note differs from its card's marker.
-  chip?: ChipKind;
+  // The caveat explained in full, after its words in the footnote. `interactive` when it, or the
+  // text, holds a link.
+  tip?: ReactNode;
+  interactive?: boolean;
+  // What the note qualifies: a legend row's segment, a waterfall row's step or a chain, where the
+  // card puts its marker. With none, it's about the whole card and its marker is on the title.
+  at?: string;
 };
 
-// A note's number is its place in the list, so it's worked out and never written by hand. Null if a
-// conditional note dropped out.
+// Notes about the whole card come first, as their markers are on the title, then the rest in their
+// own order, which is the order the card draws what they qualify: reading order.
+export function orderedNotes(notes: PinnedNote[]): PinnedNote[] {
+  return [...notes.filter((note) => !note.at), ...notes.filter((note) => note.at)];
+}
+
+// A note's number is its place in that order, so it's worked out and never written by hand. Null if
+// a conditional note dropped out.
 export function pinNumber(
   notes: PinnedNote[],
   kind: PinnedNote["kind"],
   chain?: ChainName,
 ): number | null {
-  const index = notes.findIndex((note) => note.kind === kind && note.chain === chain);
+  const index = orderedNotes(notes).findIndex((note) => note.kind === kind && note.chain === chain);
   return index === -1 ? null : index + 1;
 }
 
-export function PinMark({ number }: { number: number }) {
+// A footnote's id, from its card's prefix and its number.
+export function footnoteId(prefix: string, number: number): string {
+  return `${prefix}-fn-${number}`;
+}
+
+// Quiet superscript references, in the body text's own style, for what sits at `at`, or for the
+// whole card with no `at`, at the end of the row, label or title they qualify. Each links to its
+// footnote, which opens the card's list. No tooltip: the words are in the list. The maintainer's
+// call after the page reviews, over the earlier rule that a caveat's words stay in view.
+export function NoteMarks({
+  notes,
+  at,
+  prefix,
+}: {
+  notes: PinnedNote[];
+  at?: string;
+  prefix: string;
+}) {
+  const here = orderedNotes(notes).flatMap((note, index) =>
+    note.at === at ? [{ note, number: index + 1 }] : [],
+  );
+  if (here.length === 0) return null;
   return (
-    <span className="pin" aria-hidden="true">
-      {number}
-    </span>
+    <sup className="fn-refs" data-fn-refs data-at={at}>
+      {here.map(({ note, number }, index) => (
+        <Fragment key={`${note.kind}:${note.chain ?? ""}`}>
+          {index > 0 ? "," : null}
+          <a
+            href={`#${footnoteId(prefix, number)}`}
+            className="fn-ref"
+            aria-label={`Footnote ${number}`}
+            data-fn-ref={number}
+            data-note={note.kind}
+            data-chain={note.chain}
+          >
+            {number}
+          </a>
+        </Fragment>
+      ))}
+    </sup>
   );
 }
 
-// For inside a graphic: the graphic is hidden from assistive tech and out of the tab order, so a pin
-// is never a link or anything focusable. It takes the same notes as the list, so the two can't
-// disagree, and it draws nothing when its note isn't there.
-export function Pin({
-  notes,
-  kind,
-  chain,
-}: {
-  notes: PinnedNote[];
-  kind: PinnedNote["kind"];
-  chain?: ChainName;
-}) {
-  const number = pinNumber(notes, kind, chain);
-  return number === null ? null : <PinMark number={number} />;
-}
-
-// Always visible, and outside the graphic. Never in a details or noscript, which verify-output fails.
-export function PinnedNotes({ notes }: { notes: PinnedNote[] }) {
+// The card's footnotes, closed by default under a "Footnotes" toggle on its last row, and opened
+// below its content as a numbered list whose numbers match the markers. A details element, so it
+// opens by keyboard and with JavaScript off. Never in a noscript or a tooltip, which verify-output
+// fails.
+export function Footnotes({ notes, prefix }: { notes: PinnedNote[]; prefix: string }) {
   if (notes.length === 0) return null;
   return (
-    <ol className="pinned-notes" role="list" data-pinned-notes>
-      {notes.map((note, index) => (
-        <li key={`${note.kind}:${note.chain ?? ""}`} data-note={note.kind} data-chain={note.chain}>
-          <PinMark number={index + 1} />
-          <p>
-            {note.chip ? (
+    <details className="footnotes" data-footnotes>
+      <summary>Footnotes</summary>
+      <ol className="footnotes__list" aria-label="Footnotes">
+        {orderedNotes(notes).map((note, index) => (
+          <li
+            key={`${note.kind}:${note.chain ?? ""}`}
+            id={footnoteId(prefix, index + 1)}
+            // So a marker can move focus here without the page jumping to it.
+            tabIndex={-1}
+            data-note={note.kind}
+            data-chain={note.chain}
+          >
+            <span data-note-text>{note.text}</span>
+            {note.tip ? (
               <>
-                <StatusChip kind={note.chip} />{" "}
+                {" "}
+                <span data-note-full>{note.tip}</span>
               </>
             ) : null}
-            {note.text}
-          </p>
-        </li>
-      ))}
-    </ol>
+          </li>
+        ))}
+      </ol>
+    </details>
   );
 }

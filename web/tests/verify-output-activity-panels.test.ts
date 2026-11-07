@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { CARD_ANCHORS } from "@/lib/definitions";
 import { expectedFromDataset, verifyOutput } from "@/scripts/verify-output.mjs";
 import { at, plantFile, releaseGrade, tempDir } from "./dataset-helpers";
-import { plantedFlight, plantedRealMain } from "./planted-first-screen";
+import {
+  plantedFlight,
+  plantedFooter,
+  plantedRealMain,
+  plantedReconciliationMain,
+  PLANTED_HEADER,
+  plantedBack,
+} from "./planted-first-screen";
 
 // Each whole-page group is a file of its own, and so a worker of its own, as one worker running
 // them all ran out of memory in CI.
@@ -10,26 +17,31 @@ import { plantedFlight, plantedRealMain } from "./planted-first-screen";
 // times, which the heap of a file with hundreds of tests can't also hold. For the same reason they get
 // longer than the default, as a slower machine takes seconds over a test with several such pages.
 const WHOLE_PAGE_TIMEOUT_MS = 30_000;
-const LINE = "Independent. Not affiliated with Open Standard or Bridge.";
+// The release-grade copy, long past its 36 hours, so its detail page states its last run as old.
+const RECONCILED_TRUST =
+  "Last run 4 Nov 2026, 05:30 UTC: every check passed. Nothing newer has reached this page, so it may be out of date.";
 
 function site({ main, methodology }: { main: string; methodology: string }) {
   const dir = tempDir();
   plantFile(dir, "index.html", main);
-  plantFile(dir, "methodology/index.html", methodology);
+  plantFile(dir, "methodology/index.html", plantedBack(methodology));
+  plantFile(
+    dir,
+    "reconciliation/index.html",
+    methodology.replace("<main>Fine</main>", plantedReconciliationMain(RECONCILED_TRUST)),
+  );
   return dir;
 }
 
 describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
-  const STALE =
-    "Data from 4 Nov 2026, 06:00 UTC. Nothing newer has reached this page, so it may be out of date.";
   const TRUST =
     "Last reconciled 4 Nov 2026, 05:30 UTC. Nothing newer has reached this page, so it may be out of date.";
   const expected = expectedFromDataset(at(releaseGrade()));
-  const main = plantedRealMain(expected, STALE, TRUST);
+  const main = plantedRealMain(expected, TRUST);
   const page = (body: string) =>
     `<!doctype html><html data-dataset-kind="real" data-dataset-version="${expected.version}" data-freshness="stale"><head><title>Open USD Monitor</title></head><body>
-    <header><p>${LINE}</p></header><p data-stale-note>${STALE}</p>${plantedFlight([])}${body}
-    <footer><p>${LINE}</p><p>Not financial advice.</p></footer></body></html>`;
+    ${PLANTED_HEADER}${plantedFlight([])}${body}
+    ${plantedFooter(false, { fresh: null, stale: TRUST, short: "Last reconciled 4 Nov" })}</body></html>`;
   const check = (body: string) =>
     verifyOutput(site({ main: page(body), methodology: page("<main>Fine</main>") }), expected);
   const inPanel = (id: string, value: string, change: (panel: string) => string) => {
@@ -78,17 +90,26 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     expect(faults(figure, W, "base")).toEqual(
       expect.arrayContaining([expect.stringContaining("its rows aren't the dataset's")]),
     );
-    const pin = inPanel(W, "tempo", (html) =>
-      html.replace(/(<li data-step="clean_large"><span>S)(<span class="pin">\d+<\/span>)/, "$1"),
+    // A marker moved to the next row keeps its order, but points at another row.
+    const moved = inPanel(W, "tempo", (html) =>
+      html.replace(
+        /(<li data-step="clean_large"><span>S)(<sup class="fn-refs" data-fn-refs>.*?<\/sup>)(<\/span>.*?<li data-step="[^"]+"><span>S)/,
+        "$1$3$2",
+      ),
     );
-    expect(faults(pin, W, "tempo")).toEqual(
-      expect.arrayContaining([expect.stringContaining("its pins are")]),
+    expect(faults(moved, W, "tempo")).toContain(
+      `index.html: the tempo panel of #${W}: its hops marker isn't on clean_large`,
     );
+    // The row's marker gone, though its footnote stays.
     const lost = inPanel(W, "tempo", (html) =>
-      html.replace(/<li data-note="small-ticket">.*?<\/li>/, ""),
+      html.replace(
+        /(data-step="issuer_flows"><span>S)<sup class="fn-refs" data-fn-refs><a [^>]*data-note="small-ticket"[^>]*>\d+<\/a><\/sup>/,
+        "$1",
+      ),
     );
+    expect(lost).not.toBe(main);
     expect(faults(lost, W, "tempo")).toEqual(
-      expect.arrayContaining([expect.stringContaining("its notes are")]),
+      expect.arrayContaining([expect.stringContaining("small-ticket footnote hasn't one marker")]),
     );
     const full = inPanel(W, "all", (html) =>
       html.replace(/<p data-full-note="small-ticket">.*?<\/p>/, ""),
@@ -113,33 +134,41 @@ describe("the activity panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     expect(faults(bar, K, "solana")).toEqual(
       expect.arrayContaining([expect.stringContaining("its bars aren't the dataset's")]),
     );
-    const pins = inPanel(K, "solana", (html) =>
-      html.replace(/<div data-chart-pins>.*?<\/div>/, "<div data-chart-pins></div>"),
-    );
-    expect(faults(pins, K, "solana")).toEqual(
-      expect.arrayContaining([expect.stringContaining("its pins don't match its notes")]),
+    // Its notes are about the whole card, so markers moved into the chart fail.
+    const moved = inPanel(K, "solana", (html) => {
+      const marks = /<sup class="fn-refs" data-fn-refs>.*?<\/sup>/.exec(html)![0];
+      return html
+        .replace(marks, "")
+        .replace('<div class="chart-area" aria-hidden="true">', `$&<p>${marks}</p>`);
+    });
+    expect(faults(moved, K, "solana")).toContain(
+      `index.html: the solana panel of #${K}: its everyday-meaning marker isn't on the card's title`,
     );
     const note = inPanel(K, "solana", (html) => html.replace("nothing more.", "or so."));
     expect(faults(note, K, "solana")).toEqual(
       expect.arrayContaining([
-        expect.stringContaining("everyday-meaning note doesn't keep its words"),
+        expect.stringContaining("everyday-meaning footnote doesn't keep its words"),
       ]),
     );
     const marker = inPanel(K, "solana", (html) =>
       html.replace(
-        /(<li data-note="history"><span class="pin" aria-hidden="true">\d+<\/span><p>)/,
+        /(<li id="[^"]*" data-note="history">)/,
         '$1<span class="status-chip" data-kind="fact">F</span> ',
       ),
     );
-    expect(faults(marker, K, "solana")).toEqual(
-      expect.arrayContaining([expect.stringContaining("history note's marker isn't absent")]),
-    );
+    // A marker is gone from the page, so planting one back fails the page, wherever it is.
+    expect(check(marker)).toContain("index.html: a marker is back on the main page");
     const hidden = inPanel(K, "solana", (html) =>
       html.replace(
-        /<ol data-pinned-notes>/,
-        "<details><summary>More</summary><ol data-pinned-notes>",
+        /<details class="footnotes".*?<\/details>/,
+        "<details><summary>More</summary>$&</details>",
       ),
     );
-    expect(check(hidden).length).toBeGreaterThan(0);
+    expect(hidden).not.toBe(main);
+    expect(check(hidden)).toContain("index.html: footnotes inside a details, noscript or tooltip");
+    const opened = inPanel(K, "solana", (html) =>
+      html.replace('<details class="footnotes"', '<details open class="footnotes"'),
+    );
+    expect(check(opened)).toContain("index.html: a card's footnotes are open by default");
   });
 });

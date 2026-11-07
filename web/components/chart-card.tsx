@@ -3,9 +3,8 @@ import type { FrameWord } from "@/lib/dataset/state";
 import { formatAsOf, type AsOfRange } from "@/lib/format";
 import { DataToggle } from "./data-toggle";
 import { HairlineTable, type HairlineTableProps } from "./hairline-table";
-import { InfoPopover } from "./info-popover";
-import { PinnedNotes, type PinnedNote } from "./pinned-notes";
-import { StatusChip, type ChipKind } from "./status-chip";
+import { Footnotes, NoteMarks, type PinnedNote } from "./pinned-notes";
+import { InfoTip } from "./tooltip";
 
 // Every prop from `takeaway` to `children` is required, so a chart missing its source, time,
 // definition, summary or table doesn't compile. `frameWord` comes from the dataset's state and is
@@ -13,7 +12,6 @@ import { StatusChip, type ChipKind } from "./status-chip";
 // summary and table are server-rendered; Recharts is not.
 export type ChartCardProps = {
   takeaway: string;
-  chip: ChipKind;
   source: string;
   asOf: string | AsOfRange;
   definitionHref: string;
@@ -23,9 +21,11 @@ export type ChartCardProps = {
   children: ReactNode;
   // The card's anchor. Under a filter it goes on ChainPanels instead, as a panel repeats its card.
   id?: string;
-  // Short caveats, always visible, numbered to their pins in the chart.
+  // Caveats, as footnotes. A note about the whole card has its marker on the title; the view puts
+  // each other one's at what it qualifies, with NoteMarks and `footnotes`, the prefix of their ids.
   notes?: PinnedNote[];
-  // More for the popover, under the summary: the long takeaway or a note in full. Nothing essential.
+  footnotes?: string;
+  // More for the tooltip, under the summary: the long takeaway or a note in full. Nothing essential.
   detail?: ReactNode;
   // Further tables under the data toggle, after the chart's own.
   moreTables?: ReactNode;
@@ -35,7 +35,7 @@ export type ChartCardProps = {
   // the graphic is hidden from assistive tech, as the summary and table carry what it shows.
   plotIsContent?: boolean;
   // What goes beside the chart from the card's width that has room: its legend, and any figures. Read
-  // by assistive tech, as it's outside the hidden graphic. The notes then go under both.
+  // by assistive tech, as it's outside the hidden graphic.
   beside?: ReactNode;
   level?: 2 | 3;
 };
@@ -50,7 +50,6 @@ export type TableCardProps = Omit<
 type CardFrameProps = Pick<
   ChartCardProps,
   | "takeaway"
-  | "chip"
   | "source"
   | "asOf"
   | "definitionHref"
@@ -59,7 +58,7 @@ type CardFrameProps = Pick<
   | "id"
   | "detail"
   | "level"
-> & { children: ReactNode };
+> & { children: ReactNode; notes?: PinnedNote[]; footnotes?: string; toggle?: boolean };
 
 function cardAsOf(asOf: string | AsOfRange): { dateTime: string; text: string } {
   const dateTime = typeof asOf === "string" ? asOf : asOf.to;
@@ -71,10 +70,9 @@ function CardNote({ note }: { note: ReactNode }) {
 }
 
 // The parts every card has. The as-of time and frame word stay visible, so a cropped card still says
-// them. Source and definition sit in the popover, and in a plain note with JavaScript off.
+// them. A clock says the time is an as-of time, and the words are there for assistive tech. Source and definition sit in the tooltip, and in a plain note with JavaScript off.
 function CardFrame({
   takeaway,
-  chip,
   source,
   asOf,
   definitionHref,
@@ -84,8 +82,13 @@ function CardFrame({
   detail,
   level = 2,
   children,
+  notes = [],
+  footnotes,
+  toggle = false,
 }: CardFrameProps) {
   const headingId = useId();
+  const ownPrefix = useId();
+  const prefix = footnotes ?? ownPrefix;
   const Heading = level === 3 ? "h3" : "h2";
   const when = cardAsOf(asOf);
   return (
@@ -95,10 +98,10 @@ function CardFrame({
       aria-labelledby={headingId}
       data-frame={frameWord ?? undefined}
     >
-      <div className="chart-card__head explain-head">
+      <div className="chart-card__head explain-head" data-has-toggle={toggle ? "" : undefined}>
         <Heading id={headingId}>{takeaway}</Heading>
-        <StatusChip kind={chip} frameWord={frameWord} />
-        <InfoPopover label={`About: ${takeaway}`}>
+        <NoteMarks notes={notes} prefix={prefix} />
+        <InfoTip label={`About: ${takeaway}`}>
           <p>{summary}</p>
           {detail}
           <p>Source: {source}</p>
@@ -108,12 +111,24 @@ function CardFrame({
               Definition
             </a>
           </p>
-        </InfoPopover>
+        </InfoTip>
       </div>
       <p className="sr-only">{summary}</p>
       {children}
       <p className="chart-card__meta mt-3">
-        As of <time dateTime={when.dateTime}>{when.text}</time>
+        <svg
+          className="chart-card__clock"
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" />
+          <path d="M6 3v3h2.5" fill="none" stroke="currentColor" />
+        </svg>
+        <span className="sr-only">As of </span>
+        <time dateTime={when.dateTime}>{when.text}</time>
         {frameWord ? (
           <>
             {" "}
@@ -121,6 +136,7 @@ function CardFrame({
           </>
         ) : null}
       </p>
+      <Footnotes notes={notes} prefix={prefix} />
       <noscript>
         <p className="chart-card__source-note">
           Source: {source} ·{" "}
@@ -144,8 +160,14 @@ export function ChartCard({
   ...frame
 }: ChartCardProps) {
   return (
-    <CardFrame {...frame}>
-      <div className="chart-card__body" data-notes={(notes.length > 0 && !beside) || undefined}>
+    <CardFrame {...frame} notes={notes} toggle>
+      {/* First after the title, in reading and focus order, and drawn at the card's top right,
+          beside the info icon, where it stays whichever it shows. */}
+      <DataToggle label={frame.takeaway}>
+        <HairlineTable {...table} />
+        {moreTables}
+      </DataToggle>
+      <div className="chart-card__body">
         <div className="chart-card__plot" data-beside={beside ? "" : undefined}>
           {/* aria-hidden and nothing focusable inside; not inert, so hover tooltips still work. */}
           <div
@@ -164,27 +186,17 @@ export function ChartCard({
           ) : null}
           {beside ? <div className="chart-card__beside">{beside}</div> : null}
         </div>
-        <PinnedNotes notes={notes} />
       </div>
-      <DataToggle label={frame.takeaway}>
-        <HairlineTable {...table} />
-        {moreTables}
-      </DataToggle>
     </CardFrame>
   );
 }
 
 export function TableCard({ table, notes = [], note, ...frame }: TableCardProps) {
   return (
-    <CardFrame {...frame}>
+    <CardFrame {...frame} notes={notes}>
       <div className="mt-4">
         <HairlineTable {...table} />
       </div>
-      {notes.length > 0 ? (
-        <div className="mt-3">
-          <PinnedNotes notes={notes} />
-        </div>
-      ) : null}
       <CardNote note={note} />
     </CardFrame>
   );

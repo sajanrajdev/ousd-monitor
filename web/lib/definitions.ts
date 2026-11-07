@@ -26,7 +26,7 @@ export const DEFINITION_ANCHORS = [
   "fact-estimate-opinion",
 ] as const;
 
-// The main page's card anchors, so a finding's link and its card can't drift apart.
+// The main page's card anchors, so a link to a card and the card can't drift apart.
 export const CARD_ANCHORS = {
   supply: "where-supply-sits",
   series: "placed-vs-circulating",

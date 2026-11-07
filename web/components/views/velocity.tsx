@@ -1,13 +1,14 @@
+import { useId } from "react";
 import { ChartCard } from "@/components/chart-card";
-import { PinMark, type PinnedNote } from "@/components/pinned-notes";
-import { velocityChart, VELOCITY_MEASURES } from "@/lib/chain-views";
+import type { PinnedNote } from "@/components/pinned-notes";
+import { velocityChart } from "@/lib/chain-views";
 import { dayRange } from "@/lib/aggregate";
 import type { Definitions, DatasetState, KpiRow, ManifestWarning } from "@/lib/dataset";
 import { CARD_ANCHORS, CHAIN_NAMES, DAY_ZERO, definitionHref } from "@/lib/definitions";
 import { formatBps, formatCompact } from "@/lib/format";
 import { velocityHeading, velocityTakeaway } from "@/lib/takeaways/activity";
 import { JUMPY_NOTE, VELOCITY_NOTE, WALLETS_NOTE } from "@/lib/takeaways/caveats";
-import { measureStyle, VelocityChart } from "./velocity-chart";
+import { VelocityChart } from "./velocity-chart";
 
 export type VelocityViewProps = {
   kpis: KpiRow[];
@@ -16,30 +17,19 @@ export type VelocityViewProps = {
   state: DatasetState;
 };
 
-// The denominators note is about velocity against headline velocity, so its pin sits on the legend's
-// headline entry.
-function MeasureLegend({ pin }: { pin: number }) {
-  return (
-    <ul className="velocity-legend px-4 pt-4" data-velocity-legend>
-      {VELOCITY_MEASURES.map(({ key, label }) => (
-        <li key={key} data-legend-measure={key}>
-          <span className="velocity-legend__swatch" style={measureStyle(key)} />
-          {label === "Velocity" ? label : `${label} velocity`}
-          {key === "headline_velocity_bps" ? <PinMark number={pin} /> : null}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 // Velocity, everyday velocity and headline velocity for every chain. It compares chains, so a filter
 // option highlights its chain rather than dropping the others.
 export function VelocityCard({ kpis, definitions, warnings, state }: VelocityViewProps) {
   const chart = velocityChart(kpis, warnings);
-  const notes: PinnedNote[] = chart.notes.map(({ kind, chain, text }) => ({ kind, chain, text }));
-  const pins = Object.fromEntries(
-    chart.notes.flatMap((note, index) => (note.chain ? [[note.chain, index + 1]] : [])),
-  );
+  // A chain's note has its marker on the chain's name in the chart; the rest are about the card.
+  const footnotes = useId();
+  const notes: PinnedNote[] = chart.notes.map(({ kind, chain, text, tip }) => ({
+    kind,
+    chain,
+    text,
+    tip,
+    at: chart.max === null ? undefined : chain,
+  }));
   const dust = formatCompact(definitions.active_dust_base_units);
   const secondary = formatCompact(definitions.active_secondary_base_units);
   return (
@@ -66,13 +56,14 @@ export function VelocityCard({ kpis, definitions, warnings, state }: VelocityVie
           ))}
         </>
       }
-      chip="inferred"
       source="Chain data and public labels"
       asOf={dayRange(kpis.map((row) => row.day)) ?? DAY_ZERO}
       definitionHref={definitionHref("velocity")}
       frameWord={state.frameWord}
       summary="Velocity, everyday velocity and headline velocity per chain, on one scale from zero. The table has each beside the supply it divides by, and the wallets active in the last 7 days. Wallets, not people."
       notes={notes}
+      footnotes={footnotes}
+      plotIsContent
       table={{
         caption: `Velocity, denominators and active wallets, newest day per chain. ${WALLETS_NOTE}`,
         columns: [
@@ -97,12 +88,7 @@ export function VelocityCard({ kpis, definitions, warnings, state }: VelocityVie
         })),
       }}
     >
-      {chart.max === null ? null : (
-        <MeasureLegend
-          pin={chart.notes.findIndex((note) => note.kind === "velocity-denominators") + 1}
-        />
-      )}
-      <VelocityChart chart={chart} pins={pins} />
+      <VelocityChart chart={chart} notes={notes} footnotes={footnotes} />
     </ChartCard>
   );
 }

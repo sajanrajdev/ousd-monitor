@@ -5,7 +5,7 @@ import type { ChainName, ChainRoleRow, KpiRow, ManifestWarning } from "./dataset
 import { CHAIN_NAMES, REQUIRED_CHAINS } from "./definitions.ts";
 import { formatBps, formatCompact, UNKNOWN_TEXT } from "./format.ts";
 import { velocityWarnings } from "./takeaways/activity.ts";
-import { VELOCITY_PIN } from "./takeaways/caveats.ts";
+import { VELOCITY_NOTE, VELOCITY_PIN } from "./takeaways/caveats.ts";
 import { leadingSentence, orderedChains, type Measure } from "./takeaways/chain-roles.ts";
 
 export const VELOCITY_MEASURES = [
@@ -27,14 +27,15 @@ export type VelocityBar = {
 
 export type VelocityGroup = { chain: ChainName; name: string; bars: VelocityBar[] };
 
-export type VelocityNote = { kind: string; chain?: ChainName; text: string };
+// `tip` is the note in full, as a tooltip on its words.
+export type VelocityNote = { kind: string; chain?: ChainName; text: string; tip?: string };
 
 export type VelocityChart = {
   groups: VelocityGroup[];
   // Null when no chain has any figure, so there's nothing to draw.
   max: number | null;
   notes: VelocityNote[];
-  // The warnings in full, for the popover.
+  // The warnings in full, for the tooltip.
   fullWarnings: { chain: ChainName; text: string }[];
 };
 
@@ -77,8 +78,13 @@ export function velocityChart(kpis: KpiRow[], warnings: ManifestWarning[]): Velo
     groups,
     max,
     notes: [
-      ...ordered.map(({ chain, pin }) => ({ kind: "velocity-warning", chain, text: pin })),
-      { kind: "velocity-denominators", text: VELOCITY_PIN },
+      ...ordered.map(({ chain, pin, text }) => ({
+        kind: "velocity-warning",
+        chain,
+        text: pin,
+        tip: text,
+      })),
+      { kind: "velocity-denominators", text: VELOCITY_PIN, tip: VELOCITY_NOTE },
     ],
     fullWarnings: ordered.map(({ chain, text }) => ({ chain, text })),
   };

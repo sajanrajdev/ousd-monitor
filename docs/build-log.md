@@ -184,3 +184,33 @@ Units U1 to U5 of `docs/plans/2026-11-04-002-dashboard-refurbish-plan.md`. U6 wr
 - **Checks computed by the code they check, again.** U5's first `verify-output` checks for the velocity chart and the grid took their expected figures from the same functions the views render. They now work the figures out from the KPI and chain roles rows on their own, as review asked of U3 and U4 too.
 - **CI ran out of memory again.** With the activity and chain-card groups added, `verify-output-panels.test.ts` crashed its CI worker (SIGABRT, out of memory), as U3's tests had in `verify-output.test.ts`. Each whole-page group is now a file of its own, so a worker of its own. The heap growth behind it is still not understood.
 
+
+### Maintainer review after U5
+
+The changes are listed in [the plan's Maintainer review](plans/2026-11-04-002-dashboard-refurbish-plan.md#maintainer-review).
+
+- **A card clipped what floats out of it.** Sample and preview cards had `overflow: hidden` for their hatched edge, which would have cut any tooltip at the card's border. The edge now rounds its own corners, and nothing clips.
+- **A card is its own stacking context.** Its container query contains it, so an open tooltip painted under the next card. The card with an open tooltip now rises over the cards after it, and stays under the sticky header.
+- **A check counted hidden panels as moved.** The browser check that opening a tooltip moves nothing read each element's place on the page. A hidden filter panel has no box, so its place followed the scroll, and focus scrolling to a tooltip counted as 87 moves. Hidden elements are now left out.
+- **`verify-output` run from the repository root of a worktree** can't find the dataset schemas, as it resolves them from the working directory's parent. Run it from `web/`. This predates the review.
+
+### Maintainer review, third round
+
+The changes are listed in [the plan's Third round](plans/2026-11-04-002-dashboard-refurbish-plan.md#third-round).
+
+- **Badges by what they qualify, then footnotes.** With each badge moved onto the legend row or chart row it qualifies, opening a card's table took the chart, and so the exchange-floor badge, out of view, which the browser check on the exchange rows caught. The maintainer then replaced the badges with footnotes, whose list stays one tap away while the table shows.
+- **A footer check read the tooltip with its link.** The check that a non-passing footer never says "Reconciled" read the status's whole text, where the link and its tooltip ran together with no space, so the word boundary could miss a planted "Reconciled". It now reads each element's words apart, with the tooltips left out.
+- **The clock swap wasn't run on real data this round.** The real dataset was more than 36 hours old by the time of the run, so the build was already stale and had nothing to swap. The passing state was checked by `verify-output` on a build with its clock set to 5 Nov, and in screenshots.
+- **CI ran out of memory a third time.** With the footnote mutations added, `verify-output.test.ts` reached about 2,400 lines and its CI worker crashed (SIGABRT, heap out of memory), as U3's and U5's tests had. Its shared planted sites are now `tests/verify-output-fixture.ts`, and its tests three files, so three workers.
+
+### Maintainer review, fourth round
+
+The changes are listed in [the plan's Fourth round](plans/2026-11-04-002-dashboard-refurbish-plan.md#fourth-round).
+
+- **The supply card ignored the filter.** Round two made it one card with every chain's bar, and its legend, figures, footnotes and tables stayed the first option's, so choosing a chain changed only which bar was marked. `verify-output` passed it because it held that one card to All's figures. Each option now has its own card, and `verify-output` holds every panel's legend and table to the dataset's rows, read without the page's supply code, so a chain's panel showing every chain's figures fails by name.
+- **A named exchange on a chain's card.** The named exchange rows were across chains. A chain's card now lists only what `exchange_holdings` gives for that chain. Listings name no chain, so the name checks now allow each name once per row the page writes, not once in all.
+- **A marker under the sticky header.** The first browser check of the footnote marker clicked one hidden under the sticky header and filter, so Playwright scrolled the page to reach it and the check read that as the marker's jump. The check now clicks only a marker that a hit test finds uncovered.
+- **Scroll anchoring moved the page when a list opened.** A card's visually hidden summary is an absolute box with its static place after the card's content, so it moved down when the footnotes opened, and Chrome, holding the page still by it, scrolled the page by the list's height. That was part of the jump the maintainer saw, and it threw off the drawer's own measurement at 320 and 390. Visually hidden text is now never a scroll anchor.
+- **A muted bar faded its words.** Muting a whole bar faded the "Circulating" bracket and the direct labels with it, which the contrast check caught. Only the bar's fill fades now, and a muted bar's direct labels are hidden, as the legend has the chosen chain's.
+- **CI ran out of memory a fourth time.** With a supply card per filter option, the planted main page in `verify-output-panels.test.ts` grew, and its CI worker crashed (SIGABRT, heap out of memory) on 26bad6b. Its setup is now `tests/verify-output-panels-fixture.ts`, and its tests two files: the bars and legend, and the figures, footnotes, tables and step lines.
+- **A toggle that seemed to move.** Measuring the moved Table toggle on screen, it seemed to shift by up to 56 px when pressed. The card screenshot taken between the two measurements had scrolled the page. Measured against its card, or with nothing in between, the toggle doesn't move, and the browser check now measures it that way.

@@ -8,20 +8,23 @@ import { loadDatasetFiles, locateDataset } from "../lib/dataset/load.ts";
 import { deriveState } from "../lib/dataset/state.ts";
 import { allChainKpis, newestByChain } from "../lib/aggregate.ts";
 import { chainOptions } from "../lib/chain-scope.ts";
-import { CARD_ANCHORS, CHAIN_NAMES, TOKEN_CONTRACTS } from "../lib/definitions.ts";
-import { exchangeRows } from "../lib/exchange-rows.ts";
-import { formatBps, formatCompact, formatExact, UNKNOWN_TEXT } from "../lib/format.ts";
+import { CARD_ANCHORS, CHAIN_NAMES, REQUIRED_CHAINS, TOKEN_CONTRACTS } from "../lib/definitions.ts";
+import { chainExchangeRows, exchangeRows } from "../lib/exchange-rows.ts";
 import {
-  activityChains,
+  formatBps,
+  formatCompact,
+  formatExact,
+  formatFloorDollars,
+  UNKNOWN_TEXT,
+} from "../lib/format.ts";
+import {
   day0Scope,
   historyLabel,
   stepFigure,
   velocityHeading,
   velocityWarnings,
   waterfall,
-  waterfallHeading,
   weeklyEveryday,
-  weeklyHeading,
 } from "../lib/takeaways/activity.ts";
 import {
   PERIOD_COLUMNS,
@@ -33,9 +36,8 @@ import {
 import {
   day0Pin,
   everydayNote,
-  EXCHANGE_FLOOR_LINK,
-  EXCHANGE_FLOOR_NOTE,
-  exchangeCoverageNote,
+  EXCHANGE_FLOOR_PIN,
+  exchangeCoveragePin,
   historyPin,
   HOPS_NOTE,
   issuerUnlabeledNote,
@@ -58,9 +60,8 @@ import {
   seriesPanel,
   supplyPanel,
 } from "../lib/supply-segments.ts";
-import { chainRolesHeading } from "../lib/takeaways/chain-roles.ts";
 import { velocityChart } from "../lib/chain-views.ts";
-import { exchangeLinkedBands, journeyHeading } from "../lib/takeaways/journey.ts";
+import { exchangeLinkedBands } from "../lib/takeaways/journey.ts";
 import { verdictSentence, verdictTextVisible } from "../lib/verdict.ts";
 
 const INDEPENDENCE_LINE = "Independent. Not affiliated with Open Standard or Bridge.";
@@ -100,6 +101,8 @@ const OUT_OF_VIEW = [
   "style",
   "[hidden]",
   ".sr-only",
+  // A tooltip's panel shows only on hover or focus, so nothing in it is in view.
+  ".tip__panel",
   '[style*="display:none"]',
   '[style*="display: none"]',
   '[style*="visibility:hidden"]',
@@ -176,16 +179,116 @@ function escapedNameMatcher(name) {
   return new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`);
 }
 
+// The header keeps only the name, so the independence line is the footer's, in view with nothing
+// opened, on every page.
 function checkEveryPage(page, document, problems) {
-  const header = viewText(document.querySelector("header"));
   const footer = viewText(document.querySelector("footer"));
-  if (!header.includes(INDEPENDENCE_LINE)) {
-    problems.push(`${page}: no independence line in the header`);
-  }
   if (!footer.includes(INDEPENDENCE_LINE)) {
     problems.push(`${page}: no independence line in the footer`);
   }
   if (!/not financial advice/i.test(footer)) problems.push(`${page}: no "not financial advice"`);
+  if (!document.querySelector('footer a[href^="/methodology"]')) {
+    problems.push(`${page}: no methodology link in the footer`);
+  }
+  if (!document.querySelector('header a[href^="/methodology"]')) {
+    problems.push(`${page}: no methodology link in the header`);
+  }
+  if (!document.querySelector('header a[href="/"]')) {
+    problems.push(`${page}: the site's name in the header doesn't link to /`);
+  }
+  // Every page but the dashboard has a clear way back to it, above its title.
+  if (page !== "index.html" && !/^(404|_not-found)/.test(page))
+    checkBackLink(page, document, problems);
+}
+
+// An arrow named "Back to the dashboard" for assistive tech, before the page's title.
+function checkBackLink(page, document, problems) {
+  const back = [...document.querySelectorAll('main a[href="/"]')].find(
+    (link) =>
+      (link.getAttribute("aria-label") ?? viewText(link)).trim() === "Back to the dashboard" &&
+      inView(link),
+  );
+  const title = document.querySelector("main h1");
+  if (!back) {
+    problems.push(`${page}: no "Back to the dashboard" link to /`);
+  } else if (
+    !title ||
+    !(
+      back.compareDocumentPosition(title) &
+      back.ownerDocument.defaultView.Node.DOCUMENT_POSITION_FOLLOWING
+    )
+  ) {
+    problems.push(`${page}: the way back isn't above the page's title`);
+  }
+}
+
+const RECONCILED = /\bReconciled\b/;
+
+// The tooltip a footer status link describes.
+function footerTip(document, element) {
+  const link = element?.querySelector('a[href="/reconciliation/"]');
+  return link && document.getElementById(link.getAttribute("aria-describedby") ?? "");
+}
+
+// "Reconciled", in green with a tick, is for a build that passed. On any other it's nowhere in the
+// footer, seen or swapped out, so a reader's clock can't reveal it either. Real data that's old, or
+// that a reader's clock finds old, has an amber clock and "Last reconciled" with the day, and the
+// dated sentence as its tooltip. Each links to the detail page.
+function checkFooterStatus(page, document, expected, problems) {
+  const status = document.querySelector("footer [data-footer-status]");
+  if (!status) {
+    problems.push(`${page}: no reconciliation status in the footer`);
+    return;
+  }
+  const marked = status.querySelectorAll("[data-reconciled]");
+  // The words in the footer itself, each apart, with the tooltips left out.
+  const own = status.cloneNode(true);
+  for (const panel of own.querySelectorAll(".tip__panel")) panel.remove();
+  const words = [...own.querySelectorAll("*")].map((element) => element.textContent).join(" ");
+  if (!expected.passing && (marked.length > 0 || RECONCILED.test(words))) {
+    problems.push(`${page}: the footer says "Reconciled" on a build that didn't pass`);
+  }
+  if (expected.kind !== "real") {
+    if (!viewText(status).includes(expected.trustLine.stale)) {
+      problems.push(`${page}: the footer's status doesn't say "${expected.trustLine.stale}"`);
+    }
+  } else {
+    const stale = status.querySelectorAll("[data-stale-status]");
+    const clock = stale[0];
+    if (stale.length !== 1 || !clock.closest(".freshness-text__stale")) {
+      problems.push(`${page}: the footer has no clock state to show once the data is old`);
+    } else {
+      if (
+        clock.querySelector(".tip__trigger")?.textContent.trim() !== expected.trustLine.short ||
+        RECONCILED.test(clock.textContent) ||
+        !clock.querySelector("svg circle")
+      ) {
+        problems.push(
+          `${page}: the footer's clock state isn't a clock and "${expected.trustLine.short}"`,
+        );
+      }
+      if (!footerTip(document, clock)?.textContent.includes(expected.trustLine.stale)) {
+        problems.push(`${page}: the footer's clock state has no tooltip with the dated sentence`);
+      }
+      if (!expected.passing && !inView(clock)) {
+        problems.push(`${page}: the footer's clock state isn't in view on old data`);
+      }
+    }
+  }
+  if (expected.passing) {
+    const word = marked[0];
+    if (marked.length !== 1 || !word.closest(".freshness-text__fresh")) {
+      problems.push(`${page}: the footer's "Reconciled" isn't its fresh text, once`);
+    } else if (viewText(word).trim() !== "Reconciled" || !word.querySelector("svg path")) {
+      problems.push(`${page}: the footer's "Reconciled" lost its tick or its word`);
+    }
+    if (!footerTip(document, word)?.textContent.includes(expected.trustLine.fresh)) {
+      problems.push(`${page}: the footer's "Reconciled" has no tooltip with the dated sentence`);
+    }
+  }
+  if (!status.querySelector('a[href="/reconciliation/"]')) {
+    problems.push(`${page}: the footer's status doesn't link to the reconciliation page`);
+  }
 }
 
 function checkStateOnPage(page, document, expected, problems) {
@@ -219,7 +322,9 @@ function checkStateOnPage(page, document, expected, problems) {
   }
 }
 
-// Every page says when its data is out of date. The note is there while fresh too, for the clock.
+// Every page says when its data is out of date. On sample or preview data, or after a failed run, a
+// note at the top does, there while fresh too, for the clock. On real data that's only old, the
+// footer's clock state does, and nothing sits between the header and the page.
 function checkFreshnessOnPage(page, document, expected, problems) {
   const shown = document.documentElement.dataset.freshness;
   if (shown !== "fresh" && shown !== "stale") {
@@ -227,20 +332,36 @@ function checkFreshnessOnPage(page, document, expected, problems) {
   } else if (expected.freshness === "stale" && shown !== "stale") {
     problems.push(`${page}: page root says fresh, dataset is stale`);
   }
-  const note = viewText(document.querySelector("[data-stale-note]"));
-  if (!note.includes(expected.asOfLine.stale)) problems.push(`${page}: no stale note`);
+  const found = document.querySelector("[data-stale-note]");
+  if (expected.staleInFooter) {
+    if (found) problems.push(`${page}: a stale note is at the top of real data`);
+    return;
+  }
+  if (!viewText(found).includes(expected.asOfLine.stale)) problems.push(`${page}: no stale note`);
 }
 
+// Real data that's only old has no trust row at the top, and its as-of line says when the data is
+// from and nothing more: the footer says it's old. Sample, preview and a failed run keep the row.
 function checkMainFreshness(page, document, expected, problems) {
   const shownFresh = document.documentElement.dataset.freshness === "fresh";
   const verdict = viewText(document.querySelector('[data-section="verdict"]'));
-  const trust = viewText(document.querySelector('[data-section="trust-strip"]'));
-  if (!verdict.includes(expected.asOfLine.stale)) {
+  const strip = document.querySelector('[data-section="trust-strip"]');
+  const trust = viewText(strip);
+  if (!verdict.includes(expected.headStale)) {
     problems.push(`${page}: the verdict block has no stale text`);
   }
   if (shownFresh && expected.asOfLine.fresh && !verdict.includes(expected.asOfLine.fresh)) {
     problems.push(`${page}: the verdict block has no fresh text`);
   }
+  if (expected.staleInFooter) {
+    if (strip) problems.push(`${page}: real data that's only old has the trust row at the top`);
+    if (/Last reconciled|out of date/.test(verdict)) {
+      problems.push(`${page}: the line under the headline says more than when the data is from`);
+    }
+    return;
+  }
+  if (!strip)
+    problems.push(`${page}: the trust row isn't at the top on sample, preview or a failed run`);
   // On sample or preview data the strip's own check, below, covers both.
   if (expected.frameWord) return;
   if (!trust.includes(expected.trustLine.stale)) {
@@ -251,14 +372,20 @@ function checkMainFreshness(page, document, expected, problems) {
   }
 }
 
-// Only the verdict's chip. The words "Our reading" are fine in an accordion's heading, or in the
-// methodology page's table of what each chip means.
+// The page has no markers. A sample or preview still says, in plain words in view beside the
+// headline, that it isn't a finding.
 function checkMainFrame(page, document, expected, problems) {
+  if (document.querySelector("main .status-chip, main [data-section='marker-legend']")) {
+    problems.push(`${page}: a marker is back on the main page`);
+  }
+  const frame = document.querySelector('[data-section="verdict"] [data-verdict-frame]');
   const word = expected.frameWord;
-  if (!word) return;
-  const chip = document.querySelector('[data-section="verdict"] .status-chip[data-kind="opinion"]');
-  if (viewText(chip).trim() !== `${word}, not a finding`) {
-    problems.push(`${page}: the verdict chip doesn't say "${word}, not a finding"`);
+  if (!word) {
+    if (frame) problems.push(`${page}: real data says it isn't a finding`);
+    return;
+  }
+  if (viewText(frame).trim() !== `${word}, not a finding.`) {
+    problems.push(`${page}: the verdict doesn't say "${word}, not a finding." in view`);
   }
   if (!viewText(document.querySelector('[data-section="kpi-row"]')).includes(word)) {
     problems.push(`${page}: no "${word}" in the KPI row`);
@@ -270,10 +397,8 @@ function checkMainFrame(page, document, expected, problems) {
   }
 }
 
-const FINDINGS = 4;
 const KPIS = 4;
-const LEGEND_WORDS = ["Fact", "Inferred", "Estimate"];
-const TRUST_CAVEAT = "It doesn't verify placed share or velocity.";
+const TRUST_CAVEAT = "it doesn't check placed share or velocity.";
 
 const definitionLink = (block) =>
   [...(block?.querySelectorAll("a[href]") ?? [])].some((link) =>
@@ -281,28 +406,34 @@ const definitionLink = (block) =>
   );
 
 // The headline is the verdict's own sentence. verdict.text is verbatim, in view unless the dataset
-// allows the popover, and everything else moved there keeps its words.
+// allows the tooltip, and everything else moved there keeps its words.
 function checkHeadline(page, document, { verdict }, problems) {
   const block = document.querySelector('[data-section="verdict"]');
   if (viewText(block?.querySelector("h1")).trim() !== verdict.sentence) {
     problems.push(`${page}: the headline isn't the verdict's sentence`);
   }
-  if (!viewText(block?.querySelector('[data-section="question"]')).trim()) {
-    problems.push(`${page}: no question line in view`);
+  // The maintainer's second review removed the question line, to give the header room.
+  if (block?.querySelector('[data-section="question"]')) {
+    problems.push(`${page}: the question line is back above the headline`);
   }
-  const panel = block?.querySelector(".info-popover__panel");
+  // A "?" beside the headline, named "How we read this", opens how we read it.
+  const help = block?.querySelector(".verdict-block__head > .tip > .tip__icon--help");
+  if (help?.getAttribute("aria-label") !== "How we read this" || viewText(help).trim()) {
+    problems.push(`${page}: the headline has no "?" button named "How we read this"`);
+  }
+  const panel = block?.querySelector(".tip__panel");
   if (verdict.textVisible) {
     if (!viewText(block).includes(verdict.text)) {
       problems.push(`${page}: verdict.text isn't in view on this dataset`);
     }
   } else if (!panel?.textContent.includes(verdict.text)) {
-    problems.push(`${page}: verdict.text is neither in view nor in its popover`);
+    problems.push(`${page}: verdict.text is neither in view nor in its tooltip`);
   }
   if (verdict.items.some((item) => !panel?.textContent.includes(item))) {
-    problems.push(`${page}: the headline's popover has lost a verdict item`);
+    problems.push(`${page}: the headline's tooltip has lost a verdict item`);
   }
   if (!definitionLink(panel))
-    problems.push(`${page}: the headline's popover has no definition link`);
+    problems.push(`${page}: the headline's tooltip has no definition link`);
 }
 
 function checkKpiRow(page, document, expected, problems) {
@@ -318,111 +449,147 @@ function checkKpiRow(page, document, expected, problems) {
     } else if (value !== expected.kpiValues[index]) {
       problems.push(`${page}: ${label} isn't the dataset's figure`);
     }
-    if (!viewText(cell.querySelector(".status-chip")).trim()) {
-      problems.push(`${page}: a KPI has no marker in view`);
-    }
-    const panel = cell.querySelector(".info-popover__panel");
+    const panel = cell.querySelector(".tip__panel");
     if (!panel?.querySelector("[data-kpi-note]")?.textContent.trim()) {
-      problems.push(`${page}: a KPI's popover has no note`);
+      problems.push(`${page}: a KPI's tooltip has no note`);
     }
-    if (!definitionLink(panel)) problems.push(`${page}: a KPI's popover has no definition link`);
+    if (!definitionLink(panel)) problems.push(`${page}: a KPI's tooltip has no definition link`);
     if (!definitionLink(cell.querySelector("noscript"))) {
       problems.push(`${page}: a KPI's noscript note has no definition link`);
     }
   });
-  if (!viewText(row).includes(expected.kpiScope)) {
+  // The row names its chains only when one is missing.
+  if (expected.kpiScope && !viewText(row).includes(expected.kpiScope)) {
     problems.push(`${page}: the KPI row doesn't say which chains it covers`);
+  } else if (!expected.kpiScope && viewText(row).includes("Across ")) {
+    problems.push(`${page}: the KPI row lists every chain under it`);
   }
 }
 
-// A finding is its chart's heading with its marker, on a link that lands on that chart, and it says
-// what the dataset says. A finding that only agrees with its card could be wrong in both places.
-function checkFindings(page, document, expected, problems) {
-  const word = expected.frameWord;
-  const links = [...document.querySelectorAll('[data-section="findings"] a[data-finding-link]')];
-  if (links.length !== FINDINGS) problems.push(`${page}: there are ${links.length} findings`);
-  for (const link of links) {
-    const href = link.getAttribute("href") ?? "";
-    const text = viewText(link.querySelector(".finding__text")).trim();
-    const chip = link.querySelector(".status-chip");
-    if (!text) problems.push(`${page}: a finding has no text in view`);
-    if (!viewText(chip).trim()) problems.push(`${page}: a finding has no marker in view`);
-    if (word && !viewText(link).includes(word)) {
-      problems.push(`${page}: a finding has no "${word}"`);
-    }
-    const target = href.startsWith("#") ? document.getElementById(href.slice(1)) : null;
-    if (!target) {
-      problems.push(`${page}: a finding links to ${href}, which isn't on the page`);
-      continue;
-    }
-    const head = target.querySelector(".chart-card__head");
-    if (head?.querySelector("h2, h3")?.textContent.trim() !== text) {
-      problems.push(`${page}: a finding differs from the heading of ${href}`);
-    }
-    if (head?.querySelector(".status-chip")?.dataset.kind !== chip?.dataset.kind) {
-      problems.push(`${page}: a finding's marker differs from ${href}`);
-    }
-  }
-  for (const { id, text } of expected.findings) {
-    const link = links.find((candidate) => candidate.getAttribute("href") === `#${id}`);
-    if (viewText(link?.querySelector(".finding__text")).trim() !== text) {
-      problems.push(`${page}: the finding for #${id} isn't the dataset's heading`);
-    }
-  }
-}
-
-function checkLegend(page, document, problems) {
-  const legend = document.querySelector('[data-section="marker-legend"]');
-  if (LEGEND_WORDS.some((word) => !viewText(legend).includes(word))) {
-    problems.push(`${page}: the marker legend isn't in view`);
-  }
-  if (!definitionLink(legend?.querySelector(".info-popover__panel"))) {
-    problems.push(`${page}: the marker legend's popover has no definition link`);
-  }
-}
-
-function checkTrustDetail(page, document, problems) {
-  const details = document.querySelectorAll('[data-section="trust-strip"] details');
-  if (details.length !== 1) {
-    problems.push(`${page}: the trust row has ${details.length} disclosures, not one`);
+// The trust row's disclosure is its own page now, with a way back to the dashboard.
+function checkReconciliationPage(page, document, expected, problems) {
+  const detail = document.querySelectorAll('main [data-section="reconciliation"]');
+  if (detail.length !== 1) {
+    problems.push(`${page}: there are ${detail.length} reconciliation details, not one`);
     return;
   }
-  if (!details[0].textContent.includes(TRUST_CAVEAT)) {
-    problems.push(`${page}: the trust row's disclosure has lost what it says it doesn't verify`);
+  const text = viewText(detail[0]);
+  if (!text.includes(TRUST_CAVEAT)) {
+    problems.push(`${page}: the detail has lost what it says it doesn't verify`);
   }
-  if (!definitionLink(details[0])) {
-    problems.push(`${page}: the trust row's disclosure has no definition link`);
+  const line = detail[0].querySelector("[data-run-line]");
+  if (!line?.textContent.includes(expected.runLine.stale)) {
+    problems.push(`${page}: the detail doesn't state the reconciliation's state`);
+  }
+  if (detail[0].querySelectorAll("[data-check-list] > div").length !== expected.checkCount) {
+    problems.push(`${page}: the detail doesn't list every check with its result`);
+  }
+  if (!definitionLink(detail[0])) problems.push(`${page}: the detail has no definition link`);
+  if (!detail[0].querySelector("table") && !text.includes(UNKNOWN_TEXT)) {
+    problems.push(`${page}: the detail has neither its table nor "${UNKNOWN_TEXT}"`);
+  }
+  checkBackLink(page, document, problems);
+}
+
+// Explanations float: a details element on the main page is a data toggle or a card's footnotes,
+// which the maintainer chose to open inside the card, so no popover or accordion can push the page
+// down again.
+function checkNoPushDown(page, document, problems) {
+  for (const details of document.querySelectorAll("main details")) {
+    if (
+      !details.classList.contains("data-toggle") &&
+      !details.matches(".chart-card > .footnotes")
+    ) {
+      problems.push(`${page}: an explanation pushes the page down, in a details element`);
+    }
+  }
+}
+
+const FOCUSABLE = "a[href], button, input, select, textarea, [tabindex]";
+
+// Every tooltip is reached by keyboard: its trigger is a native button or link, with a name, and
+// points at its panel, which comes straight after it, so Tab moves from one into the other. A panel
+// with anything focusable is a disclosure, with aria-expanded, as role="tooltip" can't hold a link.
+function checkTooltips(page, document, problems) {
+  for (const tip of document.querySelectorAll("[data-tip]")) {
+    const trigger = tip.querySelector(":scope > .tip__trigger");
+    const panel = tip.querySelector(":scope > .tip__panel");
+    const name = trigger?.getAttribute("aria-label")?.trim() || trigger?.textContent.trim();
+    const native =
+      trigger?.tagName === "BUTTON" || (trigger?.tagName === "A" && trigger.hasAttribute("href"));
+    if (!trigger || !native || trigger.getAttribute("tabindex") === "-1" || !name) {
+      problems.push(`${page}: a tooltip's trigger can't be reached by keyboard, or has no name`);
+      continue;
+    }
+    if (!panel?.id || trigger.nextElementSibling !== panel) {
+      problems.push(`${page}: a tooltip's panel doesn't follow its trigger`);
+      continue;
+    }
+    const interactive = panel.querySelector(FOCUSABLE) !== null;
+    if (interactive) {
+      if (
+        trigger.getAttribute("aria-controls") !== panel.id ||
+        !trigger.hasAttribute("aria-expanded") ||
+        panel.getAttribute("role") === "tooltip"
+      ) {
+        problems.push(`${page}: a tooltip with a link isn't a disclosure`);
+      }
+    } else if (
+      trigger.getAttribute("aria-describedby") !== panel.id &&
+      trigger.getAttribute("aria-controls") !== panel.id
+    ) {
+      problems.push(`${page}: a tooltip's trigger doesn't point at its panel`);
+    } else if (
+      trigger.getAttribute("aria-describedby") === panel.id &&
+      panel.getAttribute("role") !== "tooltip"
+    ) {
+      problems.push(`${page}: a tooltip describing its trigger has no role="tooltip"`);
+    }
   }
 }
 
 const PIN_NUMBER = /^\d+$/;
 
-// A note's own words. Its pin is a number outside them, and anything else in a pin still counts.
-function noteWords(note) {
-  if (!inView(note)) return "";
-  const copy = note.cloneNode(true);
-  for (const pin of copy.querySelectorAll(".pin")) {
-    if (PIN_NUMBER.test(pin.textContent.trim())) pin.remove();
-  }
-  // A marker says what kind of claim a note is, and isn't one of its words. Panels check it apart.
-  // Only a real marker, with its kind, at the head of the note's words is left out.
-  const lead = copy.querySelector(":scope > p > .status-chip[data-kind]:first-child");
-  if (lead) lead.remove();
-  return viewText(copy, "");
+// A card's footnotes: a details element whose summary says "Footnotes", so it opens by keyboard and
+// with JavaScript off, holding a numbered list. Null if it's missing or not like that.
+function footnoteList(card) {
+  const details = card.querySelector(":scope > [data-footnotes]");
+  if (details?.tagName !== "DETAILS") return null;
+  if (plainText(details.querySelector(":scope > summary")) !== "Footnotes") return null;
+  return details.querySelector(":scope > ol");
 }
 
-// The caveats needed to read a number, wherever a unit pins them. Each required instance is in view
-// with nothing opened and keeps its words, read whole so a date or a link can't split a sentence.
+// A footnote's words, if a marker in view in its card links to it: the maintainer's call after the
+// page reviews, over the rule that a caveat's words stay in view.
+function footnoteWords(item) {
+  const card = item.closest(".chart-card");
+  if (!card || footnoteList(card) !== item.parentElement || !item.id) return "";
+  const marked = [...card.querySelectorAll(`a[data-fn-ref][href="#${item.id}"]`)].some(
+    (marker) => inView(marker) && PIN_NUMBER.test(plainText(marker)),
+  );
+  return marked ? item.textContent : "";
+}
+
+// The caveats needed to read a number, wherever a unit pins them. Each required instance has a
+// marker in view in its card and its words in that card's footnotes, read whole so a date or a link
+// can't split a sentence.
 function checkEssentialNotes(page, document, expected, problems) {
   for (const { kind, chain, text, exact } of expected.essentialNotes) {
-    const selector = `[data-note="${kind}"]${chain ? `[data-chain="${chain}"]` : ""}`;
-    const shown = [...document.querySelectorAll(selector)]
-      .map((note) => noteWords(note).replace(/\s+/g, " "))
+    const selector = `.footnotes__list > li[data-note="${kind}"]${chain ? `[data-chain="${chain}"]` : ""}`;
+    const items = [...document.querySelectorAll(selector)];
+    const shown = items
+      .map((item) => footnoteWords(item).replace(/\s+/g, " "))
       .filter((words) => words.trim());
+    const said = items.map((item) =>
+      (item.querySelector("[data-note-text]")?.textContent ?? "").replace(/\s+/g, " ").trim(),
+    );
     const name = `the ${kind} note${chain ? ` for ${chain}` : ""}`;
     if (shown.length === 0) {
-      problems.push(`${page}: ${name} isn't in view`);
-    } else if (!shown.some((words) => (exact ? words.trim() === text : words.includes(text)))) {
+      problems.push(`${page}: ${name} has no marker in view and footnote with its words`);
+    } else if (
+      !said.some((words) => (exact ? words === text : words.includes(text))) ||
+      !shown.some((words) => words.includes(text))
+    ) {
       problems.push(`${page}: ${name} doesn't say "${text}"`);
     }
   }
@@ -461,8 +628,8 @@ function drawsOnlyInBrowser(area) {
   return !area.textContent.trim() || area.querySelector(".recharts-responsive-container");
 }
 
-// A card's takeaway, marker and time stay in view. Its source and definition are one tap away in the
-// popover, and are in a plain note with JavaScript off, which the page's parser reads as elements
+// A card's takeaway and time stay in view. Its source and definition are one tap away in the
+// tooltip, and are in a plain note with JavaScript off, which the page's parser reads as elements
 // here. The table is required by type, and this says it reached the page.
 function checkCards(page, document, problems) {
   for (const card of document.querySelectorAll(".chart-card")) {
@@ -470,17 +637,15 @@ function checkCards(page, document, problems) {
     if (!headings.some((heading) => viewText(heading).trim())) {
       problems.push(`${page}: a card has no visible takeaway`);
     }
-    const chips = [...card.querySelectorAll(".chart-card__head .status-chip")];
-    if (!chips.some((chip) => viewText(chip).trim())) {
-      problems.push(`${page}: a card has no visible marker`);
-    }
     const time = visibleMeta(card)?.querySelector("time[datetime]");
     if (!time?.getAttribute("datetime").trim() || !viewText(time).trim()) {
       problems.push(`${page}: a card has no visible as-of time`);
     }
-    const panel = hasSourceAndDefinition(card.querySelector(".info-popover__panel"));
-    if (!panel.source) problems.push(`${page}: a card's popover has no source`);
-    if (!panel.definition) problems.push(`${page}: a card's popover has no definition link`);
+    const panel = hasSourceAndDefinition(
+      card.querySelector(".chart-card__head > .tip--info > .tip__panel"),
+    );
+    if (!panel.source) problems.push(`${page}: a card's tooltip has no source`);
+    if (!panel.definition) problems.push(`${page}: a card's tooltip has no definition link`);
     const notes = [...card.querySelectorAll("noscript")].map(hasSourceAndDefinition);
     if (!notes.some((note) => note.source)) {
       problems.push(`${page}: a card's noscript note has no source`);
@@ -496,10 +661,12 @@ function checkCards(page, document, problems) {
       }
     }
   }
-  for (const notes of document.querySelectorAll("[data-pinned-notes]")) {
-    if (notes.closest("details, noscript")) {
-      problems.push(`${page}: pinned notes inside a details or noscript`);
+  for (const notes of document.querySelectorAll("[data-footnotes]")) {
+    if (notes.closest("noscript, .tip__panel") || notes.parentElement.closest("details")) {
+      problems.push(`${page}: footnotes inside a details, noscript or tooltip`);
     }
+    if (notes.hasAttribute("open"))
+      problems.push(`${page}: a card's footnotes are open by default`);
   }
 }
 
@@ -533,9 +700,15 @@ function checkLinksAndRequests(page, document, problems) {
 const plainText = (element) => element?.textContent.replace(/\s+/g, " ").trim() ?? "";
 
 // The rows are the dataset's, in its order, and each says exactly what the dataset gives and nothing
-// more. A row may sit in a closed disclosure, but it can't be hidden.
+// more. A row may sit in a closed disclosure, but it can't be hidden. A chain's own rows, on its
+// supply card, are held by checkPanelExchanges and named by checkPayload.
+const ownRows = (document) =>
+  [...document.querySelectorAll("[data-exchange-row]")].filter(
+    (row) => !row.closest('[data-chain-panel]:not([data-chain-panel="all"])'),
+  );
+
 function checkExchangeRows(page, document, expected, problems) {
-  const rows = [...document.querySelectorAll("[data-exchange-row]")];
+  const rows = ownRows(document);
   if (rows.length !== expected.exchangeRows.length) {
     problems.push(`${page}: there are ${rows.length} exchange rows`);
   }
@@ -602,10 +775,18 @@ function checkNames(place, raw, expected, problems) {
   for (const name of namesFound(raw, expected)) problems.push(`${place}: names "${name}"`);
 }
 
-// Every name is blocked, and only a row's own name is taken out first, so one anywhere else is still
-// caught: the head, an attribute, a template, a sentence or serialized props.
+// Every row the main page writes, in its order: All's, then each chain's own on its supply card.
+const everyRow = (expected) => [
+  ...expected.exchangeRows,
+  ...expected.supplyPanels
+    .filter(({ value }) => value !== "all")
+    .flatMap(({ exchanges }) => exchanges.rows),
+];
+
+// Every name is blocked, and only a row's own name is taken out first, once per row, so one
+// anywhere else is still caught: the head, an attribute, a template, a sentence or serialized props.
 function checkMainNames(page, html, expected, problems) {
-  const names = expected.exchangeRows.map((row) => row.entity);
+  const names = everyRow(expected).map((row) => row.entity);
   const { document } = new JSDOM(html).window;
   for (const row of document.querySelectorAll("[data-exchange-row]")) {
     const name = row.querySelector("[data-exchange-name]");
@@ -656,10 +837,8 @@ function flightText(node, values, seen = new Set()) {
   }
   if (!Array.isArray(node)) return "";
   if (node[0] === "$" && typeof node[1] === "string") {
-    // A note's pin is a number outside its words, as in noteWords.
-    if (node[3]?.className === "pin" && typeof node[3].children === "number") return "";
-    // And a marker isn't one of its words either, as in noteWords.
-    if (/(^|\s)status-chip(\s|$)/.test(node[3]?.className ?? "")) return "";
+    // A tooltip's panel is out of view, as in viewText. A note's words are read from inside it.
+    if (node[3]?.className === "tip__panel") return "";
     return flightText(node[3]?.children, values, seen);
   }
   return node.map((child) => flightText(child, values, seen)).join("");
@@ -725,6 +904,8 @@ function checkFilter(page, document, expected, problems) {
   }
 }
 
+const SERIES_LINES = ["Total", "Circulating", "Placed"];
+
 const SERIES_COLUMNS = [
   { key: "day", label: "Day" },
   { key: "total", label: "Total" },
@@ -763,33 +944,71 @@ function checkTableRows(where, table, columns, rows, problems) {
   });
 }
 
-// The notes this panel holds, in order, each whole and in view, and none for another chain. A pin's
-// number is its note's place in that order.
+// Notes about the whole card come first, on its title, then the rest in their own order, as the
+// card numbers them.
+const ordered = (notes) => [
+  ...notes.filter((note) => !note.at),
+  ...notes.filter((note) => note.at),
+];
+
+// The notes this panel holds, in order, each whole, and none for another chain, as its footnotes. A
+// footnote's number is its note's place in that order, and its markers run in reading order. A note
+// about the whole card has its marker on the title, and any other on the legend row, waterfall row
+// or chain it qualifies. One footnote list, and one set of markers.
 function checkPanelNotes(where, panel, notes, problems) {
-  const shown = [...panel.querySelectorAll("[data-pinned-notes] > [data-note]")];
-  const said = shown.map((note) => `${note.dataset.note}:${note.dataset.chain ?? ""}`);
-  const want = notes.map(({ kind, chain }) => `${kind}:${chain ?? ""}`);
-  if (said.join() !== want.join()) {
-    problems.push(`${where}: its notes are ${said.join()}, not ${want.join()}`);
+  const want = ordered(notes);
+  const cards = panel.matches(".chart-card") ? [panel] : [...panel.querySelectorAll(".chart-card")];
+  const list = cards.length === 1 ? footnoteList(cards[0]) : null;
+  if (want.length === 0) {
+    if (panel.querySelector("[data-footnotes], a[data-fn-ref]")) {
+      problems.push(`${where}: it has footnotes but no notes`);
+    }
     return;
   }
-  notes.forEach(({ kind, words, chip }, index) => {
-    if (noteWords(shown[index]).replace(/\s+/g, " ").trim() !== words) {
-      problems.push(`${where}: its ${kind} note doesn't keep its words in view`);
+  if (!list) {
+    problems.push(`${where}: it has no footnotes toggle with its list`);
+    return;
+  }
+  const items = [...list.children];
+  const said = items.map((item) => `${item.dataset.note}:${item.dataset.chain ?? ""}`);
+  const wanted = want.map(({ kind, chain }) => `${kind}:${chain ?? ""}`);
+  if (said.join() !== wanted.join()) {
+    problems.push(`${where}: its footnotes are ${said.join()}, not ${wanted.join()}`);
+    return;
+  }
+  const markers = [...panel.querySelectorAll("a[data-fn-ref]")];
+  const numbers = markers.map((marker) => Number(plainText(marker)));
+  if (numbers.some((number, index) => index > 0 && number <= numbers[index - 1])) {
+    problems.push(`${where}: its footnote markers aren't in reading order: ${numbers.join()}`);
+  }
+  want.forEach(({ kind, chain, words, tip, at }, index) => {
+    const item = items[index];
+    if (plainText(item.querySelector("[data-note-text]")).replace(/\s+/g, " ") !== words) {
+      problems.push(`${where}: its ${kind} footnote doesn't keep its words`);
     }
-    const markers = shown[index].querySelectorAll(".status-chip");
-    const marker = markers[0];
-    if (
-      markers.length > (chip ? 1 : 0) ||
-      (chip ?? null) !== (marker?.dataset.kind ?? null) ||
-      (chip && !viewText(marker).trim())
-    ) {
-      problems.push(`${where}: its ${kind} note's marker isn't ${chip ?? "absent"}`);
+    const full = item.querySelector("[data-note-full]");
+    if (tip && !full?.textContent.replace(/\s+/g, " ").includes(tip)) {
+      problems.push(`${where}: its ${kind} footnote has lost its words in full`);
     }
-    if (plainText(shown[index].querySelector(".pin")) !== String(index + 1)) {
-      problems.push(`${where}: its ${kind} note has the wrong number`);
+    const own = markers.filter((marker) => marker.getAttribute("href") === `#${item.id}`);
+    if (own.length !== 1 || plainText(own[0]) !== String(index + 1) || !item.id) {
+      problems.push(`${where}: its ${kind} footnote hasn't one marker numbered ${index + 1}`);
+      return;
+    }
+    if (own[0].dataset.note !== kind || (own[0].dataset.chain ?? "") !== (chain ?? "")) {
+      problems.push(`${where}: its ${kind} marker links to another note's footnote`);
+    }
+    if (!inView(own[0])) problems.push(`${where}: its ${kind} marker isn't in view`);
+    const place = at
+      ? own[0].closest(`[data-segment="${at}"], [data-step="${at}"], [data-velocity-chain="${at}"]`)
+      : own[0].closest(".chart-card__head");
+    if (!place || !panel.contains(place)) {
+      problems.push(`${where}: its ${kind} marker isn't on ${at ?? "the card's title"}`);
     }
   });
+  if (markers.length !== want.length) {
+    problems.push(`${where}: it has ${markers.length} footnote markers for ${want.length} notes`);
+  }
 }
 
 function checkPanelBar(where, panel, { key, total, parts }, problems) {
@@ -841,7 +1060,7 @@ function checkPanelLegend(where, panel, { parts }, problems) {
     problems.push(`${where}: its legend doesn't list every segment`);
     return;
   }
-  parts.forEach(({ key, label, compact, share, floor, pins, bandLine }, index) => {
+  parts.forEach(({ key, label, compact, share, floor, bandLine }, index) => {
     const row = rows[index];
     const text = (selector) => plainText(row.querySelector(selector));
     if (!viewText(row).trim()) problems.push(`${where}: its ${key} legend row isn't in view`);
@@ -856,10 +1075,6 @@ function checkPanelLegend(where, panel, { parts }, problems) {
     }
     if (Boolean(row.querySelector('[data-coverage="floor"]')) !== floor) {
       problems.push(`${where}: its ${key} legend row has the wrong coverage mark`);
-    }
-    const numbers = [...row.querySelectorAll(".pin")].map(plainText);
-    if (numbers.join() !== pins.join()) {
-      problems.push(`${where}: its ${key} legend row points at notes ${numbers.join()}`);
     }
     if (bandLine !== null) {
       const line = panel.querySelector(`[data-band="${key}"]`);
@@ -896,10 +1111,12 @@ const WALLET_TABLE_COLUMNS = [
 
 // Held to the KPI rows, which the page's own supply code doesn't read, so a fault in that code can't
 // set what this check expects. Wallets are never summed, so a panel over several chains shows no
-// wallet figure outside its popover and table, whatever the stats list says.
+// wallet figure outside its tooltip, footnotes and table, whatever the stats list says.
 function checkPanelAgainstKpis(where, panel, want, problems) {
   const shown = panel.cloneNode(true);
-  for (const hidden of shown.querySelectorAll(".data-toggle, .info-popover, .sr-only, noscript")) {
+  for (const hidden of shown.querySelectorAll(
+    ".data-toggle, .footnotes, .tip__panel, .sr-only, noscript",
+  )) {
     hidden.remove();
   }
   if (want.chains > 1 && /active wallets/i.test(shown.textContent)) {
@@ -912,28 +1129,103 @@ function checkPanelAgainstKpis(where, panel, want, problems) {
   }
 }
 
+// Held to the dataset's own rows, which the page's supply code doesn't read, so a fault in that code
+// can't set what this check expects: a chain's panel showing every chain's figures is caught here.
+function checkPanelAgainstRows(where, panel, { scope, legend, band, table }, problems) {
+  for (const [key, value] of Object.entries(legend)) {
+    const row = panel.querySelector(`[data-supply-legend] [data-segment="${key}"]`);
+    if (plainText(row?.querySelector("[data-segment-amount]")).replace("≥", "") !== value) {
+      problems.push(`${where}: its ${key} legend amount isn't ${scope}'s in the dataset`);
+    }
+  }
+  const line = panel.querySelector('[data-supply-legend] [data-band="placed_supply"]');
+  if (band !== null && !plainText(line).includes(` ${band} `)) {
+    problems.push(`${where}: its exchange-linked line isn't ${scope}'s in the dataset`);
+  }
+  const shown = [
+    ...(panel.querySelector(".data-toggle table")?.querySelectorAll("tbody tr") ?? []),
+  ];
+  const names = shown.map((tr) => plainText(tr.querySelector('[data-label="Chain"]')));
+  if (names.join() !== table.map(({ chain }) => chain).join()) {
+    problems.push(`${where}: its table's chains aren't ${scope}'s, as ${names.join()}`);
+    return;
+  }
+  table.forEach(({ chain, cells }, index) => {
+    for (const [label, value] of Object.entries(cells)) {
+      const cell = shown[index].querySelector(`[data-label="${label}"]`);
+      if (plainText(cell) !== value) {
+        problems.push(`${where}: its table's ${label} for ${chain} isn't the dataset's`);
+      }
+    }
+  });
+}
+
+// The names under a panel's table are its own: every one across chains on All, a chain's holdings on
+// a chain, which says what it leaves out rather than showing All's.
+function checkPanelExchanges(where, panel, { rows, unsplit }, problems) {
+  const named = [...panel.querySelectorAll(".data-toggle [data-labels-table] [data-exchange-row]")];
+  const said = named.map(
+    (row) =>
+      `${plainText(row.querySelector("[data-exchange-name]"))}: ${plainText(row.querySelector("[data-exchange-detail]"))}`,
+  );
+  const want = rows.map(({ entity, detail }) => `${entity}: ${detail}`);
+  if (said.join("; ") !== want.join("; ")) {
+    problems.push(`${where}: its named exchanges aren't the dataset's for it`);
+  }
+  const note = panel.querySelector(".data-toggle [data-exchanges-unsplit]");
+  if ((unsplit ?? "") !== plainText(note)) {
+    problems.push(`${where}: it doesn't say which names aren't split by chain`);
+  }
+}
+
+// A card per filter option, each with every chain's bar, the first over all of them, so the bars
+// compare chains whichever is chosen. Its heading, legend, figures, notes and tables are the option's
+// own. On a chain's card that chain's bar is marked and the others are muted.
 function checkSupplyPanels(page, document, expected, problems) {
   if (expected.supplyPanels.length === 0) return;
   const id = CARD_ANCHORS.supply;
   const box = panelsOf(page, document, id, expected, problems);
+  const wanted = expected.supplyPanels.map(({ value }) => value);
   for (const want of expected.supplyPanels) {
     const panel = panelOf(box, want.value);
     const where = `${page}: the ${want.value} panel of #${id}`;
     if (!panel) continue;
     if (!inView(panel)) problems.push(`${where}: it's hidden by its markup`);
+    const rows = [...panel.querySelectorAll("[data-supply-row]")];
+    const said = rows.map((row) => row.dataset.supplyRow);
+    if (said.join() !== wanted.join()) {
+      problems.push(`${where}: has bars for ${said.join()}, not ${wanted.join()}`);
+    }
+    for (const bar of expected.supplyPanels) {
+      const row = rows.find((candidate) => candidate.dataset.supplyRow === bar.value);
+      const at = `${where}, the ${bar.value} bar`;
+      if (!row) continue;
+      if (!inView(row)) problems.push(`${at}: it's hidden by its markup`);
+      if (viewText(row.querySelector("[data-row-total]")).trim() !== bar.rowTotal) {
+        problems.push(`${at}: its total isn't the dataset's`);
+      }
+      const mark = want.value === "all" ? "none" : bar.value === want.value ? "selected" : "muted";
+      const has = row.hasAttribute("data-selected")
+        ? "selected"
+        : row.hasAttribute("data-muted")
+          ? "muted"
+          : "none";
+      if (has !== mark) problems.push(`${at}: it's ${has}, not ${mark}`);
+      checkPanelBar(at, row, bar, problems);
+    }
     const heading = panel.querySelector(".chart-card__head h2, .chart-card__head h3");
     if (viewText(heading).trim() !== want.heading) {
       problems.push(`${where}: its heading isn't the dataset's`);
     }
-    checkPanelBar(where, panel, want, problems);
     checkPanelLegend(where, panel, want, problems);
     checkPanelStats(where, panel, want.stats, problems);
     checkPanelNotes(where, panel, want.notes, problems);
-    const full = panel.querySelector('.info-popover__panel [data-full-note="placed"]');
+    const full = panel.querySelector('.chart-card__head .tip__panel [data-full-note="placed"]');
     if (!full?.textContent.includes(want.placedNote)) {
-      problems.push(`${where}: its popover has lost the placed note in full`);
+      problems.push(`${where}: its tooltip has lost the placed note in full`);
     }
     checkPanelAgainstKpis(where, panel, want, problems);
+    checkPanelAgainstRows(where, panel, want.fromRows, problems);
     const tables = panel.querySelectorAll(".data-toggle table");
     checkTableRows(where, tables[0], want.table.columns, want.table.rows, problems);
     if (
@@ -944,13 +1236,7 @@ function checkSupplyPanels(page, document, expected, problems) {
     } else {
       checkTableRows(where, tables[1], WALLET_TABLE_COLUMNS, want.kpiRows, problems);
     }
-    // Rows add up across chains, so they sit under All. checkExchangeRows holds what each one says.
-    const rows = panel.querySelectorAll(".data-toggle [data-labels-table] [data-exchange-row]");
-    if (rows.length !== want.entities) {
-      problems.push(
-        `${where}: it has ${rows.length} exchange rows under its toggle, not ${want.entities}`,
-      );
-    }
+    checkPanelExchanges(where, panel, want.exchanges, problems);
   }
 }
 
@@ -968,9 +1254,9 @@ function checkSeriesPanels(page, document, expected, problems) {
       problems.push(`${where}: its heading isn't the dataset's`);
     }
     checkPanelNotes(where, panel, want.notes, problems);
-    const full = panel.querySelector('.info-popover__panel [data-full-note="series-start"]');
+    const full = panel.querySelector('.tip__panel [data-full-note="series-start"]');
     if (!full?.textContent.includes(want.fullNote)) {
-      problems.push(`${where}: its popover has lost the series note in full`);
+      problems.push(`${where}: its tooltip has lost the series note in full`);
     }
     checkTableRows(
       where,
@@ -979,10 +1265,9 @@ function checkSeriesPanels(page, document, expected, problems) {
       want.rows,
       problems,
     );
-    const lines = [...panel.querySelectorAll("[data-series-line]")];
-    const figures = lines.map((line) => viewText(line.querySelector("[data-series-value]")).trim());
-    if (figures.join() !== want.latest.join()) {
-      problems.push(`${where}: its legend's figures aren't the newest day's`);
+    const lines = [...panel.querySelectorAll("[data-series-line]")].map(plainText);
+    if (lines.join() !== SERIES_LINES.join()) {
+      problems.push(`${where}: its legend doesn't name ${SERIES_LINES.join(", ")}`);
     }
   }
 }
@@ -1042,7 +1327,13 @@ function velocityExpected(kpis, warnings) {
                 `${row.chain}:${field}=${row[field] === null ? UNKNOWN_TEXT : formatBps(row[field])}@${width(row[field])}`,
             ),
           ),
-    notes: chart.notes.map(({ kind, chain, text }) => ({ kind, chain, words: text })),
+    notes: chart.notes.map(({ kind, chain, text, tip }) => ({
+      kind,
+      chain,
+      words: text,
+      tip,
+      at: chart.max === null ? undefined : chain,
+    })),
     fullWarnings: chart.fullWarnings,
   };
 }
@@ -1090,7 +1381,7 @@ function gridExpected(roles) {
 }
 
 // Velocity by chain: each bar's figure and width, each warning's pin beside its own chain and
-// nowhere else, the notes in view with their words, each warning whole in the popover, and the
+// nowhere else, the notes in view with their words, each warning whole in the tooltip, and the
 // wallet counts' caveat in the caption of the table that holds them.
 function checkVelocity(page, document, expected, problems) {
   if (!expected.velocity) return;
@@ -1113,33 +1404,21 @@ function checkVelocity(page, document, expected, problems) {
   const drawn = want.bars.map((bar) => bar.replace(/@0$/, "@null"));
   if (bars.join() !== drawn.join()) problems.push(`${where}: its bars aren't the dataset's`);
   checkPanelNotes(where, card, want.notes, problems);
-  const pinned = [...card.querySelectorAll("[data-velocity-chain] .velocity-chart__name .pin")].map(
-    (pin) => `${pin.closest("[data-velocity-chain]").dataset.velocityChain}=${plainText(pin)}`,
-  );
-  const pins = want.notes.flatMap(({ chain }, index) => (chain ? [`${chain}=${index + 1}`] : []));
-  if (pinned.join() !== pins.join()) {
-    problems.push(`${where}: its chain pins are ${pinned.join()}, not ${pins.join()}`);
-  }
-  const denominators = want.notes.findIndex(({ kind }) => kind === "velocity-denominators") + 1;
-  const legendPin = card.querySelector('[data-legend-measure="headline_velocity_bps"] .pin');
-  if (want.bars.length > 0 && plainText(legendPin) !== String(denominators)) {
-    problems.push(`${where}: the denominators pin isn't on the headline velocity legend`);
-  }
   for (const [kind, words] of [
     ["velocity-denominators", VELOCITY_NOTE],
     ["velocity-jumpy", JUMPY_NOTE],
   ]) {
-    const full = card.querySelector(`.info-popover__panel [data-full-note="${kind}"]`);
+    const full = card.querySelector(`.tip__panel [data-full-note="${kind}"]`);
     if (!full?.textContent.includes(words)) {
-      problems.push(`${where}: its popover has lost the ${kind} note in full`);
+      problems.push(`${where}: its tooltip has lost the ${kind} note in full`);
     }
   }
   for (const { chain, text } of want.fullWarnings) {
     const full = card.querySelector(
-      `.info-popover__panel [data-full-note="velocity-warning"][data-chain="${chain}"]`,
+      `.tip__panel [data-full-note="velocity-warning"][data-chain="${chain}"]`,
     );
     if (plainText(full) !== text)
-      problems.push(`${where}: its popover has lost ${chain}'s warning`);
+      problems.push(`${where}: its tooltip has lost ${chain}'s warning`);
   }
   const caption = card.querySelector(".data-toggle table caption");
   if (!caption?.textContent.includes(WALLETS_NOTE)) {
@@ -1175,12 +1454,12 @@ function checkGrid(page, document, expected, problems) {
   if (said.join() !== want.join()) problems.push(`${where}: its grid isn't the dataset's`);
 }
 
-// The full notes a card's popover must hold, by kind.
+// The full notes a card's tooltip must hold, by kind.
 function checkFullNotes(where, panel, fullNotes, problems) {
   for (const [kind, text] of Object.entries(fullNotes)) {
-    const full = panel.querySelector(`.info-popover__panel [data-full-note="${kind}"]`);
+    const full = panel.querySelector(`.tip__panel [data-full-note="${kind}"]`);
     if (plainText(full) !== text)
-      problems.push(`${where}: its popover has lost the ${kind} note in full`);
+      problems.push(`${where}: its tooltip has lost the ${kind} note in full`);
   }
 }
 
@@ -1220,13 +1499,6 @@ function checkWaterfallPanels(page, document, expected, problems) {
         problems.push(`${where}: its ${row.dataset.step} isn't the rows' own sum`);
       }
     }
-    const pinned = rows.flatMap((row) =>
-      [...row.querySelectorAll(".pin")].map((pin) => `${row.dataset.step}=${plainText(pin)}`),
-    );
-    const pins = want.notes.flatMap(({ step }, index) => (step ? [`${step}=${index + 1}`] : []));
-    if (pinned.join() !== pins.join()) {
-      problems.push(`${where}: its pins are ${pinned.join()}, not ${pins.join()}`);
-    }
     checkPanelNotes(where, panel, want.notes, problems);
     checkFullNotes(where, panel, want.fullNotes, problems);
     const tables = panel.querySelectorAll(".data-toggle table");
@@ -1265,10 +1537,6 @@ function checkWeeklyPanels(page, document, expected, problems) {
       (bar) => `${bar.dataset.week}=${viewText(bar.querySelector("[data-week-value]"), "").trim()}`,
     );
     if (bars.join() !== want.bars.join()) problems.push(`${where}: its bars aren't the dataset's`);
-    const pins = [...panel.querySelectorAll(".chart-area [data-chart-pins] .pin")].map(plainText);
-    if (pins.join() !== want.notes.map((_, index) => String(index + 1)).join()) {
-      problems.push(`${where}: its pins don't match its notes`);
-    }
     checkPanelNotes(where, panel, want.notes, problems);
     checkFullNotes(where, panel, want.fullNotes, problems);
     checkTableRows(
@@ -1292,10 +1560,11 @@ function checkPayload(place, flight, expected, problems) {
   }
   const words = (element) => flightText(element.children, values).replace(/\s+/g, " ").trim();
   const rows = props.filter((element) => element["data-exchange-row"]);
-  if (rows.length !== expected.exchangeRows.length) {
+  const want = everyRow(expected);
+  if (rows.length !== want.length) {
     problems.push(`${place}: the payload has ${rows.length} exchange rows`);
   }
-  expected.exchangeRows.forEach(({ entity, detail, sourceHref, sourceText }, index) => {
+  want.forEach(({ entity, detail, sourceHref, sourceText }, index) => {
     const row = rows[index];
     if (!row || words(row) !== `${entity}, ${detail}. Source: ${sourceText}.`) {
       problems.push(`${place}: the payload's row for "${entity}" isn't the dataset's`);
@@ -1311,7 +1580,12 @@ function checkPayload(place, flight, expected, problems) {
       .filter(
         (element) => element["data-note"] === kind && (!chain || element["data-chain"] === chain),
       )
-      .map(words);
+      // A note's words are in its badge's tooltip, in the element that holds them.
+      .map((element) => {
+        const inNote = flightProps(new Map([["note", element.children]]));
+        const held = inNote.find((child) => child["data-note-text"] !== undefined);
+        return held ? words(held) : "";
+      });
     if (!shown.some((said) => (exact ? said === text : said.includes(text)))) {
       problems.push(`${place}: the payload's ${kind} note isn't the dataset's`);
     }
@@ -1332,9 +1606,11 @@ function checkPayload(place, flight, expected, problems) {
   }
 }
 
-// The band beside each bar and in the table, as the dataset gives it.
+// The band's line in the supply card's legend, which is the first option's, and each chain's in the
+// table, as the dataset gives them.
 function checkBands(page, document, expected, problems) {
   const lines = [...document.querySelectorAll("[data-exchange-linked]")];
+  // Each option's card has its own legend, so each band above zero has its line, on its own card.
   const drawn = expected.bands.filter(({ amount }) => BigInt(amount) > 0n);
   if (lines.length !== drawn.length) {
     problems.push(`${page}: there are ${lines.length} exchange-linked lines`);
@@ -1416,7 +1692,7 @@ export function verifyOutput(outDir, expected) {
   const files = filesUnder(outDir);
   const pages = files.filter((path) => path.endsWith(".html"));
   const allowedAddresses = new Set(Object.values(expected.tokenContracts));
-  for (const page of ["index.html", "methodology/index.html"]) {
+  for (const page of ["index.html", "methodology/index.html", "reconciliation/index.html"]) {
     if (!files.includes(join(outDir, page))) problems.push(`${page}: missing`);
   }
   for (const path of pages) {
@@ -1426,6 +1702,8 @@ export function verifyOutput(outDir, expected) {
     const nodes = allTextNodes(document);
     const text = nodes.map((node) => node.data).join(" ");
     checkEveryPage(page, document, problems);
+    checkFooterStatus(page, document, expected, problems);
+    checkTooltips(page, document, problems);
     checkStateOnPage(page, document, expected, problems);
     checkFreshnessOnPage(page, document, expected, problems);
     checkCards(page, document, problems);
@@ -1444,14 +1722,15 @@ export function verifyOutput(outDir, expected) {
         checkNames(page, document.documentElement.outerHTML, expected, problems);
       }
     }
+    if (page === "reconciliation/index.html") {
+      checkReconciliationPage(page, document, expected, problems);
+    }
     if (page === "index.html") {
       checkMainFrame(page, document, expected, problems);
       checkMainFreshness(page, document, expected, problems);
       checkHeadline(page, document, expected, problems);
       checkKpiRow(page, document, expected, problems);
-      checkFindings(page, document, expected, problems);
-      checkLegend(page, document, problems);
-      checkTrustDetail(page, document, problems);
+      checkNoPushDown(page, document, problems);
       checkEssentialNotes(page, document, expected, problems);
       checkExchangeRows(page, document, expected, problems);
       checkBands(page, document, expected, problems);
@@ -1473,7 +1752,7 @@ export function verifyOutput(outDir, expected) {
     // Serialized props, as a name or address in them is on its way to the reader.
     if (name.endsWith(".txt") && !name.startsWith(`methodology${sep}`)) {
       const own = OWN_PAYLOAD.test(name);
-      const names = own ? expected.exchangeRows.map((row) => row.entity) : [];
+      const names = own ? everyRow(expected).map((row) => row.entity) : [];
       checkNames(name, withoutPayloadNames(content, names, '"'), expected, problems);
       if (own) checkPayload(name, content, expected, problems);
       checkAddresses(name, [content], new Set(), problems);
@@ -1490,19 +1769,15 @@ function essentialNotes({ manifest, summary, journey, activity }) {
   const scope = day0Scope(rows, summary.kpis);
   return [
     { kind: "placed", text: PLACED_PIN, exact: true },
-    {
-      kind: "exchange-floor",
-      text: `${EXCHANGE_FLOOR_NOTE} ${EXCHANGE_FLOOR_LINK}.`,
-      exact: true,
-    },
+    { kind: "exchange-floor", text: EXCHANGE_FLOOR_PIN, exact: true },
     { kind: "series-start", text: seriesStartPin(definitions), exact: true },
     { kind: "small-ticket", text: SMALL_TICKET_PIN, exact: true },
     { kind: "everyday-meaning", text: everydayNote(definitions), exact: true },
     { kind: "velocity-denominators", text: VELOCITY_PIN, exact: true },
     { kind: "no-swaps", text: NO_SWAPS_NOTE },
-    // The wallet counts beside the supply bar. The velocity table's sit under its toggle, so its
-    // caption says it there, which checkVelocity holds.
-    { kind: "wallets-not-people", text: WALLETS_ACROSS_CHAINS_NOTE },
+    // On the supply card, whose wallet counts are in its tables. The velocity table's caption says it
+    // there too, which checkVelocity holds.
+    { kind: "wallets-not-people", text: WALLETS_NOTE, exact: true },
     ...(waterfall(rows) ? [{ kind: "hops", text: HOPS_NOTE, exact: true }] : []),
     ...(scope ? [{ kind: "day-0-scope", text: day0Pin(scope), exact: true }] : []),
     ...(weeklyEveryday(rows).length > 0
@@ -1523,20 +1798,9 @@ function essentialNotes({ manifest, summary, journey, activity }) {
       .map(({ chain }) => ({
         kind: "exchange-coverage",
         chain,
-        text: exchangeCoverageNote(chain),
+        text: exchangeCoveragePin(chain),
         exact: true,
       })),
-  ];
-}
-
-// The four headings, recomputed here so a finding is held to the dataset as well as to its card.
-function expectedFindings({ manifest, journey, activity, chain_roles }) {
-  const chains = activityChains(activity.data);
-  return [
-    { id: CARD_ANCHORS.supply, text: journeyHeading(journey.data, manifest.definitions) },
-    { id: CARD_ANCHORS.waterfall, text: waterfallHeading(waterfall(activity.data), chains) },
-    { id: CARD_ANCHORS.weekly, text: weeklyHeading(weeklyEveryday(activity.data), chains) },
-    { id: CARD_ANCHORS.chainRoles, text: chainRolesHeading(chain_roles.data) },
   ];
 }
 
@@ -1563,6 +1827,43 @@ function kpiFigures(option, kpis, journey) {
   };
 }
 
+// The supply parts a row holds, by the names the legend and table give them, read straight from the
+// dataset so they don't depend on the page's supply code. Exchange venues are a floor.
+const ROW_PARTS = [
+  ["issuer_inventory", "Issuer inventory"],
+  ["placed_supply", "Placed"],
+  ["placed_exchange_linked", "Of placed, exchange-linked"],
+  ["venue_dex", "DEX venues"],
+  ["venue_lending", "Lending venues"],
+  ["venue_exchange", "Exchange venues, at least"],
+  ["free_floating", "Free-floating"],
+];
+
+// What an option's legend and table must say, from each chain's newest journey row as written:
+// summed over every chain on All, and one chain's own on a chain.
+function rowFigures(option, journey) {
+  const rows = newestByChain(journey).filter((row) => option.chains.includes(row.chain));
+  const sum = (key) => rows.reduce((held, row) => held + BigInt(row[key]), 0n).toString();
+  const legend = Object.fromEntries(
+    ROW_PARTS.filter(([key]) => key !== "placed_exchange_linked").map(([key]) => [
+      key,
+      key === "venue_exchange" ? formatFloorDollars(sum(key)) : formatCompact(sum(key)),
+    ]),
+  );
+  return {
+    scope: option.value === "all" ? "every chain" : CHAIN_NAMES[option.value],
+    legend: rows.length > 0 ? legend : {},
+    band: rows.length > 0 ? formatCompact(sum("placed_exchange_linked")) : null,
+    table: rows.map((row) => ({
+      chain: CHAIN_NAMES[row.chain],
+      cells: Object.fromEntries([
+        ["Total", formatExact(row.total_supply)],
+        ...ROW_PARTS.map(([key, label]) => [label, formatExact(row[key])]),
+      ]),
+    })),
+  };
+}
+
 // What each filter option's supply card and step line must say, from the same functions the view uses.
 function expectedPanels(files) {
   const { manifest, summary, journey, activity, labels } = files;
@@ -1573,28 +1874,37 @@ function expectedPanels(files) {
     kpis: summary.kpis,
     definitions: manifest.definitions,
     exchanges: exchangeRows(labels),
+    chainExchanges: Object.fromEntries(
+      manifest.coverage.chains_included.map((chain) => [chain, chainExchangeRows(labels, chain)]),
+    ),
   };
   const activityInputs = {
     activity: activity.data,
     kpis: summary.kpis,
     definitions: manifest.definitions,
   };
-  const noteWordsOf = ({ kind, chain, text, link, segment }) => ({
+  // The words in view, and the note in full in its tooltip, with its link's words after it.
+  const noteWordsOf = ({ kind, chain, text, tip, link, segment }) => ({
     kind,
     chain,
-    segment,
-    words: link ? `${text} ${link.text}.` : text,
+    at: segment,
+    words: text,
+    ...(tip ? { tip: link ? `${tip} ${link.text}.` : tip } : {}),
   });
   return {
     filter: options.map(({ value, label }) => ({ value, label })),
     supplyPanels: options.map((option) => {
       const panel = supplyPanel(option, inputs);
-      const notes = panel.notes.map(noteWordsOf);
+      // With no legend, a segment's note has no row, so its badge is by the title.
+      const notes = panel.notes
+        .map(noteWordsOf)
+        .map((note) => (panel.bar ? note : { ...note, at: undefined }));
       return {
         value: option.value,
         heading: panel.heading,
         key: panel.bar?.key ?? null,
         total: panel.bar?.journey.total_supply ?? null,
+        rowTotal: panel.bar ? formatCompact(panel.bar.journey.total_supply) : UNKNOWN_TEXT,
         parts: panel.segments.map((segment) => ({
           key: segment.key,
           label: segmentLabel(segment),
@@ -1606,9 +1916,6 @@ function expectedPanels(files) {
           floor: segment.coverage === "floor",
           band: segment.band?.amount ?? null,
           bandLine: segment.band?.line ?? null,
-          pins: notes.flatMap((note, index) =>
-            note.segment === segment.key ? [String(index + 1)] : [],
-          ),
         })),
         stats: panel.stats,
         notes,
@@ -1616,7 +1923,8 @@ function expectedPanels(files) {
         chains: option.chains.length,
         ...kpiFigures(option, summary.kpis, journey.data),
         placedNote: PLACED_NOTE,
-        entities: panel.segments.flatMap((segment) => segment.entities ?? []).length,
+        exchanges: panel.exchanges,
+        fromRows: rowFigures(option, journey.data),
       };
     }),
     velocity: velocityExpected(summary.kpis, manifest.warnings),
@@ -1631,7 +1939,7 @@ function expectedPanels(files) {
           key: step.key,
           figure: stepFigure(step),
         })),
-        notes: panel.notes.map(({ kind, text, step, chip }) => ({ kind, words: text, step, chip })),
+        notes: panel.notes.map(({ kind, text, step }) => ({ kind, words: text, at: step })),
         fullNotes: panel.fullNotes,
         stepRows: panel.steps.rows,
         periodRows: panel.periods.rows,
@@ -1657,13 +1965,6 @@ function expectedPanels(files) {
         notes: panel.notes.map(noteWordsOf),
         fullNote: seriesStartNote(manifest.definitions),
         rows: panel.tableRows,
-        latest: panel.latest
-          ? [
-              panel.latest.total_supply,
-              panel.latest.circulating_supply,
-              panel.latest.placed_supply,
-            ].map(formatCompact)
-          : [],
       };
     }),
   };
@@ -1688,7 +1989,17 @@ export function expectedFromDataset(location, webRoot = process.cwd(), now = Dat
 
 export function expectedFromFiles(files, placement, webRoot = process.cwd(), now = Date.now()) {
   const state = deriveState(files, placement, now);
-  const { kind, frameWord, freshness, asOfLine, trustLine } = state;
+  const {
+    kind,
+    frameWord,
+    freshness,
+    asOfLine,
+    trustLine,
+    passing,
+    headStale,
+    staleInFooter,
+    runLine,
+  } = state;
   const { manifest, summary } = files;
   const { verdict } = summary;
   return {
@@ -1697,6 +2008,11 @@ export function expectedFromFiles(files, placement, webRoot = process.cwd(), now
     freshness,
     asOfLine,
     trustLine,
+    passing,
+    headStale,
+    staleInFooter,
+    runLine,
+    checkCount: files.manifest.checks.length,
     version: manifest.dataset_version,
     pipelineStrings: [
       ...manifest.checks.map((check) => check.detail),
@@ -1710,9 +2026,11 @@ export function expectedFromFiles(files, placement, webRoot = process.cwd(), now
       textVisible: verdictTextVisible(verdict, state),
       items: [...verdict.facts, ...verdict.estimates, ...verdict.opinions],
     },
-    kpiScope: `Across ${summary.kpis.map((row) => CHAIN_NAMES[row.chain]).join(", ")}.`,
+    // Named under the row only when a chain is missing.
+    kpiScope: REQUIRED_CHAINS.every((chain) => summary.kpis.some((row) => row.chain === chain))
+      ? null
+      : `Across ${summary.kpis.map((row) => CHAIN_NAMES[row.chain]).join(", ")}.`,
     kpiValues: expectedKpiValues(summary.kpis),
-    findings: expectedFindings(files),
     essentialNotes: essentialNotes(files),
     exchangeRows: exchangeRows(files.labels),
     ...expectedPanels(files),

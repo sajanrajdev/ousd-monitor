@@ -26,7 +26,6 @@ const table: ChartCardProps["table"] = {
 
 const props: ChartCardProps = {
   takeaway: "Most sample supply sits on two chains",
-  chip: "fact",
   source: "Sample data",
   asOf: "2026-11-04T14:05:00Z",
   definitionHref: "/methodology#supply",
@@ -42,7 +41,7 @@ function parsed(card: ReactElement): Document {
 }
 
 describe("chart card", () => {
-  it("renders the takeaway as a heading, the marker and a visible as-of, and the rest on demand", () => {
+  it("renders the takeaway as a heading and a visible as-of, and the rest on demand", () => {
     const { container } = render(
       <main>
         <ChartCard {...props} />
@@ -51,7 +50,6 @@ describe("chart card", () => {
 
     const heading = screen.getByRole("heading", { level: 2 });
     expect(heading.textContent).toBe(props.takeaway);
-    expect(screen.getByText("Fact")).toBeTruthy();
 
     const meta = container.querySelector(".chart-card__meta")!;
     expect(meta.closest("details")).toBeNull();
@@ -59,7 +57,7 @@ describe("chart card", () => {
     expect(meta.querySelector("time")!.getAttribute("datetime")).toBe(props.asOf);
     expect(meta.textContent).not.toContain("Source:");
 
-    const panel = container.querySelector(".info-popover__panel")!;
+    const panel = container.querySelector(".tip__panel")!;
     expect(panel.textContent).toContain("Source: Sample data");
     expect(panel.textContent).toContain("As of 4 Nov 2026, 14:05 UTC");
     expect(panel.textContent).toContain(props.summary);
@@ -69,7 +67,7 @@ describe("chart card", () => {
     expect(within(toggle).getByRole("table", { name: table.caption, hidden: true })).toBeTruthy();
   });
 
-  it("keeps the takeaway and marker in the card's head, outside its popover", () => {
+  it("keeps the takeaway in the card's head, outside its tooltip, with no marker", () => {
     const { container } = render(
       <main>
         <ChartCard {...props} />
@@ -80,14 +78,11 @@ describe("chart card", () => {
     expect(heads).toHaveLength(2);
     for (const head of heads) {
       const heading = head.querySelector(":scope > h2")!;
-      const chip = head.querySelector(":scope > .status-chip")!;
       expect(heading.textContent).toBe(props.takeaway);
-      expect(heading.closest("details")).toBeNull();
-      expect(chip.getAttribute("data-kind")).toBe("fact");
-      expect(chip.closest("details")).toBeNull();
+      expect(heading.closest("details, .tip__panel")).toBeNull();
     }
-    expect(container.querySelector(".info-popover__panel .status-chip")).toBeNull();
-    expect(container.querySelector(".info-popover__panel h2")).toBeNull();
+    expect(container.querySelector(".status-chip")).toBeNull();
+    expect(container.querySelector(".tip__panel h2")).toBeNull();
   });
 
   it("keeps the summary for assistive tech, visually hidden", () => {
@@ -96,14 +91,32 @@ describe("chart card", () => {
     expect(hidden.textContent).toBe(props.summary);
   });
 
-  it("names the card on its popover's trigger and its toggle", () => {
+  it("names the card on its tooltip's trigger and its toggle", () => {
     const { container } = render(<ChartCard {...props} />);
-    expect(container.querySelector(".info-popover > summary")!.getAttribute("aria-label")).toBe(
+    expect(container.querySelector(".tip__icon")!.getAttribute("aria-label")).toBe(
       `About: ${props.takeaway}`,
     );
     expect(container.querySelector(".data-toggle > summary")!.textContent).toContain(
       `for ${props.takeaway}`,
     );
+  });
+
+  // CSS draws it at the card's top right, beside the info icon, so it comes straight after the title
+  // in reading and focus order, and the title keeps room for it. A table card has no toggle.
+  it("puts its data toggle straight after the title, which keeps room for it", () => {
+    const { container } = render(<ChartCard {...props} />);
+    const head = container.querySelector(".chart-card > .chart-card__head")!;
+    expect(head.hasAttribute("data-has-toggle")).toBe(true);
+    const after = [...container.querySelectorAll(".chart-card > *")].filter(
+      (element) => !element.classList.contains("sr-only"),
+    );
+    expect(after.indexOf(container.querySelector(".chart-card > .data-toggle")!)).toBe(
+      after.indexOf(head) + 1,
+    );
+    const table = render(<TableCard {...props} table={props.table} />).container.querySelector(
+      ".chart-card__head",
+    )!;
+    expect(table.hasAttribute("data-has-toggle")).toBe(false);
   });
 
   it("has source and definition in the noscript note, as verify-output parses it", () => {
@@ -153,17 +166,34 @@ describe("chart card", () => {
     expect(link.className).toContain("target-link");
   });
 
-  it("renders its pinned notes after the plot, and none when it has none", () => {
-    const notes = [{ kind: "a-caveat", text: "On Tempo, a caveat." }];
-    const { container, rerender } = render(<ChartCard {...props} notes={notes} />);
-    const list = container.querySelector("[data-pinned-notes]")!;
-    expect(list.previousElementSibling!.className).toBe("chart-card__plot");
-    expect(list.closest("details")).toBeNull();
-    expect(container.querySelector(".chart-card__body")!.hasAttribute("data-notes")).toBe(true);
+  it("marks a note about the whole card on its title, leaves one with a place to the view, and lists all as footnotes", () => {
+    const notes = [
+      { kind: "a-caveat", text: "On Tempo, a caveat." },
+      { kind: "on-a-row", text: "About one row.", at: "placed" },
+    ];
+    const { container, rerender } = render(<ChartCard {...props} notes={notes} footnotes="card" />);
+    const marks = container.querySelectorAll("[data-fn-refs]");
+    expect(marks).toHaveLength(1);
+    const [title] = marks;
+    expect(title.parentElement!.className).toContain("chart-card__head");
+    expect(title.previousElementSibling!.tagName).toBe("H2");
+    const marker = title.querySelector('a[data-fn-ref][data-note="a-caveat"]')!;
+    expect(marker.textContent).toBe("1");
+    expect(marker.getAttribute("href")).toBe("#card-fn-1");
+    expect(title.querySelector('[data-note="on-a-row"]')).toBeNull();
+    // The card's one footnote list, after its as-of line, closed, holds every note in order.
+    const footnotes = container.querySelector(".chart-card > details.footnotes")!;
+    expect(footnotes.hasAttribute("open")).toBe(false);
+    expect(footnotes.previousElementSibling!.className).toContain("chart-card__meta");
+    expect(footnotes.querySelector("summary")!.textContent).toBe("Footnotes");
+    const items = [...footnotes.querySelectorAll(".footnotes__list > li")];
+    expect(items.map((item) => item.id)).toEqual(["card-fn-1", "card-fn-2"]);
+    expect(items[1].textContent).toBe("About one row.");
+    expect(container.querySelectorAll("details.footnotes")).toHaveLength(1);
+    expect(container.querySelector(".tip__badge, .note-badges")).toBeNull();
 
     rerender(<ChartCard {...props} />);
-    expect(container.querySelector("[data-pinned-notes]")).toBeNull();
-    expect(container.querySelector(".chart-card__body")!.hasAttribute("data-notes")).toBe(false);
+    expect(container.querySelector("[data-fn-refs], details.footnotes")).toBeNull();
   });
 
   it("takes an anchor, more for the popover, and further tables under the toggle", () => {
@@ -176,9 +206,7 @@ describe("chart card", () => {
       />,
     );
     expect(container.querySelector(".chart-card")!.id).toBe("where-supply-sits");
-    expect(container.querySelector(".info-popover__panel")!.textContent).toContain(
-      "The long takeaway.",
-    );
+    expect(container.querySelector(".tip__panel")!.textContent).toContain("The long takeaway.");
     expect(screen.getByTestId("more").closest(".data-toggle")).not.toBeNull();
   });
 
@@ -220,12 +248,10 @@ describe("chart card", () => {
       { ...props, summary: undefined },
       // @ts-expect-error the definition link is required
       { ...props, definitionHref: undefined },
-      // @ts-expect-error the chip is required
-      { ...props, chip: undefined },
       // @ts-expect-error the takeaway is required
       { ...props, takeaway: undefined },
     ];
-    expect(missing).toHaveLength(7);
+    expect(missing).toHaveLength(6);
   });
 });
 

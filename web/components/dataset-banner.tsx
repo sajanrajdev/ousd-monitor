@@ -17,10 +17,12 @@ export function DatasetBanner({ state }: { state: DatasetState }) {
   );
 }
 
-// On every page, as staleness is about the whole site and later units don't own the layout. It's in
-// the page while fresh too, keeping its space, so the reader's clock can reveal it with no shift.
-// The main page says this on its own as-of line, so CSS hides this one there.
+// On every page of sample or preview data, or when a newer run failed, as staleness is about the
+// whole site. It's in the page while fresh too, keeping its space, so the reader's clock can reveal
+// it with no shift. The main page says this on its own as-of line, so CSS hides this one there. Real
+// data that is only old says so in the footer, so a page's title sits right under the header.
 export function StaleNote({ state }: { state: DatasetState }) {
+  if (state.staleInFooter) return null;
   return (
     <p className="stale-note" data-stale-note>
       <FreshnessText fresh={null} stale={state.asOfLine.stale} />

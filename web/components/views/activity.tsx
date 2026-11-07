@@ -1,8 +1,9 @@
+import { useId } from "react";
 import { ChainPanels } from "@/components/chain-panels";
 import { ChartCard } from "@/components/chart-card";
 import { HairlineTable } from "@/components/hairline-table";
 import type { PinnedNote } from "@/components/pinned-notes";
-import { WaterfallChart, WeeklyBars, type StepPins } from "@/components/views/activity-charts";
+import { WaterfallChart, WeeklyBars } from "@/components/views/activity-charts";
 import {
   PERIOD_COLUMNS,
   scopeWords,
@@ -28,20 +29,10 @@ export type ActivityViewProps = {
 
 const SOURCE = "Chain data and public labels";
 
-const pinnedNote = ({ kind, text, chip }: ActivityNote): PinnedNote => ({
-  kind,
-  text,
-  ...(chip ? { chip } : {}),
-});
+// A note on a waterfall row has its marker on that row's label.
+const pinnedNote = ({ kind, text, step }: ActivityNote): PinnedNote => ({ kind, text, at: step });
 
-// Each note's number on the row its pin sits on, by its place in the list, as PinnedNotes counts.
-function stepPins(notes: ActivityNote[]): StepPins {
-  return Object.fromEntries(
-    notes.flatMap((note, index) => (note.step ? [[note.step, index + 1]] : [])),
-  );
-}
-
-// The notes in full, for the popover. Nothing here is the only copy of a caveat.
+// The notes in full, for the tooltip. Nothing here is the only copy of a caveat.
 function FullNotes({ notes }: { notes: Record<string, string> }) {
   return (
     <>
@@ -56,6 +47,8 @@ function FullNotes({ notes }: { notes: Record<string, string> }) {
 
 function WaterfallCard({ panel, state }: { panel: WaterfallPanel; state: DatasetState }) {
   const scope = scopeWords(panel.chains);
+  const notes = panel.notes.map(pinnedNote);
+  const footnotes = useId();
   return (
     <ChartCard
       takeaway={panel.heading}
@@ -65,13 +58,14 @@ function WaterfallCard({ panel, state }: { panel: WaterfallPanel; state: Dataset
           <FullNotes notes={panel.fullNotes} />
         </>
       }
-      chip="inferred"
       source={SOURCE}
       asOf={panel.asOf}
       definitionHref={definitionHref("clean-volume")}
       frameWord={state.frameWord}
       summary={panel.summary}
-      notes={panel.notes.map(pinnedNote)}
+      notes={notes}
+      footnotes={footnotes}
+      plotIsContent
       table={{
         caption: `From headline volume to clean volume, ${scope}, Day 0 through each chain's newest day`,
         columns: STEP_COLUMNS,
@@ -85,7 +79,7 @@ function WaterfallCard({ panel, state }: { panel: WaterfallPanel; state: Dataset
         />
       }
     >
-      <WaterfallChart waterfall={panel.waterfall} pins={stepPins(panel.notes)} />
+      <WaterfallChart waterfall={panel.waterfall} notes={notes} footnotes={footnotes} />
     </ChartCard>
   );
 }
@@ -100,7 +94,6 @@ function WeeklyCard({ panel, state }: { panel: WeeklyPanel; state: DatasetState 
           <FullNotes notes={panel.fullNotes} />
         </>
       }
-      chip="inferred"
       source={SOURCE}
       asOf={panel.asOf}
       definitionHref={definitionHref("everyday-large")}
@@ -113,7 +106,7 @@ function WeeklyCard({ panel, state }: { panel: WeeklyPanel; state: DatasetState 
         rows: panel.table.rows,
       }}
     >
-      <WeeklyBars weeks={panel.weeks} pins={panel.notes.map((_, index) => index + 1)} />
+      <WeeklyBars weeks={panel.weeks} />
     </ChartCard>
   );
 }

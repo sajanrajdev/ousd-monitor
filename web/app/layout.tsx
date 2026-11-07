@@ -42,7 +42,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <DatasetBanner state={state} />
         <StaleNote state={state} />
         {children}
-        <SiteFooter />
+        <SiteFooter state={state} />
       </body>
     </html>
   );

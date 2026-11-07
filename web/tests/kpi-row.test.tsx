@@ -23,7 +23,7 @@ function values(container: HTMLElement): Record<string, string> {
 }
 
 describe("the KPI row", () => {
-  it("shows four numbers, each with a chip, a definition and a link", () => {
+  it("shows four numbers, each with a definition and a link, and no marker", () => {
     const dataset = load();
     const { container } = render(<KpiRow kpis={dataset.summary.kpis} state={dataset.state} />);
     const items = [...container.querySelectorAll("dl > div")];
@@ -34,9 +34,9 @@ describe("the KPI row", () => {
       "Everyday velocity",
     ]);
     for (const item of items) {
-      expect(item.querySelector(".status-chip")!.closest("details")).toBeNull();
-      expect(item.querySelector("[data-kpi-value]")!.closest("details")).toBeNull();
-      const panel = item.querySelector(".info-popover__panel")!;
+      expect(item.querySelector(".status-chip")).toBeNull();
+      expect(item.querySelector("[data-kpi-value]")!.closest("details, .tip__panel")).toBeNull();
+      const panel = item.querySelector(".tip__panel")!;
       expect(panel.querySelector("a")!.getAttribute("href")).toContain("/methodology/#");
       expect(panel.textContent).toContain("As of ");
     }
@@ -44,15 +44,20 @@ describe("the KPI row", () => {
     expect(container.textContent).not.toMatch(/active wallets/i);
   });
 
-  it("keeps each note in its popover, with the words and the name to reach it", () => {
+  it("keeps each note in its tooltip, with the words and the name to reach it", () => {
     const dataset = load();
     const { container } = render(<KpiRow kpis={dataset.summary.kpis} state={dataset.state} />);
     const placed = [...container.querySelectorAll("dl > div")][1];
-    expect(placed.querySelector("summary")!.getAttribute("aria-label")).toBe("About: Placed share");
-    expect(placed.querySelector(".info-popover__panel")!.textContent).toContain(
+    const trigger = placed.querySelector(".tip__trigger")!;
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger.getAttribute("aria-label")).toBe("About: Placed share");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    const panel = placed.querySelector(".tip__panel")!;
+    expect(trigger.getAttribute("aria-controls")).toBe(panel.id);
+    expect(panel.textContent).toContain(
       "Share of supply that has stayed in large wallets with no issuer, venue or system label, for the placed window.",
     );
-    expect(placed.querySelector("details")!.getAttribute("name")).toBe("info");
+    expect(placed.querySelector("details")).toBeNull();
     // Parsed as verify-output parses a built page, so the noscript's children are elements.
     const html = renderToStaticMarkup(<KpiRow kpis={dataset.summary.kpis} state={dataset.state} />);
     const link = new DOMParser()
@@ -62,12 +67,26 @@ describe("the KPI row", () => {
     expect(link.getAttribute("href")).toBe("/methodology/#placed-supply");
   });
 
-  it("repeats no date in its visible line when the as-of line above covers it", () => {
+  it("repeats no date, and lists no chains, when the as-of line covers it and every chain is in", () => {
     const dataset = load();
     const { container } = render(<KpiRow kpis={dataset.summary.kpis} state={dataset.state} />);
-    const line = container.querySelector(".chart-card__meta")!.textContent!;
-    expect(line).toContain("Across Tempo, Ethereum, Base, Solana.");
+    const line = container.querySelector("[data-kpi-scope]")!.textContent!;
+    expect(line).not.toContain("Across");
     expect(line).not.toContain("As of");
+    // The sample keeps its frame word under the row.
+    expect(line).toBe("Sample");
+    const real = { ...dataset.state, frameWord: null };
+    const { container: plain } = render(<KpiRow kpis={dataset.summary.kpis} state={real} />);
+    expect(plain.querySelector("[data-kpi-scope]")).toBeNull();
+  });
+
+  it("names its chains when one is missing", () => {
+    const dataset = load();
+    const kpis = dataset.summary.kpis.filter((row) => row.chain !== "solana");
+    const { container } = render(<KpiRow kpis={kpis} state={dataset.state} />);
+    expect(container.querySelector("[data-kpi-scope]")!.textContent).toContain(
+      "Across Tempo, Ethereum, Base.",
+    );
   });
 
   it("shows its own date if it ever differs from the line above, as the line wouldn't cover it", () => {

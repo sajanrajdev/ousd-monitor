@@ -1,106 +1,138 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { describe, expect, it } from "vitest";
-import { Pin, pinNumber, PinnedNotes, type PinnedNote } from "@/components/pinned-notes";
+import { ExplainEnhance } from "@/components/explain-enhance";
+import {
+  footnoteId,
+  Footnotes,
+  NoteMarks,
+  orderedNotes,
+  pinNumber,
+  type PinnedNote,
+} from "@/components/pinned-notes";
 
 const notes: PinnedNote[] = [
-  { kind: "velocity-warning", chain: "ethereum", text: "On Ethereum, a one-off jump." },
-  { kind: "placed", text: "Placed counts dollars that stayed." },
+  {
+    kind: "velocity-warning",
+    chain: "ethereum",
+    text: "On Ethereum, a one-off jump.",
+    at: "ethereum",
+  },
+  { kind: "placed", text: "Placed counts dollars that stayed.", tip: "In full." },
 ];
 
-describe("pins and notes", () => {
-  it("lists numbers that match the pins in the chart", () => {
-    const { container } = render(
+describe("footnotes", () => {
+  it("numbers notes about the whole card first, then the rest in their order", () => {
+    expect(orderedNotes(notes).map((note) => note.kind)).toEqual(["placed", "velocity-warning"]);
+    expect(pinNumber(notes, "placed")).toBe(1);
+    expect(pinNumber(notes, "velocity-warning", "ethereum")).toBe(2);
+  });
+
+  it("puts each marker where its note points, linking to its footnote", () => {
+    render(
       <>
-        <div aria-hidden="true" data-testid="graphic">
-          <Pin notes={notes} kind="placed" />
-          <Pin notes={notes} kind="velocity-warning" chain="ethereum" />
-        </div>
-        <PinnedNotes notes={notes} />
+        <h2>Title</h2>
+        <NoteMarks notes={notes} prefix="card" />
+        <p data-testid="ethereum">
+          Ethereum <NoteMarks notes={notes} at="ethereum" prefix="card" />
+        </p>
+        <Footnotes notes={notes} prefix="card" />
       </>,
     );
-    const inChart = [...screen.getByTestId("graphic").querySelectorAll(".pin")];
-    expect(inChart.map((pin) => pin.textContent)).toEqual(["2", "1"]);
-    const numberOf = (kind: string) =>
-      container.querySelector(`[data-pinned-notes] [data-note="${kind}"] .pin`)!.textContent;
-    expect(numberOf("velocity-warning")).toBe(inChart[1].textContent);
-    expect(numberOf("placed")).toBe(inChart[0].textContent);
-  });
-
-  it("renumbers the pin when a conditional note before it drops out", () => {
-    const without = notes.slice(1);
-    expect(pinNumber(notes, "placed")).toBe(2);
-    expect(pinNumber(without, "placed")).toBe(1);
-    const { container } = render(<Pin notes={without} kind="placed" />);
-    expect(container.querySelector(".pin")!.textContent).toBe("1");
-  });
-
-  it("draws no pin when its note isn't there, or is on another chain", () => {
-    const { container, rerender } = render(<Pin notes={notes.slice(1)} kind="velocity-warning" />);
-    expect(container.querySelector(".pin")).toBeNull();
-    rerender(<Pin notes={notes} kind="velocity-warning" chain="base" />);
-    expect(container.querySelector(".pin")).toBeNull();
-    expect(pinNumber(notes, "velocity-warning", "base")).toBeNull();
-  });
-
-  it("numbers two notes of one kind by chain", () => {
-    const two: PinnedNote[] = [
-      { kind: "velocity-warning", chain: "ethereum", text: "On Ethereum." },
-      { kind: "velocity-warning", chain: "base", text: "On Base." },
-    ];
-    expect(pinNumber(two, "velocity-warning", "base")).toBe(2);
-  });
-
-  it("is an ordered list with the note's words outside any graphic", () => {
-    render(<PinnedNotes notes={notes} />);
-    const list = screen.getByRole("list");
-    expect(list.tagName).toBe("OL");
-    const items = within(list).getAllByRole("listitem");
-    expect(items[0].textContent).toContain("On Ethereum, a one-off jump.");
-    expect(items[0].closest("[aria-hidden]")).toBeNull();
-  });
-
-  it("marks each note so a check can find it by what it is and its chain", () => {
-    const { container } = render(<PinnedNotes notes={notes} />);
-    const warning = container.querySelector('[data-note="velocity-warning"]')!;
-    expect(warning.getAttribute("data-chain")).toBe("ethereum");
-    expect(container.querySelector('[data-note="placed"]')!.hasAttribute("data-chain")).toBe(false);
-  });
-
-  it("gives a note its own marker only when it has one", () => {
-    const { container } = render(
-      <PinnedNotes
-        notes={[{ kind: "day-0", chip: "fact", text: "Minted minus burned." }, notes[1]]}
-      />,
+    const marker = screen.getByRole("link", { name: "Footnote 2" });
+    expect(marker.textContent).toBe("2");
+    expect(marker.closest("sup")).not.toBeNull();
+    expect(screen.getByTestId("ethereum").contains(marker)).toBe(true);
+    expect(marker.getAttribute("href")).toBe(`#${footnoteId("card", 2)}`);
+    const item = document.getElementById(footnoteId("card", 2))!;
+    expect(item.textContent).toBe("On Ethereum, a one-off jump.");
+    expect(item.getAttribute("data-chain")).toBe("ethereum");
+    expect(screen.getByRole("link", { name: "Footnote 1" }).getAttribute("href")).toBe(
+      `#${footnoteId("card", 1)}`,
     );
-    expect(container.querySelector('[data-note="day-0"] .status-chip')).not.toBeNull();
-    expect(container.querySelector('[data-note="placed"] .status-chip')).toBeNull();
   });
 
-  it("never makes a pin focusable", () => {
-    const { container } = render(<Pin notes={notes} kind="placed" />);
-    const pin = container.querySelector(".pin")!;
-    expect(pin.tagName).toBe("SPAN");
-    expect(pin.getAttribute("aria-hidden")).toBe("true");
-    expect(pin.hasAttribute("tabindex")).toBe(false);
-    expect(pin.closest("a, button")).toBeNull();
+  it("is a closed details with a Footnotes summary and a numbered list, so it needs no script", () => {
+    const { container } = render(<Footnotes notes={notes} prefix="card" />);
+    const details = container.querySelector("details")!;
+    expect(details.hasAttribute("open")).toBe(false);
+    expect(details.querySelector(":scope > summary")!.textContent).toBe("Footnotes");
+    const list = within(details).getByRole("list", { hidden: true });
+    expect(list.tagName).toBe("OL");
+    const items = list.querySelectorAll(":scope > li");
+    expect(items[0].querySelector("[data-note-text]")!.textContent).toBe(
+      "Placed counts dollars that stayed.",
+    );
+    expect(items[0].querySelector("[data-note-full]")!.textContent).toBe("In full.");
+    expect(items[1].querySelector("[data-note-full]")).toBeNull();
   });
 
-  it("renders nothing with no notes, so no number is left over", () => {
-    const { container } = render(<PinnedNotes notes={[]} />);
-    expect(container.innerHTML).toBe("");
+  it("has no tooltip on a marker", () => {
+    const { container } = render(<NoteMarks notes={notes} prefix="card" />);
+    expect(container.querySelector("[data-tip], [role='tooltip'], button")).toBeNull();
   });
 
-  it("has no axe violations with a pin inside an aria-hidden graphic", async () => {
+  it("renders nothing where no note points, and no list with no notes", () => {
+    expect(render(<NoteMarks notes={notes} at="base" prefix="card" />).container.innerHTML).toBe(
+      "",
+    );
+    expect(render(<Footnotes notes={[]} prefix="card" />).container.innerHTML).toBe("");
+  });
+
+  it("separates two markers on one row", () => {
+    const two: PinnedNote[] = [
+      { kind: "a", text: "A.", at: "row" },
+      { kind: "b", text: "B.", at: "row" },
+    ];
+    const { container } = render(<NoteMarks notes={two} at="row" prefix="card" />);
+    expect(container.textContent).toBe("1,2");
+  });
+
+  it("has no axe violations", async () => {
     const { container } = render(
       <main>
-        <div aria-hidden="true">
-          <Pin notes={notes} kind="placed" />
-        </div>
-        <PinnedNotes notes={notes} />
+        <h2>Title</h2>
+        <NoteMarks notes={notes} prefix="card" />
+        <ul>
+          <li>
+            Ethereum <NoteMarks notes={notes} at="ethereum" prefix="card" />
+          </li>
+        </ul>
+        <Footnotes notes={notes} prefix="card" />
       </main>,
     );
     const results = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(results.violations).toEqual([]);
+  });
+
+  // With a script, a marker opens its list in place: no jump to the footnote, no new address, and
+  // focus moved to the footnote, which lights briefly. The toggle opens and closes it.
+  it("opens the list from a marker in place, focusing and lighting the footnote", () => {
+    render(
+      <>
+        <h2>Title</h2>
+        <NoteMarks notes={notes} prefix="card" />
+        <Footnotes notes={notes} prefix="card" />
+        <ExplainEnhance />
+      </>,
+    );
+    const before = location.hash;
+    const marker = screen.getByRole("link", { name: "Footnote 1" });
+    const followed = fireEvent.click(marker);
+    expect(followed).toBe(false);
+    expect(location.hash).toBe(before);
+    const details = document.querySelector<HTMLDetailsElement>("details.footnotes")!;
+    expect(details.open).toBe(true);
+    const item = document.getElementById(footnoteId("card", 1))!;
+    expect(document.activeElement).toBe(item);
+    expect(item.hasAttribute("data-flash")).toBe(true);
+    // A marker with its list open leaves it open.
+    fireEvent.click(marker);
+    expect(details.open).toBe(true);
+    const summary = details.querySelector("summary")!;
+    expect(fireEvent.click(summary)).toBe(false);
+    expect(details.open).toBe(false);
+    fireEvent.click(summary);
+    expect(details.open).toBe(true);
   });
 });

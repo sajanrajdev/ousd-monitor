@@ -5,32 +5,49 @@ import axe from "axe-core";
 import { describe, expect, it } from "vitest";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
+import { loadDataset } from "@/lib/dataset/load";
 import { INDEPENDENCE_LINE } from "@/lib/site";
+import { at, copySample } from "./dataset-helpers";
+
+const { state } = loadDataset(at(copySample("complete")));
 
 describe("the site shell", () => {
-  it("shows the exact independence line in the header and the footer", () => {
+  it("shows the exact independence line in the footer, and the name and Methodology in the header", () => {
     expect(INDEPENDENCE_LINE).toBe("Independent. Not affiliated with Open Standard or Bridge.");
     render(
       <>
         <SiteHeader />
-        <SiteFooter />
+        <SiteFooter state={state} />
       </>,
     );
 
     const header = screen.getByRole("banner");
     const footer = screen.getByRole("contentinfo");
-    expect(within(header).getByText(INDEPENDENCE_LINE)).toBeTruthy();
+    expect(header.textContent).not.toContain(INDEPENDENCE_LINE);
+    // Methodology is back in the header, at its far right, and stays in the footer too.
+    expect(within(header).getByRole("link", { name: "Methodology" }).getAttribute("href")).toMatch(
+      /^\/methodology/,
+    );
+    expect(
+      within(header)
+        .getByRole("link", { name: /Open USD Monitor/ })
+        .getAttribute("href"),
+    ).toBe("/");
     expect(within(footer).getByText(INDEPENDENCE_LINE)).toBeTruthy();
+    expect(within(footer).getByText(INDEPENDENCE_LINE).closest("details, [data-tip]")).toBeNull();
+    expect(within(footer).getByRole("link", { name: "Methodology" }).getAttribute("href")).toMatch(
+      /^\/methodology/,
+    );
     expect(
       within(header).getByRole("link", { name: "Skip to main content" }).getAttribute("href"),
     ).toBe("#main-content");
   });
 
   it("says in the footer that it is not financial advice and not an attestation", () => {
-    render(<SiteFooter />);
+    render(<SiteFooter state={state} />);
     const footer = screen.getByRole("contentinfo");
 
-    expect(within(footer).getByText("Not financial advice.")).toBeTruthy();
+    expect(within(footer).getByText("Not financial advice. Not an attestation.")).toBeTruthy();
     expect(footer.textContent).toContain("Not an attestation");
     expect(
       within(footer)
@@ -40,12 +57,12 @@ describe("the site shell", () => {
   });
 
   it("leaves the GitHub link out while the repo URL is empty", () => {
-    render(<SiteFooter repoUrl="" />);
+    render(<SiteFooter state={state} repoUrl="" />);
     expect(screen.queryByRole("link", { name: /GitHub/ })).toBeNull();
   });
 
   it("links to GitHub once the repo URL is set", () => {
-    render(<SiteFooter repoUrl="https://example.invalid/repo" />);
+    render(<SiteFooter state={state} repoUrl="https://example.invalid/repo" />);
     expect(screen.getByRole("link", { name: /GitHub/ }).getAttribute("href")).toBe(
       "https://example.invalid/repo",
     );
@@ -58,7 +75,7 @@ describe("the site shell", () => {
         <main>
           <h1>Page</h1>
         </main>
-        <SiteFooter repoUrl="https://example.invalid/repo" />
+        <SiteFooter state={state} repoUrl="https://example.invalid/repo" />
       </>,
     );
     const results = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
@@ -79,17 +96,18 @@ describe("touch targets", () => {
   it("sets a 24px minimum on links that stand alone, and not on links inside a sentence", () => {
     const rule = /([^{}]*)\{[^}]*min-height:\s*1\.5rem[^}]*\}/.exec(css)!;
     expect(rule).not.toBeNull();
-    for (const selector of [".target-link", ".site-header nav a"]) {
+    for (const selector of [".target-link"]) {
       expect(rule[1]).toContain(selector);
     }
     expect(rule[1]).not.toMatch(/(^|,)\s*(main\s+)?p\s+a\b/);
   });
 
-  it.each([".info-popover > summary", ".data-toggle > summary"])(
+  it.each([".tip__icon", ".data-toggle > summary", ".footnotes > summary"])(
     "gives %s at least 24px",
     (selector) => {
       const escaped = selector.replace(/[.>]/g, "\\$&");
-      const rule = new RegExp(`${escaped} \\{([^}]*)\\}`).exec(css)!;
+      // The rule that names it on its own, alone or in a list of selectors.
+      const rule = new RegExp(`(?:^|,)\\s*${escaped}\\s*(?:,[^{]*)?\\{([^}]*)\\}`, "m").exec(css)!;
       expect(rule).not.toBeNull();
       const sizes = [...rule[1].matchAll(/(?:min-)?height:\s*([\d.]+)rem/g)].map((match) =>
         Number(match[1]),

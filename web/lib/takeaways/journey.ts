@@ -49,10 +49,11 @@ export function journeyHeading(rows: JourneyRow[], definitions: Definitions): st
   const share = all && floorBps(BigInt(all.placed_supply), BigInt(all.total_supply));
   if (!all || share === null) return UNKNOWN_TEXT;
   const minimum = formatCompact(definitions.placed_min_base_units);
-  return scopedHeading(
-    all.chains,
-    `${formatBps(share)} of supply stayed ${definitions.placed_days}+ days in ${minimum}-plus wallets.`,
-  );
+  // Below all four chains it names the ones it covers inside the sentence: "of Base supply".
+  const whose = REQUIRED_CHAINS.every((chain) => all.chains.includes(chain))
+    ? "supply"
+    : `${scopeText(all.chains)} supply`;
+  return `${formatBps(share)} of ${whose} stayed ${definitions.placed_days}+ days in ${minimum}-plus wallets.`;
 }
 
 export type SeriesPoint = { day: string; total_supply: string; placed_supply: string };
@@ -110,9 +111,18 @@ function shareBps(part: string, total: string): number | null {
 
 export type BandFigures = { total_supply: string; placed_exchange_linked: string };
 
+// The band's legend row, set like every other row: its figure and its share of supply.
+export function exchangeLinkedFigures(row: BandFigures): { amount: string; share: string } {
+  return {
+    amount: formatCompact(row.placed_exchange_linked),
+    share: formatBps(shareBps(row.placed_exchange_linked, row.total_supply)),
+  };
+}
+
+// The row's words as a reader takes them in: its label, then its figure and share.
 export function exchangeLinkedLine(row: BandFigures): string {
-  const share = formatBps(shareBps(row.placed_exchange_linked, row.total_supply));
-  return `${EXCHANGE_LINKED_LABEL}: ${formatCompact(row.placed_exchange_linked)} (${share} of supply)`;
+  const { amount, share } = exchangeLinkedFigures(row);
+  return `${EXCHANGE_LINKED_LABEL} ${amount} ${share}`;
 }
 
 // The band as the supply card shows it: across all chains, then per chain, on each one's newest day.

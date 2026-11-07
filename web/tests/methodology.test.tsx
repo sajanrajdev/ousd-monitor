@@ -95,6 +95,30 @@ describe("the rendered page", () => {
     }
   });
 
+  it("has a clear way back to the dashboard, near the top", () => {
+    const container = page();
+    const back = [...container.querySelectorAll('a[href="/"]')].find(
+      (link) => link.getAttribute("aria-label") === "Back to the dashboard",
+    )!;
+    expect(back).toBeTruthy();
+    // An arrow, named for assistive tech, with no words in view.
+    expect(back.querySelector("svg")).not.toBeNull();
+    expect(back.textContent).toBe("");
+    expect(container.querySelector("h1")!.className).toContain("page-title");
+    expect(
+      back.compareDocumentPosition(container.querySelector("h1")!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("lists its sections in one column, with a section's own items nested under it", () => {
+    const list = page().querySelector("[data-contents-list]")!;
+    expect(list.className).not.toMatch(/grid-cols/);
+    const nested = list.querySelector(":scope > li > ul")!;
+    expect(nested).not.toBeNull();
+    expect(nested.parentElement!.parentElement).toBe(list);
+  });
+
   it("marks an arriving anchor, and keeps every outbound link safe", () => {
     const container = page();
     expect(container.querySelector("#verdict")!.className).toContain("target:");
@@ -102,7 +126,7 @@ describe("the rendered page", () => {
       expect(link.getAttribute("rel")).toBe("noopener noreferrer");
     }
     for (const link of container.querySelectorAll("a[href]")) {
-      expect(link.getAttribute("href")).toMatch(/^(https:\/\/|#|\/methodology\/#)/);
+      expect(link.getAttribute("href")).toMatch(/^(https:\/\/|#|\/methodology\/#|\/$)/);
     }
   });
 
@@ -174,7 +198,7 @@ describe("the rendered page", () => {
     const card = container.querySelector("#documented-defaults")!.parentElement!.parentElement!;
     expect(card.textContent).toContain("placed_days");
     expect(card.textContent).toContain("clean_7d / 7 over circulating_supply");
-    expect(card.querySelector(".info-popover__panel")!.textContent).toContain("Source:");
+    expect(card.querySelector(".tip__panel")!.textContent).toContain("Source:");
   });
 
   it("names nothing but what the dataset names", () => {

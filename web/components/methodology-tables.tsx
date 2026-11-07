@@ -82,7 +82,6 @@ export function NamedLabelsCard({
       <TableCard
         level={3}
         takeaway={labelsTakeaway(rows)}
-        chip="inferred"
         source="Public sources, linked in each row"
         asOf={latestCheck(rows) ?? fallbackAsOf}
         definitionHref="/methodology/#named-labels"
@@ -219,7 +218,6 @@ export function SettingsCard({ manifest, state }: { manifest: Manifest; state: D
       <TableCard
         level={3}
         takeaway={settingsTakeaway(rows)}
-        chip="fact"
         source="This dataset's manifest"
         asOf={manifest.generated_at}
         definitionHref="/methodology/#documented-defaults"

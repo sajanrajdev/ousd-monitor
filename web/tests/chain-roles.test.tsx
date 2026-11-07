@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChainRolesView } from "@/components/views/chain-roles";
 import { getDataset } from "@/lib/dataset";
 import { UNKNOWN_TEXT } from "@/lib/format";
+import { NO_SWAPS_NOTE } from "@/lib/takeaways/caveats";
 
 function mount(edit?: (props: Parameters<typeof ChainRolesView>[0]) => void) {
   vi.stubEnv("OUSD_DATASET_DIR", "fixtures/dataset/complete");
@@ -39,11 +40,11 @@ describe("the chain roles view", () => {
     expect(card.classList.contains("chart-card")).toBe(true);
     expect(card.querySelector("h2")!.textContent).toBe("Ethereum leads on all five measures.");
     expect(card.querySelector(".chart-card__meta")!.textContent).toContain("As of");
-    const panel = card.querySelector(".info-popover__panel")!;
+    const panel = card.querySelector(".chart-card__head > .tip--info > .tip__panel")!;
     expect(panel.textContent).toContain("Ethereum leads on all 5 measures");
     expect(panel.textContent).toContain("Source:");
     expect(panel.querySelector('a[href="/methodology/#chain-roles"]')).not.toBeNull();
-    expect(card.querySelector("svg, canvas")).toBeNull();
+    expect(card.querySelector(".chart-area svg, canvas")).toBeNull();
   });
 
   it("shows each leading_for value as its sentence, and nothing for a chain with none", () => {
@@ -83,9 +84,9 @@ describe("the chain roles view", () => {
     }));
     expect(days.find((d) => d.chain === "Base")!.day).toContain("2 Nov 2026");
     expect(days.find((d) => d.chain === "Ethereum")!.day).toContain("3 Nov 2026");
-    expect(container.querySelector(".info-popover__panel")!.textContent).toContain(
-      "Chains end on different days",
-    );
+    expect(
+      container.querySelector(".chart-card__head > .tip--info > .tip__panel")!.textContent,
+    ).toContain("Chains end on different days");
   });
 
   it("shows a null share as the unknown text, not zero", () => {
@@ -135,11 +136,17 @@ describe("the chain roles view", () => {
 
   it("uses 'trading' only in the plain note, never 'settlement'", () => {
     const { container } = mount();
-    const note = container.querySelector('[data-note="no-swaps"]')!;
+    const note = container.querySelector('.footnotes__list > [data-note="no-swaps"]')!;
     expect(note.textContent).toContain("We don’t ingest swaps, so this view can’t show trading.");
-    expect(note.querySelector('a[href="/methodology/#chain-roles"]')).not.toBeNull();
+    // The definition link is the card's tooltip's, so the note keeps only its caveat.
+    expect(note.querySelector("a")).toBeNull();
+    expect(
+      container.querySelector(
+        '.chart-card__head > .tip--info > .tip__panel a[href="/methodology/#chain-roles"]',
+      ),
+    ).not.toBeNull();
     const rest = container.cloneNode(true) as HTMLElement;
-    rest.querySelector('[data-note="no-swaps"]')!.remove();
+    rest.querySelector('.footnotes__list > [data-note="no-swaps"]')!.remove();
     expect(rest.textContent).not.toMatch(/trading|settlement/i);
   });
 
@@ -239,12 +246,16 @@ describe("the chain roles view", () => {
       expect(grid(same.container).querySelector('[data-grid-measure="as-of"]')).toBeNull();
     });
 
-    it("pins the no-swaps note to the grid, in view", () => {
+    it("marks the no-swaps note on the title, with its words in the footnotes, and no pin in the grid", () => {
       const { container } = mount();
-      expect(grid(container).querySelector("caption .pin")!.textContent).toBe("1");
-      const note = container.querySelector('[data-pinned-notes] [data-note="no-swaps"]')!;
-      expect(note.closest("details, noscript")).toBeNull();
-      expect(note.querySelector(".pin")!.textContent).toBe("1");
+      expect(grid(container).querySelector(".pin, a[data-fn-ref]")).toBeNull();
+      const marker = container.querySelector(
+        '.chart-card__head a[data-fn-ref][data-note="no-swaps"]',
+      )!;
+      expect(marker.textContent).toBe("1");
+      const item = container.querySelector(marker.getAttribute("href")!.replace(/:/g, "\\:"))!;
+      expect(item.closest("details.footnotes")).not.toBeNull();
+      expect(item.querySelector("[data-note-text]")!.textContent).toBe(NO_SWAPS_NOTE);
     });
 
     it("never calls a chain's role settlement", () => {
@@ -260,7 +271,7 @@ describe("the chain roles view", () => {
       ].find((bar) => bar.getAttribute("data-width") === "0");
       expect(negative).toBeTruthy();
       expect(container.querySelector("[data-chain-grid] caption")!.textContent).toContain(
-        "The marked chain leads that measure.",
+        "The marked chain leads.",
       );
     });
   });

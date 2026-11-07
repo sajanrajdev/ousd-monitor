@@ -1,4 +1,5 @@
 import type { Dataset } from "./dataset/load.ts";
+import type { ChainName } from "./dataset/rows.ts";
 import { formatFloorDollars } from "./format.ts";
 
 type Labels = Pick<Dataset["labels"], "data" | "exchange_holdings" | "exchange_listings">;
@@ -9,7 +10,7 @@ type Labels = Pick<Dataset["labels"], "data" | "exchange_holdings" | "exchange_l
 export type ExchangeRow = {
   entity: string;
   detail: string;
-  // In base units, across chains, so a segment can refuse rows that add up to more than it holds.
+  // In base units, across chains or on one, so a segment can refuse rows that add up to more than it holds.
   amount: string;
   sourceHref: string;
   sourceText: string;
@@ -20,6 +21,27 @@ const EACH_WALLET = "each wallet's label";
 
 function wallets(count: number): string {
   return `${count.toLocaleString("en-US")} ${count === 1 ? "wallet" : "wallets"}`;
+}
+
+// A chain's own rows: each name the dataset gives a holding for on that chain, with that chain's
+// wallets and balance. A listing or a label with nothing held names no chain, so neither is here.
+export function chainExchangeRows(
+  { exchange_holdings }: Pick<Labels, "exchange_holdings">,
+  chain: ChainName,
+): ExchangeRow[] {
+  const held = exchange_holdings.filter((row) => row.chain === chain);
+  return [...new Set(held.map((row) => row.entity))].sort().map((entity) => {
+    const own = held.filter((row) => row.entity === entity);
+    const count = own.reduce((sum, row) => sum + row.wallets, 0);
+    const balance = own.reduce((sum, row) => sum + BigInt(row.balance), 0n);
+    return {
+      entity,
+      detail: `${wallets(count)}, at least ${formatFloorDollars(balance.toString())}`,
+      amount: balance.toString(),
+      sourceHref: LABELS_HREF,
+      sourceText: EACH_WALLET,
+    };
+  });
 }
 
 export function exchangeRows({

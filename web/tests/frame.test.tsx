@@ -6,9 +6,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import RootLayout, { generateMetadata } from "@/app/layout";
 import Methodology from "@/app/methodology/page";
+import Reconciliation from "@/app/reconciliation/page";
 import Home from "@/app/page";
 import { TableCard } from "@/components/chart-card";
-import { StatusChip } from "@/components/status-chip";
 import { CARD_ANCHORS, DEFINITION_ANCHORS } from "@/lib/definitions";
 import { copySample, editJson, releaseGrade } from "./dataset-helpers";
 
@@ -16,8 +16,6 @@ const SECTIONS = [
   "trust-strip",
   "verdict",
   "kpi-row",
-  "findings",
-  "marker-legend",
   "chain-filter",
   "view-a",
   "view-b",
@@ -45,9 +43,8 @@ describe("the main page", () => {
       .map((element) => element.getAttribute("data-section"))
       .filter((name) => name !== "question");
     expect(order).toEqual(SECTIONS);
-    const question = container.querySelector('[data-section="question"]')!;
-    expect(question.textContent).toContain("Is that turning into money that moves?");
-    expect(container.querySelector('[data-section="verdict"]')!.contains(question)).toBe(true);
+    // The second review removed the question line, to give the header room.
+    expect(container.querySelector('[data-section="question"]')).toBeNull();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
       "At least half of Open USD (OUSD) supply is sitting still.",
     );
@@ -91,37 +88,41 @@ describe("the main page", () => {
       (label) => label.textContent,
     );
     expect(labels).toEqual(["All covered", "Tempo", "Ethereum"]);
+    // The supply card and the step line have a panel per option.
     expect(container.querySelectorAll('[data-section="view-a"] [data-chain-panel]')).toHaveLength(
       6,
     );
+    const rows = [...container.querySelectorAll('[data-chain-panel="all"] [data-supply-row]')].map(
+      (row) => row.querySelector(".supply-row__name")!.textContent,
+    );
+    expect(rows).toEqual(["All covered", "Tempo", "Ethereum"]);
   });
 
-  it.each(["complete", "partial"] as const)(
-    "on the %s sample, each finding lands on a card with the same words and marker",
-    (name) => {
-      useSample(name);
-      const { container } = render(<Home />);
-      const links = [...container.querySelectorAll("[data-finding-link]")];
-      expect(links).toHaveLength(4);
-      for (const link of links) {
-        const card = container.querySelector(link.getAttribute("href")!)!;
-        expect(card.querySelector("h2")!.textContent).toBe(
-          link.querySelector(".finding__text")!.textContent,
-        );
-        expect(card.querySelector(".status-chip")!.getAttribute("data-kind")).toBe(
-          link.querySelector(".status-chip")!.getAttribute("data-kind"),
-        );
-      }
-    },
-  );
+  it("has no findings row: each finding is its card's heading, in view", () => {
+    useSample("complete");
+    const { container } = render(<Home />);
+    expect(container.querySelector('[data-section="findings"], [data-finding-link]')).toBeNull();
+    for (const card of container.querySelectorAll(".chart-card")) {
+      expect(
+        card.querySelector(".chart-card__head h2")!.textContent!.trim().length,
+      ).toBeGreaterThan(0);
+    }
+  });
 
-  it("puts the trust status first and the legend last, ahead of every card", () => {
+  it("puts the trust status first on a sample, and the KPI row last, ahead of every card", () => {
     useSample("complete");
     const { container } = render(<Home />);
     const screen = container.querySelector(".first-screen")!;
     expect(screen.firstElementChild!.getAttribute("data-section")).toBe("trust-strip");
-    expect(screen.lastElementChild!.getAttribute("data-section")).toBe("marker-legend");
+    expect(screen.lastElementChild!.getAttribute("data-section")).toBe("kpi-row");
     expect(screen.querySelector(".chart-card")).toBeNull();
+  });
+
+  it("has no marker or marker legend anywhere", () => {
+    useSample("complete");
+    const { container } = render(<Home />);
+    expect(container.querySelector(".status-chip, [data-section='marker-legend']")).toBeNull();
+    expect(container.querySelector("details[name], .info-popover")).toBeNull();
   });
 
   it("has a word on every card and in the KPI row, and hatching on every card", () => {
@@ -137,16 +138,14 @@ describe("the main page", () => {
     }
     const kpis = container.querySelector('[data-section="kpi-row"]')!;
     expect(within(kpis as HTMLElement).getByText("Sample")).toBeTruthy();
-    for (const finding of container.querySelectorAll("[data-finding-link]")) {
-      expect(finding.getAttribute("data-frame")).toBe("Sample");
-      expect(finding.textContent).toContain("Sample");
-    }
   });
 
-  it('says "Sample, not a finding" and "Not reconciled"', () => {
+  it('says "Sample, not a finding." in plain words, and "Not reconciled"', () => {
     useSample("complete");
     const { container } = render(<Home />);
-    expect(screen.getByText("Sample, not a finding")).toBeTruthy();
+    const frame = screen.getByText("Sample, not a finding.");
+    expect(frame.closest("[data-verdict-frame]")).not.toBeNull();
+    expect(frame.closest(".tip__panel, details")).toBeNull();
     expect(container.querySelector('[data-section="verdict"]')!.textContent).not.toContain(
       "Our reading",
     );
@@ -188,11 +187,11 @@ describe("the layout", () => {
     expect(metadata.robots).toEqual({ index: false, follow: false });
   });
 
-  it("keeps the independence line in the header and footer", () => {
+  it("keeps the independence line in the footer, and the header to the name", () => {
     useSample("complete");
     const document = layoutDocument();
     const line = "Independent. Not affiliated with Open Standard or Bridge.";
-    expect(document.querySelector("header")!.textContent).toContain(line);
+    expect(document.querySelector("header")!.textContent).not.toContain(line);
     expect(document.querySelector("footer")!.textContent).toContain(line);
   });
 
@@ -218,19 +217,50 @@ describe("a real dataset", () => {
     expect(metadata.title).toMatchObject({ default: "Open USD Monitor" });
   });
 
-  it("has no word on its cards, and no not-a-finding chip", () => {
+  it("has no word on its cards, and no reading tag", () => {
     vi.stubEnv("OUSD_DATASET_DIR", releaseGrade());
     const { container } = render(<Home />);
     for (const card of container.querySelectorAll(".chart-card")) {
       expect(card.getAttribute("data-frame")).toBeNull();
       expect(card.querySelector(".chart-card__meta")!.textContent).not.toContain("Sample");
     }
-    for (const finding of container.querySelectorAll("[data-finding-link]")) {
-      expect(finding.getAttribute("data-frame")).toBeNull();
-      expect(finding.textContent).not.toContain("Sample");
-    }
-    expect(screen.getAllByText("Our reading").length).toBeGreaterThan(0);
+    // "Our reading" is only a group's title, in the reading's tooltip.
+    const shown = container.cloneNode(true) as Element;
+    shown.querySelectorAll(".tip__panel").forEach((panel) => panel.remove());
+    expect(shown.textContent).not.toContain("Our reading");
+    expect(container.querySelector("[data-verdict-frame]")).toBeNull();
+    expect(container.querySelector(".status-chip")).toBeNull();
     expect(container.textContent).not.toContain("Not reconciled");
+  });
+
+  describe("the trust row at the top", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("is gone on a build that passed, fresh and reconciled", () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-11-04T08:00:00Z"));
+      vi.stubEnv("OUSD_DATASET_DIR", releaseGrade());
+      const { container } = render(<Home />);
+      expect(container.querySelector('[data-section="trust-strip"]')).toBeNull();
+      // The line under the headline says when the data is from, and nothing more: the footer
+      // says when the data is old.
+      expect(container.querySelector('[data-section="verdict"]')!.textContent).not.toMatch(
+        /Last reconciled|out of date/,
+      );
+    });
+
+    it("is gone on a real build that's only old, as the footer says so", () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-11-07T08:00:00Z"));
+      vi.stubEnv("OUSD_DATASET_DIR", releaseGrade());
+      const { container } = render(<Home />);
+      expect(container.querySelector('[data-section="trust-strip"]')).toBeNull();
+      expect(container.querySelector(".verdict-block__as-of")!.textContent).toMatch(
+        /^Data from .* UTC\.$/,
+      );
+    });
   });
 });
 
@@ -296,14 +326,29 @@ describe("a preview dataset", () => {
       expect(card.getAttribute("data-frame")).toBe("Preview");
       expect(card.querySelector(".chart-card__meta")!.textContent).toContain("Preview");
     }
-    for (const finding of container.querySelectorAll("[data-finding-link]")) {
-      expect(finding.getAttribute("data-frame")).toBe("Preview");
-      expect(finding.textContent).toContain("Preview");
-    }
-    expect(screen.getByText("Preview, not a finding")).toBeTruthy();
+    expect(screen.getByText("Preview, not a finding.")).toBeTruthy();
     expect(container.querySelector('[data-section="trust-strip"]')!.textContent).toContain(
       "Not reconciled",
     );
+  });
+});
+
+describe("the reconciliation page", () => {
+  it("holds the detail and a way back to the dashboard", () => {
+    useSample("complete");
+    const { container } = render(<Reconciliation />);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Reconciliation");
+    const back = screen.getByRole("link", { name: "Back to the dashboard" });
+    expect(back.getAttribute("href")).toBe("/");
+    expect(back.textContent).toBe("");
+    // The arrow comes first, then the title, in the large style.
+    const title = screen.getByRole("heading", { level: 1 });
+    expect(back.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(title.className).toContain("page-title");
+    const detail = container.querySelector('[data-section="reconciliation"]')!;
+    expect(detail.textContent).toContain("it doesn't check placed share or velocity.");
+    expect(detail.textContent).toContain("Sample figures, not a reconciliation.");
+    expect(container.querySelector("details, [data-tip]")).toBeNull();
   });
 });
 
@@ -319,7 +364,6 @@ describe("shared parts", () => {
     const css = readFileSync("app/globals.css", "utf8");
     expect(css).toContain("html[data-frame] body::before");
     expect(css).toContain(".chart-card[data-frame]::before");
-    expect(css).toContain(".finding[data-frame]::before");
     expect(css).not.toMatch(/\[data-frame\][^{]*\{[^}]*display:\s*none/);
   });
 
@@ -328,7 +372,6 @@ describe("shared parts", () => {
       <main>
         <TableCard
           takeaway="A takeaway"
-          chip="inferred"
           source="A source"
           asOf={{ from: "2026-11-02", to: "2026-11-03" }}
           definitionHref="/methodology/#chain-roles"
@@ -347,15 +390,6 @@ describe("shared parts", () => {
     const meta = container.querySelector(".chart-card__meta")!.textContent;
     expect(meta).toContain("2 Nov 2026 to 3 Nov 2026 UTC");
     expect(meta).toContain("Preview");
-  });
-
-  it("an opinion chip reads as an opinion only on real data", () => {
-    const { rerender } = render(<StatusChip kind="opinion" frameWord={null} />);
-    expect(screen.getByText("Our reading")).toBeTruthy();
-    rerender(<StatusChip kind="opinion" frameWord="Preview" />);
-    expect(screen.getByText("Preview, not a finding")).toBeTruthy();
-    rerender(<StatusChip kind="fact" frameWord="Preview" />);
-    expect(screen.getByText("Fact")).toBeTruthy();
   });
 
   it("every fixed anchor is listed once", () => {

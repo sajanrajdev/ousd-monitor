@@ -26,6 +26,15 @@ function panel(container: HTMLElement, id: string, value: string): HTMLElement {
   return container.querySelector(`#${id} > [data-chain-panel="${value}"]`)!;
 }
 
+// A note's footnote in a card's list, and the marker that points at it.
+function footnote(card: Element, kind: string): Element | null {
+  return card.querySelector(`.footnotes__list > [data-note="${kind}"]`);
+}
+
+function markerOf(card: Element, kind: string): Element | null {
+  return card.querySelector(`a[data-fn-ref][data-note="${kind}"]`);
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -39,7 +48,7 @@ describe("the real activity view", () => {
     for (const card of cards) {
       expect(card.querySelector("h2")!.textContent!.length).toBeGreaterThan(10);
       expect(card.querySelector(".chart-card__meta")!.textContent).toContain("As of");
-      const panel = card.querySelector(".info-popover__panel")!;
+      const panel = card.querySelector(".chart-card__head > .tip--info > .tip__panel")!;
       expect(panel.textContent).toContain("Source:");
       expect(panel.querySelector('a[href^="/methodology/#"]')).not.toBeNull();
     }
@@ -48,13 +57,14 @@ describe("the real activity view", () => {
   it.each([
     ["everyday-meaning", "Everyday means under"],
     ["hops", "Hops across transactions still count more than once."],
-  ])("keeps the %s caveat visible, with nothing opened", (kind, words) => {
+  ])("marks the %s caveat in view, with its words in the card's footnotes", (kind, words) => {
     const { container } = mount();
-    const notes = [...container.querySelectorAll(`[data-note="${kind}"]`)];
+    const notes = [...container.querySelectorAll(`.footnotes__list > [data-note="${kind}"]`)];
     expect(notes.length).toBeGreaterThan(0);
     for (const note of notes) {
       expect(note.textContent).toContain(words);
-      expect(note.closest("details, noscript, .sr-only")).toBeNull();
+      const marker = container.querySelector(`a[data-fn-ref][href="#${note.id}"]`)!;
+      expect(marker.closest("details, noscript, .sr-only")).toBeNull();
     }
   });
 
@@ -172,7 +182,7 @@ describe("the real activity view", () => {
 
   it("renders the small-ticket note with its date and 'unproven'", () => {
     const { container } = mount();
-    const note = container.querySelector('[data-note="small-ticket"]')!;
+    const note = footnote(container, "small-ticket")!;
     expect(note.textContent).toContain("26 Oct 2026");
     expect(note.textContent).toContain("unproven");
     expect(note.textContent).toContain("4.07M");
@@ -185,7 +195,7 @@ describe("the real activity view", () => {
     }
   });
 
-  it("says the Day 0 scope as a Fact when the rows add up to supply, and leaves it out when not", () => {
+  it("says the Day 0 scope when the rows add up to supply, and leaves it out when not", () => {
     const exact = mount((props) => {
       const [first] = props.activity;
       props.activity.push({
@@ -205,16 +215,20 @@ describe("the real activity view", () => {
     const card = exact.container.querySelector(
       `#${CARD_ANCHORS.waterfall} > [data-chain-panel="all"]`,
     )!;
-    const note = card.querySelector('[data-pinned-notes] [data-note="day-0-scope"]')!;
-    expect(note.textContent).toContain("Fact");
-    expect(note.textContent).toContain("from Day 0, 30 Sept 2026 UTC");
-    expect(note.textContent).toContain("total supply predates it");
-    expect(note.closest("details, noscript")).toBeNull();
-    // Pinned on the headline row, and whole in the popover.
-    expect(card.querySelector('[data-step="headline_value"] .pin')!.textContent).toBe("1");
-    expect(
-      card.querySelector('.info-popover__panel [data-full-note="day-0-scope"]')!.textContent,
-    ).toContain("Supply also includes mints from before it");
+    const note = footnote(card, "day-0-scope")!;
+    // No chip: the page reads as inferred throughout, and a fact needs no marker of its own.
+    expect(note.querySelector(".status-chip")).toBeNull();
+    const words = note.querySelector("[data-note-text]")!.textContent;
+    expect(words).toContain("from Day 0, 30 Sept 2026 UTC");
+    expect(words).toContain("supply predates it");
+    // Its marker is the first, on the headline row, and the note is whole in the card's tooltip.
+    const marker = markerOf(card, "day-0-scope")!;
+    expect(marker.textContent).toBe("1");
+    expect(marker.closest('[data-step="headline_value"]')).not.toBeNull();
+    expect(card.querySelector(".chart-area .pin")).toBeNull();
+    expect(card.querySelector('.tip__panel [data-full-note="day-0-scope"]')!.textContent).toContain(
+      "Supply also includes mints from before it",
+    );
     exact.unmount();
     // Mismatched by one base unit, so the figure isn't exact and nothing is claimed.
     const off = mount((props) => {
@@ -223,38 +237,50 @@ describe("the real activity view", () => {
     expect(off.container.querySelector('[data-note="day-0-scope"]')).toBeNull();
   });
 
-  it("pins the small-ticket note under All and Tempo only, short in view and whole in the popover", () => {
+  it("marks the small-ticket note under All and Tempo only, short in its footnote and whole in the card's tooltip", () => {
     const { container } = mount();
     for (const value of ["all", "tempo", "ethereum", "base", "solana"]) {
       const card = panel(container, CARD_ANCHORS.waterfall, value);
-      const note = card.querySelector('[data-pinned-notes] [data-note="small-ticket"]');
-      const full = card.querySelector('.info-popover__panel [data-full-note="small-ticket"]');
+      const note = footnote(card, "small-ticket");
+      const full = card.querySelector('.tip__panel [data-full-note="small-ticket"]');
       if (value === "all" || value === "tempo") {
-        expect(note!.textContent).toContain("26 Oct 2026");
-        expect(note!.textContent).toContain("unproven");
+        const words = note!.querySelector("[data-note-text]")!.textContent;
+        expect(words).toContain("26 Oct 2026");
+        expect(words).toContain("unproven");
+        expect(markerOf(card, "small-ticket")).not.toBeNull();
         expect(full!.textContent).toContain("2,441 transfers to 237 recipients");
-        expect(card.querySelector('[data-step="issuer_flows"] .pin')).not.toBeNull();
       } else {
         expect(note).toBeNull();
         expect(full).toBeNull();
-        expect(card.querySelector('[data-step="issuer_flows"] .pin')).toBeNull();
       }
+      expect(card.querySelector(".chart-area .pin")).toBeNull();
     }
   });
 
-  it("numbers each pin as its note, with no gap when a note drops out", () => {
+  it("numbers each marker as its footnote, in reading order with no gap when a note drops out", () => {
     const { container } = mount();
     for (const value of ["all", "ethereum"]) {
       const card = panel(container, CARD_ANCHORS.waterfall, value);
-      const notes = [...card.querySelectorAll("[data-pinned-notes] > [data-note]")];
-      const numbers = notes.map((note) => note.querySelector(".pin")!.textContent);
-      expect(numbers).toEqual(notes.map((_, index) => String(index + 1)));
-      const hops = notes.findIndex((note) => note.getAttribute("data-note") === "hops");
-      expect(card.querySelector('[data-step="clean_large"] .pin')!.textContent).toBe(
-        String(hops + 1),
+      const markers = [...card.querySelectorAll("a[data-fn-ref]")];
+      const numbers = markers.map((marker) => marker.textContent);
+      expect(numbers).toEqual(markers.map((_, index) => String(index + 1)));
+      const items = [...card.querySelectorAll(".footnotes__list > li")];
+      expect(markers.map((marker) => marker.getAttribute("href"))).toEqual(
+        items.map((item) => `#${item.id}`),
       );
-      expect(card.querySelector(".chart-area .pin")!.closest("[aria-hidden]")).not.toBeNull();
+      expect(markers.some((marker) => marker.getAttribute("data-note") === "hops")).toBe(true);
+      expect(card.querySelector(".chart-area .pin, .tip__badge")).toBeNull();
+      // Each marker sits on the waterfall row it qualifies, so the chart is read, not hidden.
+      expect(card.querySelector('[data-step="clean_large"] [data-note="hops"]')).not.toBeNull();
+      expect(card.querySelector(".chart-area")!.hasAttribute("aria-hidden")).toBe(false);
     }
+    const all = panel(container, CARD_ANCHORS.waterfall, "all");
+    expect(
+      all.querySelector('[data-step="issuer_flows"] [data-note="small-ticket"]'),
+    ).not.toBeNull();
+    // The weekly card's notes are about the whole card, so their markers are on its title.
+    const weekly = panel(container, CARD_ANCHORS.weekly, "all");
+    expect(weekly.querySelectorAll(".chart-card__head a[data-fn-ref]")).toHaveLength(2);
   });
 
   it("sums every chain's waterfall back to its headline, with bars at clean large and everyday", () => {
@@ -282,8 +308,8 @@ describe("the real activity view", () => {
         const name = value.charAt(0).toUpperCase() + value.slice(1);
         expect(card.querySelector("h2")!.textContent).toMatch(new RegExp(`^On ${name}, `));
         for (const kind of kinds) {
-          const note = card.querySelector(`[data-pinned-notes] [data-note="${kind}"]`);
-          expect(note, `${kind} on ${value}`).not.toBeNull();
+          expect(footnote(card, kind), `${kind} on ${value}`).not.toBeNull();
+          expect(markerOf(card, kind), `${kind} marker on ${value}`).not.toBeNull();
         }
       }
       expect(panel(container, id, "all").querySelector("h2")!.textContent).not.toMatch(/^On /);
@@ -301,16 +327,17 @@ describe("the real activity view", () => {
     }
   });
 
-  it("says Weeks end on the date shown in the popover, and pins the history", () => {
+  it("says Weeks end on the date shown in the tooltip, and marks the history", () => {
     const { container } = mount();
     const card = panel(container, CARD_ANCHORS.weekly, "all");
-    expect(
-      card.querySelector('.info-popover__panel [data-full-note="history"]')!.textContent,
-    ).toMatch(/^Weeks end on the date shown, in UTC\. \d+ days of history/);
-    expect(card.querySelector('[data-pinned-notes] [data-note="history"]')!.textContent).toMatch(
+    expect(card.querySelector('.tip__panel [data-full-note="history"]')!.textContent).toMatch(
+      /^Weeks end on the date shown, in UTC\. \d+ days of history/,
+    );
+    expect(footnote(card, "history")!.querySelector("[data-note-text]")!.textContent).toMatch(
       /\d+ days of history: a direction, not a trend\./,
     );
-    expect(card.querySelectorAll("[data-chart-pins] .pin")).toHaveLength(2);
+    expect(card.querySelectorAll("a[data-fn-ref]")).toHaveLength(2);
+    expect(card.querySelector(".chart-area .pin")).toBeNull();
   });
 
   it("never says what transfers were for, in any panel", () => {
@@ -361,6 +388,6 @@ describe("the real activity view", () => {
     expect(panel.waterfall).toBeNull();
     expect(panel.notes.map((note) => note.kind)).toEqual(["day-0-scope"]);
     expect(panel.notes[0].step).toBeUndefined();
-    expect(panel.notes[0].text).toContain("of Base's $5 total supply predates it");
+    expect(panel.notes[0].text).toContain("of Base's $5 supply predates it");
   });
 });

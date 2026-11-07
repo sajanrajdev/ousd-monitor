@@ -28,6 +28,7 @@
   --meaning-removed: #a97f92;
   --meaning-positive: #2f6b4f;
   --meaning-negative: #a23b3b;
+  --meaning-caution: #8a5300;
 
   --font-display: "Newsreader Variable", Georgia, serif;
   --font-sans: "Inter Variable", system-ui, sans-serif;
@@ -52,8 +53,8 @@
   --page-content-width: 1056px;
   --page-margin: clamp(1rem, 4.5vw, 4rem);
   --section-space: clamp(3.5rem, 4.1vw + 2.5rem, 6.25rem);
-  --header-height: 60px;
-  --header-budget: 88px;
+  --header-height: 48px;
+  --header-budget: 48px;
   --grid-gap: 1rem;
   --dashboard-space: clamp(1.5rem, 2vw, 2rem);
   --filter-height: 2.75rem;
