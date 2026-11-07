@@ -41,6 +41,25 @@ describe("the deploy config", () => {
     expect(inlineScriptSources(dir)).toEqual([]);
   });
 
+  it.each([
+    ["an onclick attribute", '<button onclick="go()">x</button>', "onclick="],
+    ["an onload attribute, in any case", '<body ONLOAD = "go()">', "ONLOAD="],
+    ["a javascript: href", '<a href="javascript:void(0)">x</a>', "javascript:"],
+    ["an unquoted javascript: src", "<iframe src=javascript:go()>", "javascript:"],
+  ])("fails the release on %s", (_name, html, found) => {
+    const dir = release({ "methodology/index.html": html });
+    expect(() => inlineScriptSources(dir)).toThrow(found);
+    expect(() => buildOutputConfig(dir)).toThrow(/methodology\/index\.html/);
+  });
+
+  it("allows handler-like text in a script body, in prose and in plain attributes", () => {
+    const dir = release({
+      "index.html":
+        '<script>el.onclick = f; const u = "javascript:x";</script><p>use onclick= and javascript: here</p><a href="/on=1" data-on="x">a</a>',
+    });
+    expect(inlineScriptSources(dir)).toHaveLength(1);
+  });
+
   it("gives the same policy for the same release", () => {
     const dir = release({ "index.html": "<script>b()</script><script>a()</script>" });
     expect(securityHeaders(dir)).toEqual(securityHeaders(dir));

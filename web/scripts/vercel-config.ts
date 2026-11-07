@@ -9,6 +9,12 @@ import { join } from "node:path";
 // An inline script's text is raw up to its closing tag, which is the text the browser hashes.
 const INLINE_SCRIPT = /<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/g;
 
+// What a script hash can't cover: an inline event handler attribute, or a javascript: URL. Under this
+// policy the browser would block it, so the page would break without any build step noticing.
+const INLINE_SCRIPT_BLOCK = /<script\b[^>]*>[\s\S]*?<\/script>/gi;
+const EVENT_HANDLER_ATTRIBUTE = /<[a-z][^>]*?\s(on[a-z]+)\s*=/i;
+const JAVASCRIPT_URL = /<[a-z][^>]*?\s[a-z:-]+\s*=\s*["']?\s*javascript:/i;
+
 // Features a page could ask for, each granted to no origin.
 const DENIED_FEATURES = [
   "accelerometer",
@@ -38,12 +44,24 @@ function htmlFilesUnder(dir: string): string[] {
   });
 }
 
+// Throws when a page holds script the policy would block and a hash can't allow.
+export function assertNoInlineHandlers(html: string, path: string): void {
+  const markup = html.replace(INLINE_SCRIPT_BLOCK, "");
+  const handler = markup.match(EVENT_HANDLER_ATTRIBUTE);
+  if (handler)
+    throw new Error(`${path} has an inline event handler (${handler[1]}=), which the CSP blocks.`);
+  if (JAVASCRIPT_URL.test(markup))
+    throw new Error(`${path} has a javascript: URL, which the CSP blocks.`);
+}
+
 // Every inline script in the release's pages, as a CSP source, sorted so the same release always
 // gives the same policy.
 export function inlineScriptSources(releaseDir: string): string[] {
   const hashes = new Set<string>();
   for (const path of htmlFilesUnder(releaseDir)) {
-    for (const [, body] of readFileSync(path, "utf8").matchAll(INLINE_SCRIPT)) {
+    const html = readFileSync(path, "utf8");
+    assertNoInlineHandlers(html, path);
+    for (const [, body] of html.matchAll(INLINE_SCRIPT)) {
       if (body.trim() === "") continue;
       hashes.add(`'sha256-${createHash("sha256").update(body).digest("base64")}'`);
     }

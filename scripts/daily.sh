@@ -165,13 +165,14 @@ for name in VERCEL_ORG_ID VERCEL_PROJECT_ID; do
 done
 
 # The verified folder, as the Build Output API wants it: static/ and config.json, nothing else.
-# config.json carries the security headers, with the hash of each inline script in this release.
+# config.json carries the security headers, with the hash of each inline script in the copied folder
+# that is uploaded.
 # No vercel build, which would run next build again without the release gate.
 work="$(mktemp -d)"
 mkdir -p "$work/.vercel/output"
 cp -RL "$release_dir/." "$work/.vercel/output/static"
 node --experimental-strip-types --disable-warning=ExperimentalWarning \
-  "$ROOT/web/scripts/vercel-config.mjs" "$release_dir" >"$work/.vercel/output/config.json" ||
+  "$ROOT/web/scripts/vercel-config.mjs" "$work/.vercel/output/static" >"$work/.vercel/output/config.json" ||
   alert_and_fail deploy "web/scripts/vercel-config.mjs could not write the deploy config."
 
 say "Deploy: vercel deploy --prebuilt, a preview (token from the environment only)."

@@ -46,6 +46,9 @@ case "$1" in
     mkdir -p web/.release/v1/sub
     echo '<html><script>self.x=1</script></html>' > web/.release/v1/index.html
     echo 'x' > web/.release/v1/sub/a.txt
+    if [ -f "$FAKES/release-has-handler" ]; then
+      echo '<button onclick="go()">x</button>' > web/.release/v1/sub/index.html
+    fi
     ln -sfn v1 web/.release/latest
     ;;
 esac
@@ -360,6 +363,11 @@ def test_an_undelivered_heartbeat_does_not_fail_a_deployed_run(root):
 @pytest.mark.parametrize(
     ("fake", "step", "reason"),
     [
+        (
+            "release-has-handler",
+            "deploy",
+            "web/scripts/vercel-config.mjs could not write the deploy config.",
+        ),
         ("release-fails", "release", "make web-release refused or failed, so nothing is deployed."),
         ("deploy-fails", "deploy", "vercel deploy did not make a preview (see the run's log)."),
         (
@@ -377,6 +385,9 @@ def test_a_failure_the_pipeline_did_not_alert_on_raises_one_and_never_pings(
     result = daily(root)
     assert result.returncode != 0
     assert uv_calls(root) == [alert_call(step, reason)]
+    if fake == "release-has-handler":
+        # The config step failed before any upload.
+        assert not any(call.startswith("vercel ") for call in calls(root))
 
 
 def test_a_failed_run_that_alerted_itself_is_not_alerted_twice(root):
