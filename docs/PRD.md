@@ -1,12 +1,13 @@
 # Open USD Monitor: PRD
 
-**Status:** Draft.
-**Date:** 2026-11-03
-**Working name:** Open USD Monitor. Independent project, not affiliated with Open Standard, Bridge or any partner.
+**Status:** the first version is live. Views C, D and F are still to come (see [the roadmap](roadmap.md)).
+**Written:** 2026-11-03, with figures as of that date.
 
-## 1. Verdict
+Open USD Monitor is an independent project, not affiliated with Open Standard, Bridge or any partner.
 
-A supply and holders dashboard is not worth building. That ground is already covered well (section 5).
+## 1. The question
+
+A supply and holders dashboard is not worth building. That ground is already covered well (section 4).
 
 A dashboard that answers one question is worth building:
 
@@ -38,27 +39,7 @@ Figures are as of 2026-11-03 unless noted. The on-chain and reserve figures were
 
 **Trap:** the ticker OUSD also belongs to Origin Dollar, a 2020 DeFi token. Always filter by contract address and write "Open USD (OUSD)".
 
-## 4. Who the partners are, and why they care
-
-Five founding partners, each with an equal initial stake, committed $1B+ of launch liquidity together. Open Standard counts 200+ partners; that means signing up, not live volume. I confirmed names only from sources I could read, and the homepage list I fetched stopped partway through the alphabet, so Phase 1 needs the full list.
-
-"Why they care" is my reading unless a source is cited, and should be presented that way.
-
-| Group | Partners | Why they care |
-|---|---|---|
-| **Founders: payments and commerce** | Stripe, Visa, Mastercard, Shopify | Lower cost money movement they can share in. OUSD is Stripe's default stablecoin; Visa and Mastercard say they will keep supporting several coins, so this is a coalition, not an exclusive |
-| **Founder: exchange** | Coinbase | Already receives about half of USDC's reserve income, per CoinShares, so OUSD may strengthen its hand with Circle |
-| **Issuer and reserves** | Bridge (Stripe), BlackRock, Lead Bank, BNY | Issuance and reserve management at scale |
-| **Banks and card networks** | American Express, BBVA, Standard Chartered, U.S. Bank, Bradesco, others | A way into onchain settlement through regulated partners, without running their own coin |
-| **Fintechs and platforms** | Brex, Chime, Airwallex, Affirm, others | Revenue on balances they already hold. Separately, Stripe says Ramp will offer OUSD balances through it |
-| **Crypto and infrastructure** | Aave, Solana, Fireblocks, Anchorage, BitGo, Bybit, others | Distribution and liquidity. Separately, Crystal saw Wintermute seeding pools |
-
-**Why anyone else should care:**
-- **Businesses:** could earn from balances that earn nothing elsewhere.
-- **The stablecoin market:** if distributors keep the float, issuer margins come under pressure. Circle fell about 17% on the announcement. In FY2025, 96% of its $2.7B revenue was reserve income, and about $1.08B remained after distribution costs, per Coin Metrics.
-- **Everyone watching:** partners who move money rather than park it need a reason beyond yield. Whether activity follows balances decides if this works.
-
-## 5. What already exists
+## 4. What already exists
 
 | Source | Covers | Doesn't cover |
 |---|---|---|
@@ -72,6 +53,10 @@ Five founding partners, each with an equal initial stake, committed $1B+ of laun
 **The gap:** Crystal's question, answered continuously and in public, with named entities where public evidence supports them, plus peer benchmarks and the partner lens.
 
 **Don't compete on:** live supply, reserve coverage or pool health. Link to those sources instead.
+
+## 5. Non-goals
+
+Price or trading signals; reserve attestation; replacing the sources in section 4; real-time alerts; other chains beyond the four; a token or paid product; wallet-level doxxing.
 
 ## 6. Product
 
@@ -87,13 +72,13 @@ One page that reads top to bottom as an argument, then a methodology page. First
 | **F. Partner economics** | What could the reserve pool be worth at current supply? | The whole model rests on this. Estimate only, with assumptions visible |
 | **Trust strip** | Do our numbers reconcile? | Mints minus burns against `totalSupply()` on every chain, then against Bridge's total |
 
-**How the first version words views A and E.** View A shows *active* as a separate measure, not a slice of the supply stack: volume and wallets aren't parts of a balance. The stack is issuer inventory, placed, venues and free-floating, with clean volume and active wallets beside it. View E says what each chain *leads* in (supply, issuance, everyday use, DEX flow, lending flow), and never calls a chain a "trading" or "settlement" chain, because the pipeline ingests no swap events and so can't show it. Both choices keep the site from saying more than the data does. Details are in `docs/plans/2026-11-04-001-first-public-version-plan.md`.
+**How the first version words views A and E.** View A shows *active* as a separate measure, not a slice of the supply stack: volume and wallets aren't parts of a balance. The stack is issuer inventory, placed, venues and free-floating, with clean volume and active wallets beside it. View E says what each chain *leads* in (supply, issuance, everyday use, DEX flow, lending flow), and never calls a chain a "trading" or "settlement" chain, because the pipeline ingests no swap events and so can't show it. Both choices keep the site from saying more than the data does. [The methodology](methodology.md) gives each definition.
 
 Also: a short written "what changed this week" note, for sharing and for readers who want the summary without the charts.
 
 ## 7. Metric definitions
 
-Tested against real data on 2026-11-03 for Tempo and part of Ethereum: see `docs/brainstorms/2026-11-03-adoption-metrics-requirements.md`. Base and Solana may still change them. Publish every one on the methodology page.
+Tested against real data on 2026-11-03 for Tempo and part of Ethereum: Base and Solana may still change them. Publish every one on the methodology page.
 
 | Metric | Definition |
 |---|---|
@@ -121,7 +106,7 @@ Tested against real data on 2026-11-03 for Tempo and part of Ethereum: see `docs
 - **R2. Idempotent backfill:** re-running any range changes nothing.
 - **R3. Reorg handling:** store block hashes, re-check a lookback at the tip, and replace orphaned data. Use each chain's finality signal. Reorgs may be rare here, so test the logic with simulated reorgs and say so.
 - **R4. Modeling:** dbt from raw to staging to marts, with tests and documentation.
-- **R5. Orchestration:** one daily Dagster job, `make run`, with retries on source errors and an alert file on failure. The Dagster schedule ships stopped; the hosted daily run is a Railway cron job that runs the same job (see `docs/deploy.md`). Ingest is cursor-based and idempotent, so it doesn't use partitions (see `docs/architecture.md`).
+- **R5. Orchestration:** one daily Dagster job, `make run`, with retries on source errors and an alert file on failure. The Dagster schedule ships stopped; the hosted daily run is a Railway cron job that runs the same job (see [operations](operations.md)). Ingest is cursor-based and idempotent, so it doesn't use partitions (see `docs/architecture.md`).
 - **R6. Reconciliation checks, which block publishing:** per chain, mints minus burns must equal `totalSupply()` at the same block, to the base unit, and balances must match `balanceOf` for sampled wallets. The chain total should match Bridge's figure within a stated timing tolerance.
 - **R7. Labels:** a versioned file with address, entity, source type, source and confidence for every label.
 - **R8. Freshness:** at least daily, with "data as of" visible. Show the last good data if a check fails.
@@ -136,7 +121,7 @@ Tested against real data on 2026-11-03 for Tempo and part of Ethereum: see `docs
 ### Documentation
 - **R14.** README and methodology a stranger can follow. A short decision record for the node provider and data vendor choice, buy versus build.
 - **R15.** A half-page weekly note written for an executive.
-- **R16.** A public build log of what went wrong and what changed as a result.
+- **R16.** A public record of lessons learned: what went wrong and what changed as a result ([lessons learned](build-log.md)).
 
 ## 9. Integrity rules
 
@@ -147,66 +132,23 @@ Tested against real data on 2026-11-03 for Tempo and part of Ethereum: see `docs
 - **Stay neutral.** Report what the data shows, good or bad, with no predictions about partners.
 - **It isn't an attestation.** Say so, and link to Bridge's reports.
 
-## 10. Proposed architecture
-
-Binding detail is in `docs/architecture.md`.
-
-```
-RPC (EVM, Solana) + Blockscout + Bridge API
-        | Python ingestion (idempotent, reorg-aware)
-        v
-DuckDB: raw tables
-        | dbt-duckdb: staging, then marts
-        v
-Dagster: one daily job, blocking checks
-        | publish step, only if checks pass
-        v
-JSON/CSV dataset, then static Next.js site on Vercel
-```
-
-**Feasibility checked 2026-11-03:**
-- `totalSupply` read on all three EVM chains, and token supply on Solana. The four summed to Bridge's total.
-- Bridge's transparency API is public and needs no key.
-- Recent transfer logs read on Ethereum, Base and Tempo, and recent signatures on Solana, all from public RPC.
-- Older logs worked on Tempo but were refused on Ethereum and Base (HTTP 403), so the backfill needs a keyed RPC provider. Solana's full signature history was read on both the key and the public RPC, with the same rows.
-- Finality differs: Tempo's finalized block matched its tip, while Base was about 600 blocks behind and Ethereum about 76. Reorg lookback should be set per chain.
-
-## 11. Phases
-
-Each phase can stop and still be useful. Time is a rough guess until Phase 1 shows the data's quirks.
-
-The phase numbers here differ from `docs/implementation-plan.md`, which is the one to follow for what is built when. There, setup is not a separate phase, independent review is Phase 4 and not part of Phase 3's exit, and views C, D and F come in Phase 5, after the first release.
-
-| Phase | Delivers | Done when |
-|---|---|---|
-| **0. Setup** | Remote repo, kit onboarding, stack and `Makefile`, the "Build and test" CI job, provider decision | Kit preflight passes |
-| **1. Trustworthy core** | Ingestion on 4 chains, reorg logic, dbt staging, reconciliation | Every chain reconciles to the base unit from first mint |
-| **2. Adoption models** | Labels, journey, clean volume, chain roles, orchestration | A week of scheduled runs with checks passing |
-| **3. First public version** | Views A, B and E, the trust strip and methodology | An independent review finds no unsupported claim |
-| **4. Full argument** | Views C, D and F, weekly note, CSV | Reviewed and published |
-| **5. Launch** | Announcement | Released publicly |
-
-## 12. Success criteria
+## 10. Success criteria
 
 - All four chains reconcile, visibly, every day.
 - Someone unfamiliar with OUSD understands the answer from the first screen.
 - A skeptical reader can trace any number to its definition, source and code.
 - Partners and analysts can use the data and the methods with confidence.
 
-## 13. Non-goals
-
-Price or trading signals; reserve attestation; replacing the sources in section 5; real-time alerts; other chains beyond the four; a token or paid product; wallet-level doxxing.
-
-## 14. Risks
+## 11. Risks
 
 | Risk | Response |
 |---|---|
-| Wrong labels or a public error | Section 9; start small; independent review before publishing |
+| Wrong labels or a public error | Section 9, the integrity rules; start small; independent review before publishing |
 | Perceived as official | Clear disclaimer, and design that takes cues without copying (see design system) |
 | Read as criticism of Open Standard or its partners | Neutral framing and visible methods |
 | Mostly placed supply means little to show | That is itself the finding. Track when it changes |
 | Free RPC limits on history | Short history helps. Prefer free tiers |
-| Scope exceeds the time available | Phase 3 is the first release; later phases are optional |
+| Scope exceeds the time available | The first release is views A, B and E; the rest is optional |
 | Open Standard's promotion rules exclude the EEA | Data isn't obviously promotion, but avoid promoting the coin. Check before launch |
 
 ## Sources

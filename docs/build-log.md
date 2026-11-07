@@ -1,8 +1,8 @@
-# Build log
+# Lessons learned
 
-Honest notes on what went wrong and what the data taught us. Newest phase last.
+Honest notes on what went wrong and what the data taught us, grouped by area and dated. Newest last. Each fix named here has a test.
 
-## Phase 1, 2026-11-03: ingestion and reconciliation
+## Ingestion and reconciliation, 2026-11-03
 
 ### What went wrong
 
@@ -17,10 +17,6 @@ Honest notes on what went wrong and what the data taught us. Newest phase last.
 
 **`executemany` was too slow.** About 0.86 ms per row is fine at 1,000 rows, but not at 20,000 per range, and the database stays locked while it runs. Binding one list per column and using `unnest` wrote 20,000 rows in 0.1 s.
 
-**Commits that failed lint.** One batch of commits was made while `make check` was failing, because the commit script did not depend on its result. It was caught before pushing and the commit was amended.
-
-**A paging test that was wrong.** One test asserted that a full page in a single block returned nothing. That case actually raises an error, as intended. The test was rewritten to cover what its name promised: a page ending exactly on a block boundary.
-
 **One unexplained stall, still unproven.** The very first Ethereum run stopped writing after about 2 minutes and sat idle for about 27 minutes until it was killed. Its output was buffered through `tail`, so there is no log of why, and the cause can't now be established. There are two candidates. One is a slow read, since the 60 second timeout only limits the gap between bytes. The other is a rate limit wait: 27 minutes is inside Blockscout's 22 to 36 minute reset, and the earliest committed client could already wait up to 30 minutes on a 429. Its warning would have sat in the same buffer. Both are now closed off. Each attempt has a 120 second deadline, tested against a real trickling socket, and every pause of 5 seconds or more logs its length. A silent gap now means a real hang. Don't pipe a long run through `tail`.
 
 **A review of this code found bugs the tests had missed.** Each now has a test.
@@ -32,12 +28,7 @@ Honest notes on what went wrong and what the data taught us. Newest phase last.
 - **A conflicting row was silently dropped.** `ON CONFLICT DO NOTHING` also hid a different row at the same position. It now raises. This adds about 15 ms per 20,000 rows at 2M stored rows.
 - **Smaller ones.** A Bridge total given as a JSON number or with too many decimals was silently truncated, and now raises. Nothing checked `chain_id`, so a mispasted RPC URL looked like a quiet chain. Logs from another contract weren't rejected locally. Provider URLs reached logs, errors and `repr(Chain)`. A rate limit hint outlived its response and could repeat a long wait after an unrelated failure. A node lagging behind every stored block got advice to rebuild the database, which costs hours. `--chain tempo` listed Ethereum as neither checked nor missing. A sync after a long backfill finished hours behind the tip, too old for reconciliation on public nodes.
 
-**More commits that failed the check.** Three commits in this review went in with one test failing, because the command was `make check | tail && git commit`, and a pipeline's exit status is `tail`'s. This is the same mistake as the earlier lint failure. The test had pinned the old request sequence, and a follow-up commit updated it. Run the check without a pipe when a commit depends on it.
-
-**Decisions from the review.**
-
-- The key stays chain, block and log index, though `docs/architecture.md` says chain, transaction and log index. They identify the same rows on one EVM chain, and changing it means rebuilding a table in a live database for no gain on these two chains. Revisit with Solana.
-- `make reconcile` can still exit 0 with chains unchecked, and the README says so. Deciding what counts as a full pass belongs to the cross-chain reconciliation unit, and nothing publishes before that.
+**Decision from the review.** The key stays chain, block and log index, though an early draft of the architecture said chain, transaction and log index. They identify the same rows on one EVM chain, and changing it would mean rebuilding a table in a live database for no gain. This was settled for Solana too: see the first full reconciliation below.
 
 **Known gaps.** A Blockscout index that lags more than the 2,000 block tail would return "No logs found" for blocks that have logs, and the cursor would pass them. Reconciliation catches this for mints and burns, not ordinary transfers, so the sampled balance check must stay blocking. Whether Blockscout and RPC report the same `logIndex` for a block hasn't been checked. If they differ, a re-read across the boundary would store duplicates at new positions.
 
@@ -60,7 +51,7 @@ Honest notes on what went wrong and what the data taught us. Newest phase last.
 
 **Bridge's figure moves quickly.** It read 872,221,164.60664 at the start of the day and 889,381,963.45664 hours later. Any full check needs a stated timing tolerance, as the PRD says.
 
-## Phase 1, 2026-11-04: the first full reconciliation
+## The first full reconciliation, 2026-11-04
 
 ### Result
 
@@ -109,17 +100,16 @@ These were found before any real run, by reviews that reproduced each one agains
 - **A Bridge error can pass.** An error exactly equal to the moves inside the window matches one of the attainable sums.
 - **Scrubbing has gaps.** A key under 8 characters, a key joined by `-` or `_`, and a key that is fully percent-encoded all survive scrubbing.
 - **Solana has no reorg test.** It reads finalized data only, so there is nothing to simulate.
-- **`solana.py`'s checks are protected by hand.** Path enforcement for that file is an owner change, so for now a reviewer has to watch it.
 
-### Decision closed
+### Decision on the key
 
-**The key stays chain, block or slot, and log index.** This closes the earlier "Revisit with Solana". Solana's `log_index` is built from the transaction index and the position within the transaction, so it fits the same key, and no table needed rebuilding.
+**The key stays chain, block or slot, and log index.** Solana's `log_index` is built from the transaction index and the position within the transaction, so it fits the same key, and no table needed rebuilding.
 
-## Phase 3, 2026-11-04: the site
+## The site, 2026-11-04
 
 ### What went wrong
 
-**A bare `pnpm` crashed.** Corepack 0.34 from Homebrew looks for `bin/pnpm.cjs`, which pnpm 12 doesn't ship, and exits with "Cannot find module". The same crash can reappear in any local setup script that calls `pnpm` directly. The site now runs pnpm only through `npx`, at the one version in `web/package.json`'s `packageManager`, and the Makefile reads it from there. Use `make web-install`, never a bare `pnpm`. This was checked on macOS only. Linux and the CI runner were not checked, and nothing relies on Corepack there.
+**A bare `pnpm` crashed.** Corepack 0.34 from Homebrew looks for `bin/pnpm.cjs`, which pnpm 12 doesn't ship, and exits with "Cannot find module". The same crash can reappear in any local setup script that calls `pnpm` directly. The site now runs pnpm only through `npx`, at the one version in `web/package.json`'s `packageManager`, and the Makefile reads it from there. [Operations](operations.md#the-site) has the rule. This was checked on macOS only. Linux and the CI runner were not checked, and nothing relies on Corepack there.
 
 **The newest TypeScript and ESLint left unmet peers.** TypeScript 7.0.2 and ESLint 10.14.0 both leave peer dependencies unmet in `eslint-config-next` and `typescript-eslint`. The site pins TypeScript 6.0.3 and ESLint 9.39.5, which have none. Move them together, and only when those two packages support the newer versions.
 
@@ -127,12 +117,10 @@ These were found before any real run, by reviews that reproduced each one agains
 
 **An ignored folder nearly hid code.** `.gitignore` matches `data/` at any depth, so a folder named `web/lib/data/` would have been silently untracked. Nothing under `web/` uses that name.
 
-**The first dataset schema's wording promised more than a static page can do.** It described a failed run as marking the page stale. A failed run does mark the last published dataset stale, but a static page shows that only after someone rebuilds it. Until then, only the clock tells a page it is old, and it does so once the data is more than 36 hours old, in the reader's browser. So a failed run can go unseen on a page that nobody rebuilds for up to 36 hours. The plan now says this, the page compares times with the reader's clock, and the choice of who rebuilds, and how often, is left to the release decision in Phase 4.
+**The first dataset schema's wording promised more than a static page can do.** It described a failed run as marking the page stale. A failed run does mark the last published dataset stale, but a static page shows that only after it is rebuilt. Until then, only the clock tells a page it is old, and it does so once the data is more than 36 hours old, in the reader's browser. So a failed run can go unseen on a page that nobody rebuilds for up to 36 hours. The page now compares times with the reader's clock, and the daily hosted run is what rebuilds it.
 
 ### Known limits
 
-- **No hosted schedule.** The Dagster schedule ships stopped, and nothing rebuilds the site by itself.
-- **Recharts' behavior in a real browser is proved by tests and sample builds only** until the acceptance unit (3.6) runs it at phone and desktop widths.
 
 ### Acceptance
 
@@ -151,12 +139,6 @@ Acceptance ran on a local build from real dataset 20261104T163224Z and from the 
 - **Ethereum's velocity read 88.22% a day.** That is on a $2.8M circulating supply that burns had shrunk, so the figure misleads on its own. The page now carries a note taken from the dataset's warnings.
 - **$454.5M of the $888.3M supply predates Day 0.** The page now says so.
 
-### Earlier lessons
-
-- **A held-out PR with conflicts gets no CI.** A worker waiting on its checks waits forever.
-- **A 502 on merge can still have merged.** Check the result before retrying.
-- **GitHub returned intermittent 5xx errors on 2026-11-04.**
-
 ### Not run
 
 - A real screen reader.
@@ -164,16 +146,16 @@ Acceptance ran on a local build from real dataset 20261104T163224Z and from the 
 - A live refused publish on real data. That a failed check stops publishing is proved by tests and by a marked copy.
 - Credits actually charged by the Solana provider are unknown.
 
-## Phase 4, 2026-11-05: dashboard refurbish
+## The dashboard rework, 2026-11-05
 
-Units U1 to U5 of `docs/plans/2026-11-04-002-dashboard-refurbish-plan.md`. U6 writes the measured results.
+The main page became a dashboard with legends, keeping every finding visible and changing no number. This covers the build and the review rounds that followed.
 
 ### What went wrong
 
-- **A floor rounded up in one place.** U3 printed the exchange floor rounded down in its legend, as "at least" needs, but the bar's tooltip still used the compact figure: "$346.6K" for $346,579. Review caught it, and the tooltip now uses the legend's figure.
+- **A floor rounded up in one place.** The supply view printed the exchange floor rounded down in its legend, as "at least" needs, but the bar's tooltip still used the compact figure: "$346.6K" for $346,579. A review caught it, and the tooltip now uses the legend's figure.
 - **A caveat pointed at rows that weren't there.** The exchange-floor note said "the rows below", but the named rows sit under All's table toggle and on no single-chain panel. It now says "the named exchange rows".
-- **Checks that read the same code as the page.** U3's panel checks in `verify-output` took what to expect from the functions the view renders, so a fault in those functions would have passed. The supply card's figures and wallet table are now also held to the KPI rows.
-- **A link left with its card.** The active wallets definition link was on the card U3 folded into the supply card, and wasn't carried over until review.
+- **Checks that read the same code as the page.** The panel checks in `verify-output` took what to expect from the functions the view renders, so a fault in those functions would have passed. The supply card's figures and wallet table are now also held to the KPI rows.
+- **A link left with its card.** The active wallets definition link was on a card that was folded into the supply card, and wasn't carried over until review.
 - **Narrow weekly figures ran into each other, then broke inside a number.** On one chain at 320 px, figures such as "$516.1K" were wider than their bar's column. The first fix let them wrap anywhere, and review found "$516." over "1K", which reads as $516. A figure now breaks only before its unit, and browser checks hold each figure over its own bar and each number on one line.
 - **A pin could point at a row that wasn't drawn.** A chain with supply minted before Day 0 and no transfers since would have kept its Day 0 and small-ticket pins with no waterfall to sit on, and `verify-output` would then have refused the build. With no waterfall those notes now stay in the list with no pin.
 - **"−$0".** A removal that rounds to nothing printed a minus sign on the per-chain waterfalls. It now prints "$0", as `formatCompact` does.
@@ -181,36 +163,26 @@ Units U1 to U5 of `docs/plans/2026-11-04-002-dashboard-refurbish-plan.md`. U6 wr
 - **jsdom finds an id across the whole document.** A test that mounted the chain view twice found the second card missing, because `container.querySelector("#id")` returned nothing when an earlier mount held the same id. Tests that mount twice now use an attribute selector.
 - **A grid that stacked where it fit.** The hairline table's rule stacks any table in a card under 720 px, which would have stacked the chain grid in every half-width card. The grid has its own threshold, and a browser check holds both chain cards inside themselves at every width.
 - **A chart that couldn't be read on a phone.** The velocity chart's two fixed label columns left its bars 22 px of track at 320, so the comparison it exists for was lost. On a narrow card the measure's name now sits above its bar. That costs about 280 px of height at 390.
-- **Checks computed by the code they check, again.** U5's first `verify-output` checks for the velocity chart and the grid took their expected figures from the same functions the views render. They now work the figures out from the KPI and chain roles rows on their own, as review asked of U3 and U4 too.
-- **CI ran out of memory again.** With the activity and chain-card groups added, `verify-output-panels.test.ts` crashed its CI worker (SIGABRT, out of memory), as U3's tests had in `verify-output.test.ts`. Each whole-page group is now a file of its own, so a worker of its own. The heap growth behind it is still not understood.
+- **Checks computed by the code they check, again.** The first `verify-output` checks for the velocity chart and the grid took their expected figures from the same functions the views render. They now work the figures out from the KPI and chain roles rows on their own, as review had asked of the supply and activity checks.
 
 
-### Maintainer review after U5
-
-The changes are listed in [the plan's Maintainer review](plans/2026-11-04-002-dashboard-refurbish-plan.md#maintainer-review).
+### First whole-page review
 
 - **A card clipped what floats out of it.** Sample and preview cards had `overflow: hidden` for their hatched edge, which would have cut any tooltip at the card's border. The edge now rounds its own corners, and nothing clips.
 - **A card is its own stacking context.** Its container query contains it, so an open tooltip painted under the next card. The card with an open tooltip now rises over the cards after it, and stays under the sticky header.
 - **A check counted hidden panels as moved.** The browser check that opening a tooltip moves nothing read each element's place on the page. A hidden filter panel has no box, so its place followed the scroll, and focus scrolling to a tooltip counted as 87 moves. Hidden elements are now left out.
-- **`verify-output` run from the repository root of a worktree** can't find the dataset schemas, as it resolves them from the working directory's parent. Run it from `web/`. This predates the review.
 
-### Maintainer review, third round
+### Third round
 
-The changes are listed in [the plan's Third round](plans/2026-11-04-002-dashboard-refurbish-plan.md#third-round).
-
-- **Badges by what they qualify, then footnotes.** With each badge moved onto the legend row or chart row it qualifies, opening a card's table took the chart, and so the exchange-floor badge, out of view, which the browser check on the exchange rows caught. The maintainer then replaced the badges with footnotes, whose list stays one tap away while the table shows.
+- **Badges by what they qualify, then footnotes.** With each badge moved onto the legend row or chart row it qualifies, opening a card's table took the chart, and so the exchange-floor badge, out of view, which the browser check on the exchange rows caught. The badges were then replaced with footnotes, whose list stays one tap away while the table shows.
 - **A footer check read the tooltip with its link.** The check that a non-passing footer never says "Reconciled" read the status's whole text, where the link and its tooltip ran together with no space, so the word boundary could miss a planted "Reconciled". It now reads each element's words apart, with the tooltips left out.
 - **The clock swap wasn't run on real data this round.** The real dataset was more than 36 hours old by the time of the run, so the build was already stale and had nothing to swap. The passing state was checked by `verify-output` on a build with its clock set to 5 Nov, and in screenshots.
-- **CI ran out of memory a third time.** With the footnote mutations added, `verify-output.test.ts` reached about 2,400 lines and its CI worker crashed (SIGABRT, heap out of memory), as U3's and U5's tests had. Its shared planted sites are now `tests/verify-output-fixture.ts`, and its tests three files, so three workers.
 
-### Maintainer review, fourth round
+### Fourth round
 
-The changes are listed in [the plan's Fourth round](plans/2026-11-04-002-dashboard-refurbish-plan.md#fourth-round).
-
-- **The supply card ignored the filter.** Round two made it one card with every chain's bar, and its legend, figures, footnotes and tables stayed the first option's, so choosing a chain changed only which bar was marked. `verify-output` passed it because it held that one card to All's figures. Each option now has its own card, and `verify-output` holds every panel's legend and table to the dataset's rows, read without the page's supply code, so a chain's panel showing every chain's figures fails by name.
+- **The supply card ignored the filter.** An earlier round had made it one card with every chain's bar, and its legend, figures, footnotes and tables stayed the first option's, so choosing a chain changed only which bar was marked. `verify-output` passed it because it held that one card to All's figures. Each option now has its own card, and `verify-output` holds every panel's legend and table to the dataset's rows, read without the page's supply code, so a chain's panel showing every chain's figures fails by name.
 - **A named exchange on a chain's card.** The named exchange rows were across chains. A chain's card now lists only what `exchange_holdings` gives for that chain. Listings name no chain, so the name checks now allow each name once per row the page writes, not once in all.
 - **A marker under the sticky header.** The first browser check of the footnote marker clicked one hidden under the sticky header and filter, so Playwright scrolled the page to reach it and the check read that as the marker's jump. The check now clicks only a marker that a hit test finds uncovered.
-- **Scroll anchoring moved the page when a list opened.** A card's visually hidden summary is an absolute box with its static place after the card's content, so it moved down when the footnotes opened, and Chrome, holding the page still by it, scrolled the page by the list's height. That was part of the jump the maintainer saw, and it threw off the drawer's own measurement at 320 and 390. Visually hidden text is now never a scroll anchor.
+- **Scroll anchoring moved the page when a list opened.** A card's visually hidden summary is an absolute box with its static place after the card's content, so it moved down when the footnotes opened, and Chrome, holding the page still by it, scrolled the page by the list's height. That was part of the visible jump, and it threw off the drawer's own measurement at 320 and 390. Visually hidden text is now never a scroll anchor.
 - **A muted bar faded its words.** Muting a whole bar faded the "Circulating" bracket and the direct labels with it, which the contrast check caught. Only the bar's fill fades now, and a muted bar's direct labels are hidden, as the legend has the chosen chain's.
-- **CI ran out of memory a fourth time.** With a supply card per filter option, the planted main page in `verify-output-panels.test.ts` grew, and its CI worker crashed (SIGABRT, heap out of memory) on 26bad6b. Its setup is now `tests/verify-output-panels-fixture.ts`, and its tests two files: the bars and legend, and the figures, footnotes, tables and step lines.
 - **A toggle that seemed to move.** Measuring the moved Table toggle on screen, it seemed to shift by up to 56 px when pressed. The card screenshot taken between the two measurements had scrolled the page. Measured against its card, or with nothing in between, the toggle doesn't move, and the browser check now measures it that way.

@@ -1,6 +1,6 @@
 # Architecture
 
-**Status:** binding. If a decision here is missing or wrong, change this file in the same PR.
+**Status:** binding. If a decision here is missing or wrong, change this file in the same pull request.
 
 ## Purpose
 
@@ -21,17 +21,17 @@ Prefer a small system that's clearly correct over a big one that looks impressiv
 | Modeling | dbt with dbt-duckdb | Standard for analytics. Tests and lineage come with it |
 | Orchestration | Dagster assets, with asset checks | Asset model suits data work. Checks can block publishing |
 | Site | Static Next.js with TypeScript, Tailwind and Recharts, on Vercel | No database calls from visitors |
-| Hosting | One Railway cron service runs the daily job and deploys a prebuilt Vercel preview; production is promoted by hand | One writer, one volume, nothing listening. See `docs/deploy.md` |
-| Site packages | pnpm, always through `npx` at the version in `web/package.json`'s `packageManager` | Needs only Node and npm, which CI already has. A bare or Corepack `pnpm` can crash |
+| Hosting | One Railway cron service runs the daily job and deploys a prebuilt Vercel preview; production is promoted by hand | One writer, one volume, nothing listening. See [deploying the daily run](deploy.md) |
+| Site packages | pnpm, always through `npx` at the version in `web/package.json`'s `packageManager` | Needs only Node and npm, which CI already has. [Operations](operations.md#the-site) says why not a bare `pnpm` |
 | Quality | ruff, mypy, pytest, sqlfluff, ESLint, Prettier, Vitest | Enforced by `make check` |
 
 **Cost:** a few dollars a month: one daily Railway run of about 35 minutes and a small volume. The site is static, on Vercel's free tier.
 
-**Hosted schedule:** Railway's cron runs `scripts/daily.sh` instead of the Dagster schedule, which stays off. The DuckDB files live on the service's volume, which has no backups: a lost volume is rebuilt from the chains, which takes hours because of Blockscout's rate limits, or restored from a copy taken by hand (see Backups and restore).
+**Hosted schedule:** Railway is the current host. Moving to another would change only the service's settings. Its cron runs `scripts/daily.sh` instead of the Dagster schedule, which stays off. The DuckDB files live on the service's volume, which has no backups: a lost volume is rebuilt from the chains, which takes hours because of Blockscout's rate limits, or restored from a copy taken by hand (see [backup and restore](operations.md#backup-and-restore)).
 
 **No Dagster partitions (decision):** ingest is cursor-based and idempotent, and dbt rebuilds in seconds, so partitions would add a second backfill path that could disagree with the cursor. dbt runs as one asset for the same reason. A missed day is caught up by the next run, which reads from the cursor. Revisit only if a rebuild stops taking seconds.
 
-**Orchestration:** one Dagster job, `ousd_daily`, runs four assets in order: `raw_transfers`, `chain_reconciliations`, `dbt_marts`, then `published_dataset`. The blocking checks are asset checks on `dbt_marts`, so a failed check stops the run before publish, marks the last published dataset stale and publishes nothing. Ingest and reconciliation retry twice, five minutes apart, on a source error. A failed check or a reconciliation that isn't a full pass never retries. The schedule (06:00 UTC daily) and a failure sensor ship **stopped**: they run only while the Dagster UI is up and someone has switched them on. A failed run writes `data/alerts/<run_id>.json` from a failure hook inside the run, so `make run` alerts too. With `OUSD_ALERT_WEBHOOK_URL` set it also posts a scrubbed summary there, and with `OUSD_HEARTBEAT_URL` set a fully successful run pings that URL for a dead-man check. Both are secrets and unset by default. A run-scoped resource limits the run's time (`OUSD_MAX_RUNTIME_SECONDS`), the dbt build (`OUSD_DBT_TIMEOUT_SECONDS`) and the total time spent waiting on rate limits (`OUSD_RATE_LIMIT_WAIT_SECONDS`). Dagster's state lives in `data/.dagster`.
+**Orchestration:** one Dagster job, `ousd_daily`, runs four assets in order: `raw_transfers`, `chain_reconciliations`, `dbt_marts`, then `published_dataset`. The blocking checks are asset checks on `dbt_marts`, so a failed check stops the run before publish, marks the last published dataset stale and publishes nothing. Ingest and reconciliation retry twice, five minutes apart, on a source error. A failed check or a reconciliation that isn't a full pass never retries. The schedule (06:00 UTC daily) and a failure sensor ship **stopped**: they run only while the Dagster UI is up and someone has switched them on. A failed run writes an alert file from a failure hook inside the run, and a run-scoped resource limits its time. Dagster's state lives in `data/.dagster`. Alerts, the heartbeat and the limits are in [operations](operations.md).
 
 ## Layout
 
@@ -42,7 +42,7 @@ dbt/                dbt project: staging, intermediate, marts, tests
 labels/             Versioned entity labels, each with source type, source and confidence
 web/                Static site. Reads the published dataset, its schemas and the methodology doc
 tests/              Python tests. No network, ever
-docs/               PRD, architecture, plans, design system, methodology, build log
+docs/               PRD, architecture, operations, roadmap, design system, methodology, lessons learned
 data/               Local DuckDB and published output. Not in git
 ```
 
@@ -142,7 +142,7 @@ Marts map to PRD questions. Definitions are in PRD section 7, and these are the 
 
 - JSON per view, plus CSV for download.
 - A manifest with data-as-of time, git commit and check results.
-- Numbers as strings where precision matters, with a schema the site validates at build. The schemas are in `pipeline/ousd/schemas/`, now at version 2. `docs/plans/2026-11-03-001-insight-models-plan.md` is the record of version 1.
+- Numbers as strings where precision matters, with a schema the site validates at build. The schemas are in `pipeline/ousd/schemas/`, now at version 2.
 
 ## Site
 
@@ -162,14 +162,14 @@ Marts map to PRD questions. Definitions are in PRD section 7, and these are the 
 - Small modules with one job. Type hints throughout. Clear names over comments; comments explain why.
 - Tests cover behavior and edge cases: paging boundaries, idempotent re-runs, reorg replacement, reconciliation failures. Tests never use the network.
 - No speculative abstractions. A second chain justifies an interface; an imagined fifth doesn't.
-- Conventional Commits. Every PR has `## Decisions`. UI PRs add `## Evidence`.
-- `docs/build-log.md` records what went wrong, honestly.
+- Conventional Commits, with an area as the scope: `pipeline`, `dbt`, `web`, `docs`, `ops` or `deps`, for example `fix(dbt): count mints once`. Every pull request has `## Decisions`. Pull requests that change the site add `## Evidence`.
+- [Lessons learned](build-log.md) records what went wrong, honestly.
 
 ## Commands
 
-`make check` runs lint, types and tests for the Python code, then, once `web/package.json` exists, installs the site's packages and runs Prettier, ESLint, `tsc`, Vitest and a site build. It has no chain access, though a clean install reaches package registries. It's the only command CI calls.
+`make check` runs lint, types and tests for the Python code, then, once `web/package.json` exists, installs the site's packages and runs Prettier, ESLint, `tsc`, Vitest and a build of both sample sites. It has no chain access, though a clean install reaches package registries. It's the only command CI calls.
 
-`make build` builds what's buildable and `make test` runs tests. `make web-install` installs the site's packages, `make web-samples` builds the two bundled sample sites, `make web-build` builds from the newest dataset it finds, and `make web-release` builds only from a dataset that is release grade. `make web-shots` captures local screenshots and is never part of `make check`.
+`make build` builds what's buildable and `make test` runs tests. The site's targets (`make web-*`) and the rules for running pnpm are in [operations](operations.md#the-site).
 
 The pipeline commands:
 
@@ -184,26 +184,4 @@ The pipeline commands:
 | `make dagster-dev` | The Dagster UI, where the schedule and failure sensor can be switched on |
 | `make backup` | A checksummed copy of the raw database, uploaded when `OUSD_BACKUP_URL` is set. Manual only |
 
-Run one writer at a time: each of these writes to `data/ousd.duckdb`, and the second to start exits 2 with "database in use". `ousd publish` only reads it. `ousd check` reads it, then opens it as a writer only for the one write that records its results. Readers can share the file with each other but never with a writer, so a reader started while a writer runs exits 2 too, and so does a writer started while a reader runs. Exit 2 from `ousd check`, `ousd publish` or `ousd migrate` can also mean the schema doesn't match the code: migrations are pending (run `ousd migrate`, which needs no key) or the database is newer than the code.
-
-If Node or npm is missing or out of range, the site's steps fail with a message saying what to install. They never skip, and they never load `.env`.
-
-## Backups and restore
-
-`data/ousd.duckdb` is the only copy of the raw store that matters: the marts rebuild from it in seconds, but the raw store takes hours to rebuild from the chains, and Solana history needs a keyed provider.
-
-**Backup.** `make backup` (or `ousd backup`) takes the writer lock, runs `CHECKPOINT` so the file holds every change, copies it to `OUSD_BACKUP_DIR` (default `data/backups`) as `ousd-YYYYMMDDTHHMMSSZ.duckdb` (UTC), and releases the lock. DuckDB's lock is a POSIX record lock, which a process loses when it closes any descriptor on the file, so the copy reads through one descriptor opened before the lock is taken and closed after it is released. It then hashes the copy, opens it read-only to prove DuckDB can read it, and writes `<name>.sha256` in the format `sha256sum -c` reads. The checksum is written last, so a copy without one is incomplete. Like the other writers, it exits 2 with "database in use" while another process holds the file, and copies nothing. It applies no migrations: a copy keeps the schema it was taken at. Each copy is the size of the database, about 90 MB now.
-
-**Upload.** With `OUSD_BACKUP_URL=s3://bucket/prefix`, `OUSD_BACKUP_ACCESS_KEY_ID` and `OUSD_BACKUP_SECRET_ACCESS_KEY` set, the copy goes to S3-compatible object storage through boto3, then its size is checked, then the checksum is uploaded. For Scaleway Object Storage also set `OUSD_BACKUP_ENDPOINT_URL=https://s3.fr-par.scw.cloud` and `OUSD_BACKUP_REGION=fr-par`. The endpoint must use https. Plain http is accepted only for `localhost` or `127.0.0.1`, such as a local test server. The credentials are passed to boto3 explicitly, and configured endpoints are ignored, so neither the credentials nor the endpoint ever come from `~/.aws` or `AWS_*` variables. Only the region does, when `OUSD_BACKUP_REGION` is unset. A failed upload exits 1 and keeps the local copy. Exit 0 means the copy is on disk and, when a URL is set, in the bucket. The output names objects only, such as `uploaded: ousd-<stamp>.duckdb to object storage`, never the bucket, prefix, URL or endpoint. The upload is checked by size, not by reading it back, so the `.sha256` in the bucket is what proves a downloaded copy intact.
-
-**Retention.** After each backup, in the folder, and after an upload, among the objects directly under the prefix. Of the complete copies it keeps the newest copy of each of the last `OUSD_BACKUP_KEEP_DAILY` (default 7) UTC days that have one, and the newest of each of the last `OUSD_BACKUP_KEEP_WEEKLY` (default 4) ISO weeks that have one. The two overlap, so the defaults keep 7 to 10 copies. Days and weeks are counted only when they have a copy, so if backups stop, the old ones never age out to nothing. An incomplete copy, or a hidden `.partial` file a killed run left, is removed once a newer complete copy exists. The copy just taken is always kept, even if the clock stepped back. Files not named like a copy are never touched. Retention reads only names, so use one folder and one prefix per database.
-
-**Not scheduled.** The hosted run takes no backups: `scripts/daily.sh` doesn't call `make backup`, so no backup failure can fail a daily run.
-
-**Restore.**
-
-1. Stop every writer. On the host, set the start command to `sleep infinity` with no cron schedule, as in the first seeding in `docs/deploy.md`.
-2. Put the copy and its `.sha256` in one folder. From the bucket, with any S3 tool given the bucket's credentials, for example `aws s3 cp --endpoint-url https://s3.fr-par.scw.cloud s3://<bucket>/<prefix>/ousd-<stamp>.duckdb .`, then the same for `ousd-<stamp>.duckdb.sha256`.
-3. Run `ousd restore <folder>/ousd-<stamp>.duckdb`, with `OUSD_DB_PATH` pointing at the target. It checks the copy against its checksum, and that DuckDB opens it, before changing anything. It exits 1 on a mismatch, a missing checksum, or a copy at a schema newer than the code. If a database is already there it refuses, unless you pass `--force`. Then it takes the writer lock (exit 2 if another process holds it), swaps the copy in atomically, and keeps the old file as `<target>.replaced-<stamp>`. The lock covers the old file, so no writer has it open while it is kept and swapped out. It doesn't cover the restored file, which is complete before the swap, so a writer may open it straight after. Delete that once the restore is checked. A damaged database can't be locked, so `--force` refuses it: move it aside, then restore without `--force`.
-4. A copy older than the code is migrated as usual: the next writer, or `ousd migrate`, applies the pending migrations. `ousd check` and `ousd publish` only read, so until then they exit 2 and say to run `ousd migrate`. `restore` prints when this applies. A copy newer than the code is refused, because nothing could open it until the code is updated.
-5. Verify offline with `ousd migrate`, `make models`, then `ousd check --run-id <id>`. Every check reads stored data except freshness, which fails for a copy whose newest transfer or reconciliation is over 36 hours old. The next `make run` catches up from the cursor.
+Exit codes, the one-writer rule, keys, backup and restore are in [operations](operations.md).
