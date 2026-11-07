@@ -117,7 +117,7 @@ Ours divides by circulating supply, and the common one divides by total supply. 
 
 ### Active wallets
 
-Wallets that sent at least $1 of clean volume in the period, netted per transaction, excluding issuer, venue and system wallets. Also published at $100. These count wallets, not people.
+Wallets that sent at least $1 of clean volume in the period, netted per transaction. Unlabeled wallets count, and so do wallets labeled exchange or exchange-linked. Wallets labeled issuer, issuer route, system, DEX or lending don't. Also published at $100. These count wallets, not people.
 
 ### Concentration
 

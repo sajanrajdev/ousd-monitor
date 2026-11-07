@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 import duckdb
 import pytest
+from dbt_helpers import DBT_DIR, build_marts
 from ousd import checks, sources
 from ousd.chains import REQUIRED_CHAINS
 from ousd.decode import ZERO_ADDRESS, Transfer
@@ -584,29 +585,124 @@ def test_thresholds_are_read_from_what_the_build_compiled(world):
     }
 
 
-@pytest.mark.parametrize(
-    "model", ["int_wallet_placed", "mart_supply_journey", "mart_activity_waterfall"]
-)
-def test_a_model_that_no_longer_shows_a_threshold_fails_rather_than_guesses(world, model):
+def edit_build_params(world, compiled_code):
+    """dbt's record says the build compiled mart_build_params to this, or has no record of it."""
     path = world.sources.run_results
     results = json.loads(path.read_text())
-    for node in results["results"]:
-        if node["unique_id"].endswith(f".{model}"):
-            node["compiled_code"] = "select 1"
+    nodes = results["results"]
+    node = next(n for n in nodes if n["unique_id"] == "model.ousd_monitor.mart_build_params")
+    if compiled_code is None:
+        nodes.remove(node)
+    else:
+        node["compiled_code"] = compiled_code
     path.write_text(json.dumps(results))
-    assert "does not show one value" in world.run_checks()["dbt_tests"].detail
+    return results
 
 
-def test_two_values_of_one_threshold_are_not_read_as_either(world):
-    path = world.sources.run_results
-    results = json.loads(path.read_text())
-    for node in results["results"]:
-        if node["unique_id"].endswith(".mart_supply_journey"):
-            node["compiled_code"] += "\nwhere still_value >= 7"
-    path.write_text(json.dumps(results))
-    assert (
-        "does not show one value of placed_min_base_units" in world.run_checks()["dbt_tests"].detail
+def test_thresholds_do_not_depend_on_how_the_compiled_sql_is_laid_out(world):
+    results = json.loads(world.sources.run_results.read_text())
+    node = next(
+        n for n in results["results"] if n["unique_id"] == "model.ousd_monitor.mart_build_params"
     )
+    code = node["compiled_code"]
+    reformatted = re.sub(r"\s+", " ", re.sub(r"--[^\n]*", "", code)).replace(", ", "\n  ,  ")
+    assert reformatted != code
+    expected = checks.built_thresholds(results)
+    edited = edit_build_params(world, reformatted.upper().replace(" AS ", "\n\tAS "))
+    assert checks.built_thresholds(edited) == expected
+    assert world.run_checks()["dbt_tests"].status == "passed"
+
+
+@pytest.mark.parametrize(
+    "compiled_code,word",
+    [
+        (None, "does not show one mart_build_params"),
+        ("select 1 as placed_days", "does not hold one row of every threshold"),
+        (
+            "select * from (values (14, 1, 1, 1, 1, 1), (20, 1, 1, 1, 1, 1)) as t(placed_days, "
+            "placed_min_base_units, large_transfer_base_units, clean_tx_min_base_units, "
+            "active_dust_base_units, active_secondary_base_units)",
+            "does not hold one row of every threshold",
+        ),
+        ("select * from mart_supply_journey", "mart_build_params does not run"),
+    ],
+)
+def test_a_record_without_one_row_of_thresholds_fails_rather_than_guesses(
+    world, compiled_code, word
+):
+    edit_build_params(world, compiled_code)
+    result = world.run_checks()["dbt_tests"]
+    assert result.status == "failed"
+    assert word in result.detail
+
+
+def test_the_build_record_is_run_where_it_cannot_read_a_file(world):
+    results = edit_build_params(
+        world, f"select * from read_csv('{world.sources.labels}', all_varchar = true)"
+    )
+    with pytest.raises(ValueError, match="does not run"):
+        checks.built_thresholds(results)
+
+
+def test_dbt_tests_fails_when_the_marts_hold_other_thresholds(world):
+    world.mart_sql("UPDATE mart_build_params SET placed_days = 20")
+    assert "marts hold other thresholds" in world.run_checks()["dbt_tests"].detail
+
+
+def test_dbt_tests_fails_when_the_marts_have_no_thresholds(world):
+    world.mart_sql("DROP TABLE mart_build_params")
+    assert "marts have no mart_build_params" in world.run_checks()["dbt_tests"].detail
+
+
+DAY_S = 86_400
+START = 1_700_006_400  # 2023-11-15 00:00:00 UTC
+HOLDER = "0x" + "a" * 40
+PAYEE = "0x" + "b" * 40
+OVERRIDES: dict[str, object] = {
+    "placed_days": 2,
+    "placed_min_base_units": 30,
+    "large_transfer_base_units": 50,
+    "clean_tx_min_base_units": 7,
+    "active_dust_base_units": 3,
+    "active_secondary_base_units": 70,
+}
+
+
+def test_an_overridden_var_changes_the_models_and_what_the_checks_read_alike(tmp_path):
+    """The checks read the thresholds a build applied, not the project's, so an override shows in
+    both: here a two-day placed window and a $50-base-unit large transfer."""
+
+    def transfer(block, day, sender, receiver, value):
+        return Transfer(
+            block, None, START + day * DAY_S, f"0x{block:064x}", 0, sender, receiver, value
+        )
+
+    rows = [
+        ("base", transfer(1, 0, ZERO_ADDRESS, HOLDER, 100)),
+        ("base", transfer(2, 2, HOLDER, PAYEE, 60)),
+        # Makes day 4 the last complete day.
+        ("base", transfer(3, 5, ZERO_ADDRESS, PAYEE, 1)),
+    ]
+    marts = build_marts(tmp_path, rows, [], {"base": 3}, dbt_vars=OVERRIDES)
+    try:
+        results = json.loads((tmp_path / "target" / "run_results.json").read_text())
+        assert checks.built_thresholds(results) == OVERRIDES
+        assert checks._threshold_problems(results, DBT_DIR / "dbt_project.yml", marts) == []
+        # The models applied the same values: still_value starts on the holder's third day, and
+        # the 60 moved on day 2 is large, not everyday.
+        still = marts.execute(
+            "SELECT day_utc - DATE '2023-11-15', still_value FROM int_wallet_placed "
+            "WHERE address = ? ORDER BY day_utc",
+            [HOLDER],
+        ).fetchall()
+        assert still == [(0, None), (1, None), (2, 40), (3, 40), (4, 40)]
+        clean = marts.execute(
+            "SELECT clean_large, clean_everyday, clean_tx_count FROM mart_activity_waterfall "
+            "WHERE day_utc = DATE '2023-11-17'"
+        ).fetchone()
+        assert clean == (60, 0, 1)
+    finally:
+        marts.close()
 
 
 def test_dbt_tests_fails_with_no_record_of_a_build(world):

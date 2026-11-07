@@ -39,18 +39,12 @@ models:
       - name: value
         description: '{{ doc("base_units") }}'
         data_tests: [not_null]
-  - name: stg_sync_coverage
+  - name: stg_sync_state
     description: >
-      One row per chain: how far it has been ingested and its last complete UTC day.
-      Grain: one row per `chain`.
+      How far each chain has been ingested, as stored. Grain: one row per `chain`.
     columns:
       - name: chain
         description: '{{ doc("chain") }}'
         data_tests: [unique, not_null]
       - name: synced_through
         description: The newest block (or Solana slot) ingested for the chain.
-      - name: last_transfer_timestamp
-        description: The time of the chain's newest transfer, in seconds since the Unix epoch.
-      - name: last_complete_day
-        description: >
-          {{ doc("utc_day") }} The chain's last complete day: the day before its newest transfer.

@@ -1,0 +1,43 @@
+version: 2
+models:
+  - name: mart_build_params
+    config:
+      contract: {enforced: true}
+    description: >
+      The thresholds the marts were built with, from the project's vars and any `--vars` on the
+      build. The blocking checks compare it with `dbt_project.yml` and publish describes the
+      dataset from it, so neither has to read a threshold out of another model's SQL. Not
+      published as a table. Grain: exactly one row.
+    columns:
+      - name: placed_days
+        data_type: integer
+        description: >
+          How many days a balance must stay put to count as placed.
+        data_tests: [not_null]
+      - name: placed_min_base_units
+        data_type: hugeint
+        description: >
+          The smallest balance that can count as placed. {{ doc("base_units") }}
+        data_tests: [not_null]
+      - name: large_transfer_base_units
+        data_type: hugeint
+        description: >
+          The clean value at and above which a transaction is large rather than everyday.
+          {{ doc("base_units") }}
+        data_tests: [not_null]
+      - name: clean_tx_min_base_units
+        data_type: hugeint
+        description: >
+          The smallest clean value a transaction needs to count in the clean transfer count.
+          {{ doc("base_units") }}
+        data_tests: [not_null]
+      - name: active_dust_base_units
+        data_type: hugeint
+        description: >
+          The least a wallet must send in seven days to count as active. {{ doc("base_units") }}
+        data_tests: [not_null]
+      - name: active_secondary_base_units
+        data_type: hugeint
+        description: >
+          The higher sending floor for the second active-wallet count. {{ doc("base_units") }}
+        data_tests: [not_null]

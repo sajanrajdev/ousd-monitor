@@ -109,7 +109,13 @@ models:
         data_type: varchar
         description: >
           The exchange's name, as a public source gives it.
-        data_tests: [not_null]
+        data_tests:
+          - not_null
+          # Every name comes from a label, so it is never one the model made up.
+          - relationships:
+              arguments:
+                to: ref('stg_labels')
+                field: entity
       - name: wallets
         data_type: bigint
         description: >

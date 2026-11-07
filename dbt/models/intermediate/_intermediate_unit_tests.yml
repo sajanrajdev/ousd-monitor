@@ -1,0 +1,90 @@
+version: 2
+# Small inline cases for the rules the activity and journey figures rest on. dbt runs them in every
+# build, before the model they test, so a broken rule stops the build like any other test.
+unit_tests:
+  - name: transfer_classes_follow_the_rule_order
+    description: >
+      Each class in its order of precedence: mint and burn, the tempo fee (the last transfer of a
+      transaction, to the fee manager), other tempo fee-manager movements, issuer flows, transfers
+      within one named entity, and the rest. The fee manager means nothing off tempo.
+    model: int_transfer_classes
+    given:
+      - input: ref('stg_transfers')
+        rows:
+          - {chain: tempo, tx_hash: t_mint, log_index: 0, from_address: "0x0000000000000000000000000000000000000000", to_address: "0xa", value: 10}
+          - {chain: tempo, tx_hash: t_burn, log_index: 0, from_address: "0xa", to_address: "0x0000000000000000000000000000000000000000", value: 10}
+          - {chain: tempo, tx_hash: t_fee, log_index: 0, from_address: "0xa", to_address: "0xb", value: 10}
+          - {chain: tempo, tx_hash: t_fee, log_index: 1, from_address: "0xa", to_address: "0xfeec000000000000000000000000000000000000", value: 1}
+          - {chain: tempo, tx_hash: t_liquidity, log_index: 0, from_address: "0xa", to_address: "0xfeec000000000000000000000000000000000000", value: 5}
+          - {chain: tempo, tx_hash: t_liquidity, log_index: 1, from_address: "0xa", to_address: "0xb", value: 10}
+          - {chain: ethereum, tx_hash: e_issuer, log_index: 0, from_address: "0xa", to_address: "0x1551", value: 10}
+          - {chain: ethereum, tx_hash: e_same, log_index: 0, from_address: "0xe1", to_address: "0xe2", value: 10}
+          - {chain: ethereum, tx_hash: e_manager, log_index: 0, from_address: "0xa", to_address: "0xfeec000000000000000000000000000000000000", value: 10}
+      - input: ref('stg_labels')
+        rows:
+          - {chain: ethereum, address: "0x1551", category: issuer, entity: Issuer}
+          - {chain: ethereum, address: "0xe1", category: exchange, entity: Venue}
+          - {chain: ethereum, address: "0xe2", category: exchange_linked, entity: Venue}
+    expect:
+      rows:
+        - {chain: tempo, tx_hash: t_mint, log_index: 0, transfer_class: mint}
+        - {chain: tempo, tx_hash: t_burn, log_index: 0, transfer_class: burn}
+        - {chain: tempo, tx_hash: t_fee, log_index: 0, transfer_class: remaining}
+        - {chain: tempo, tx_hash: t_fee, log_index: 1, transfer_class: fee}
+        - {chain: tempo, tx_hash: t_liquidity, log_index: 0, transfer_class: fee_liquidity}
+        - {chain: tempo, tx_hash: t_liquidity, log_index: 1, transfer_class: remaining}
+        - {chain: ethereum, tx_hash: e_issuer, log_index: 0, transfer_class: issuer_flow}
+        - {chain: ethereum, tx_hash: e_same, log_index: 0, transfer_class: same_entity}
+        - {chain: ethereum, tx_hash: e_manager, log_index: 0, transfer_class: remaining}
+
+  - name: tx_decomposition_splits_gross_into_netting_venues_and_clean
+    description: >
+      t_dex: 100 into a dex and 60 out of it, so gross 160, 100 moved, 60 netted within the
+      transaction, 40 to the dex and 60 clean. t_lending: 50 into a lending market, all of it
+      lending flow. t_mint has no remaining transfer, so it has no row.
+    model: int_tx_decomposition
+    given:
+      - input: ref('int_transfer_classes')
+        rows:
+          - {chain: base, tx_hash: t_dex, day_utc: "2026-11-01", value: 100, transfer_class: remaining}
+          - {chain: base, tx_hash: t_dex, day_utc: "2026-11-01", value: 60, transfer_class: remaining}
+          - {chain: base, tx_hash: t_lending, day_utc: "2026-11-02", value: 50, transfer_class: remaining}
+          - {chain: base, tx_hash: t_mint, day_utc: "2026-11-02", value: 70, transfer_class: mint}
+      - input: ref('int_tx_net')
+        rows:
+          - {chain: base, tx_hash: t_dex, net_value: -100, category: null}
+          - {chain: base, tx_hash: t_dex, net_value: 40, category: dex}
+          - {chain: base, tx_hash: t_dex, net_value: 60, category: null}
+          - {chain: base, tx_hash: t_lending, net_value: -50, category: null}
+          - {chain: base, tx_hash: t_lending, net_value: 50, category: lending}
+    expect:
+      rows:
+        - {chain: base, tx_hash: t_dex, day_utc: "2026-11-01", gross_value: 160, same_tx_netting: 60, dex_flow: 40, lending_flow: 0, clean_value: 60}
+        - {chain: base, tx_hash: t_lending, day_utc: "2026-11-02", gross_value: 50, same_tx_netting: 0, dex_flow: 0, lending_flow: 50, clean_value: 0}
+
+  - name: still_value_is_the_low_over_the_placed_window
+    description: >
+      With a two-day window, still_value needs three days of history: the balance two days before,
+      and the lowest the balance went on the day before and the day itself. The dip to 30 on day 2
+      counts on day 3, and the close of 80 on day 3 caps day 5.
+    model: int_wallet_placed
+    overrides:
+      vars: {placed_days: 2}
+    given:
+      - input: ref('int_wallet_days')
+        rows:
+          - {chain: base, address: "0xa", day_utc: "2026-11-01", close_balance: 100, day_min: 100}
+          - {chain: base, address: "0xa", day_utc: "2026-11-02", close_balance: 50, day_min: 30}
+          - {chain: base, address: "0xa", day_utc: "2026-11-03", close_balance: 80, day_min: 50}
+          - {chain: base, address: "0xa", day_utc: "2026-11-04", close_balance: 90, day_min: 90}
+          - {chain: base, address: "0xa", day_utc: "2026-11-05", close_balance: 90, day_min: 90}
+      - input: ref('stg_labels')
+        rows:
+          - {chain: base, address: "0xa", category: exchange_linked}
+    expect:
+      rows:
+        - {address: "0xa", day_utc: "2026-11-01", category: exchange_linked, still_value: null}
+        - {address: "0xa", day_utc: "2026-11-02", category: exchange_linked, still_value: null}
+        - {address: "0xa", day_utc: "2026-11-03", category: exchange_linked, still_value: 30}
+        - {address: "0xa", day_utc: "2026-11-04", category: exchange_linked, still_value: 50}
+        - {address: "0xa", day_utc: "2026-11-05", category: exchange_linked, still_value: 80}
