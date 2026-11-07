@@ -1184,7 +1184,8 @@ def test_make_models_gives_dbt_only_the_allowlist(tmp_path):
     (bin_dir / "dbt").write_text(
         f"#!{sys.executable}\n"
         "import json, os, sys\n"
-        "record = {'args': sys.argv[1:], 'names': sorted(os.environ)}\n"
+        "record = {'args': sys.argv[1:], 'names': sorted(os.environ),"
+        " 'marts': os.environ.get('OUSD_MARTS_DB_PATH')}\n"
         f"json.dump(record, open({str(seen)!r}, 'w'))\n"
     )
     for fake in bin_dir.iterdir():
@@ -1207,8 +1208,11 @@ def test_make_models_gives_dbt_only_the_allowlist(tmp_path):
         "DBT_SEND_ANONYMOUS_USAGE_STATS": "false",
     }
     make = shutil.which("make") or "make"
+    # A path given on the command line, as in `make models OUSD_MARTS_DB_PATH=...`, wins over the
+    # environment and still reaches dbt.
+    on_command_line = str(tmp_path / "other-marts.duckdb")
     result = subprocess.run(
-        [make, "--no-print-directory", "models"],
+        [make, "--no-print-directory", "models", f"OUSD_MARTS_DB_PATH={on_command_line}"],
         cwd=repo,
         env={**secrets, **allowed},
         capture_output=True,
@@ -1221,6 +1225,7 @@ def test_make_models_gives_dbt_only_the_allowlist(tmp_path):
     assert record["args"] == ["build", "--project-dir", "dbt", "--profiles-dir", "dbt"]
     names = set(record["names"])
     assert set(allowed) <= names
+    assert record["marts"] == on_command_line
     assert not names & set(secrets)
     assert not [
         name

@@ -111,6 +111,7 @@ DBT_ENV_NAMES = frozenset(
         "OUSD_MARTS_DB_PATH",
     }
 )
+# Secrets must never use a DBT_ prefix: only DBT_ENV_SECRET_* is excluded below.
 DBT_ENV_PREFIXES = ("DBT_", "LC_")
 # The sync facts an alert or a heartbeat repeats for each chain.
 SUMMARY_SYNC_FIELDS = ("cursor", "tip", "lag", "reorg_depth", "rows_added")

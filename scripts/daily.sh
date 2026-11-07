@@ -177,6 +177,9 @@ cp -RL "$release_dir/." "$work/.vercel/output/static"
 node --experimental-strip-types --disable-warning=ExperimentalWarning \
   "$ROOT/web/scripts/vercel-config.mjs" "$work/.vercel/output/static" >"$work/.vercel/output/config.json" ||
   alert_and_fail deploy "web/scripts/vercel-config.mjs could not write the deploy config."
+# Under umask 077 the copy is 600, and the Vercel CLI uploads each file with its mode. $work is a 700
+# directory, so opening the modes exposes nothing on this host.
+chmod -R u=rwX,go=rX "$work/.vercel/output"
 
 say "Deploy: vercel deploy --prebuilt, a preview (token from the environment only)."
 export VERCEL_TELEMETRY_DISABLED=1 NO_UPDATE_NOTIFIER=1

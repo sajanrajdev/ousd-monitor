@@ -61,7 +61,7 @@ printf '%s\\n' "vercel $*" >> "$FAKES/calls"
 for arg in "$@"; do
   case "$arg" in --cwd) next=1 ;; *) [ -n "$next" ] && cwd="$arg"; next= ;; esac
 done
-cp -R "$cwd/.vercel" "$FAKES/uploaded"
+cp -Rp "$cwd/.vercel" "$FAKES/uploaded"
 if [ -f "$FAKES/deploy-fails" ]; then
   echo '{"status":"error","reason":"deploy_failed","message":"Upload refused"}'
   exit 1
@@ -203,6 +203,15 @@ def test_uploads_only_the_verified_release_as_build_output(root):
     assert (uploaded / "static" / "sub" / "a.txt").is_file()
     assert not (uploaded / "static").is_symlink()
     assert sorted(p.name for p in uploaded.iterdir()) == ["config.json", "static"]
+
+
+def test_deploy_files_are_world_readable_and_folders_755(root):
+    # The CLI sends each file's mode, so a 600 file would be served unreadable.
+    assert daily(root).returncode == 0
+    uploaded = root / "fakes" / "uploaded" / "output"
+    for path in [uploaded, *uploaded.rglob("*")]:
+        expected = 0o755 if path.is_dir() else 0o644
+        assert stat.S_IMODE(path.stat().st_mode) == expected, path
 
 
 def test_a_failed_run_releases_and_deploys_nothing(root):
