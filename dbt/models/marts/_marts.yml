@@ -33,8 +33,10 @@ models:
       - name: placed_supply
         data_type: hugeint
         description: >
-          Supply that has stayed put over the placed window in wallets with no issuer, venue or system
-          label. Includes exchange-linked placed. {{ doc("base_units") }}
+          Supply that has stayed put over the 14-day placed window: for each wallet with a full
+          window of history, the lowest balance over the window, counted when it is at least $1M.
+          Only wallets with no label, or labeled exchange-linked, count. Includes exchange-linked
+          placed. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: placed_exchange_linked
         data_type: hugeint

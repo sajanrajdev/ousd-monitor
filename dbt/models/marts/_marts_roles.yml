@@ -70,7 +70,7 @@ models:
     description: >
       The newest recorded result per chain and the newest Bridge comparison, beside the newest
       finished run. A Bridge row says which run it belongs to (`run_id`) and whether that is the
-      latest run (`in_latest_run`); a chain row has neither, as `reconciliations` records no run.
+      latest run (`in_latest_run`); a chain row has neither, as the mart does not carry a run for chain rows.
       Grain: one row per chain, plus one Bridge row.
     columns:
       - name: kind
@@ -113,7 +113,7 @@ models:
       - name: run_id
         data_type: varchar
         description: >
-          The run that made a Bridge comparison. Empty on chain rows, which record no run.
+          The run that made a Bridge comparison. Empty on chain rows, as the mart does not carry a run for them.
       - name: latest_run_id
         data_type: varchar
         description: The newest finished run.

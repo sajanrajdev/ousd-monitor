@@ -44,7 +44,7 @@ models:
         description: 'The balance at the end of the day. {{ doc("base_units") }}'
         data_tests: [not_null]
       - name: day_min
-        description: 'The lowest balance the wallet held during the day. {{ doc("base_units") }}'
+        description: 'The lowest balance the wallet held after any movement that day. {{ doc("base_units") }}'
   - name: int_wallet_placed
     description: >
       Each wallet-day with its label category and the balance that has stayed put over the

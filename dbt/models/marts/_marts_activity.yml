@@ -157,11 +157,15 @@ models:
       - name: active_wallets_7d
         data_type: bigint
         description: >
-          Wallets that sent at least $1 of clean volume in the 7 days to this day. Counts wallets, not
-          people.
+          Wallets that sent at least $1 in the 7 days to this day. An address's amount is its net
+          outflow in each transaction that has clean volume, summed over the 7 days. Wallets with no
+          label, or labeled exchange or exchange-linked, are counted; wallets labeled issuer,
+          issuer route, system, DEX or lending are not. Counts wallets, not people.
         data_tests: [not_null]
       - name: active_wallets_over_100_7d
         data_type: bigint
         description: >
-          Wallets that sent at least $100 of clean volume in the 7 days to this day.
+          Wallets that sent at least $100 in the 7 days to this day, measured and filtered as for
+          `active_wallets_7d`: net outflow per transaction with clean volume, summed over 7 days,
+          counting unlabeled, exchange and exchange-linked wallets and no others.
         data_tests: [not_null]

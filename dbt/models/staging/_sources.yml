@@ -10,7 +10,8 @@ sources:
       - name: transfers
         description: >
           Every OUSD transfer event on every chain, one row per chain, block and log position.
-        # Freshness documents the 36-hour rule. The blocking freshness check in the pipeline is
+        # Freshness documents the 36-hour rule across all chains together, on the newest row of any
+        # chain. It is not a per-chain check; the blocking freshness check (6) in the pipeline is
         # the gate.
         loaded_at_field: to_timestamp(block_timestamp)
         freshness:
@@ -73,11 +74,12 @@ sources:
             description: Whether minted less burned equals the chain's reported supply exactly.
           - name: run_id
             description: >
-              The run that made the comparison. Empty on rows from before runs were recorded.
+              The run that made the comparison. Empty on rows from before runs were recorded or written outside a run.
       - name: bridge_comparisons
         description: >
           One row per comparison of the four chains' summed supply with the issuer's reported
-          total. A run makes at most one.
+          total. A run retries the Bridge read up to three times and writes a row for each attempt it
+          compared, so one run can have several rows.
         columns:
           - name: checked_at
             description: When the comparison was made.
@@ -94,8 +96,8 @@ sources:
           - name: passed
             description: Whether the two totals agree within the tolerance.
           - name: run_id
-            description: '{{ doc("run_id") }} A run makes at most one comparison, so it is unique.'
-            data_tests: [not_null, unique]
+            description: '{{ doc("run_id") }} One row per compared attempt, so a run can appear more than once.'
+            data_tests: [not_null]
       - name: reconciliation_runs
         description: >
           One row per reconciliation run. A run with no finish time did not complete.

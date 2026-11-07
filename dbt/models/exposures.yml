@@ -22,12 +22,12 @@ exposures:
   - name: site
     label: Open USD Monitor site
     type: application
-    maturity: high
+    maturity: low
     owner:
       name: maintainer
     url: https://example.invalid/site  # Placeholder until the site has its public address.
     description: >
-      The static public site. It reads only the published dataset at build time, so it depends on
+      The static site. It reads only the published dataset at build time, so it depends on
       the marts through that dataset.
     depends_on:
       - ref('mart_activity_kpis')
