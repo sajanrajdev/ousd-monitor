@@ -1,5 +1,5 @@
 """Command line entry point: `ousd sync`, `reconcile`, `check`, `publish`, `migrate`, `backup`
-and `restore`."""
+and `restore`, and `alert` and `heartbeat` for the daily run's steps after the pipeline."""
 
 import argparse
 import logging
@@ -13,6 +13,13 @@ from pathlib import Path
 import duckdb
 
 from ousd import backup
+from ousd.alerts import (
+    DEFAULT_ALERTS_DIR,
+    HEARTBEAT_VARIABLE,
+    new_alert,
+    ping_heartbeat,
+    raise_alert,
+)
 from ousd.chains import (
     DECIMALS,
     DEFAULT_BRIDGE_URL,
@@ -481,6 +488,27 @@ def _publish(run_id: str, allow_partial: bool) -> int:
     return 0
 
 
+def _alert(step: str, reason: str) -> int:
+    """An alert for a failure outside the pipeline run, which raises its own. Always exit 0: the
+    caller is already failing, and this must not change why."""
+    moment = datetime.now(UTC)
+    alert = new_alert(f"daily-{moment:%Y%m%dT%H%M%SZ}", "daily", step, reason, moment)
+    path = raise_alert(DEFAULT_ALERTS_DIR, alert)
+    print(f"alert: {path}" if path else "alert: no file written")
+    return 0
+
+
+def _heartbeat() -> int:
+    if not os.environ.get(HEARTBEAT_VARIABLE, "").strip():
+        print(f"heartbeat: {HEARTBEAT_VARIABLE} is not set, so nothing was sent")
+        return 0
+    if ping_heartbeat():
+        print("heartbeat: sent")
+        return 0
+    print("heartbeat: not delivered", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ousd", description=__doc__)
     parser.add_argument("--chain", action="append", help="limit to this chain (repeatable)")
@@ -544,12 +572,31 @@ def main(argv: list[str] | None = None) -> int:
     restore.add_argument(
         "--force", action="store_true", help="replace an existing database, keeping it renamed"
     )
+    alert = commands.add_parser(
+        "alert",
+        help="record a failed daily step, and post it to the webhook when one is set",
+        description="Write data/alerts/<id>.json for a step of the daily run that failed outside "
+        "the pipeline, and post it to OUSD_ALERT_WEBHOOK_URL when that is set. Always exit 0.",
+    )
+    alert.add_argument("--step", required=True, help="the step that failed")
+    alert.add_argument("--reason", required=True, help="why, scrubbed of any URL")
+    commands.add_parser(
+        "heartbeat",
+        help="ping OUSD_HEARTBEAT_URL, after a fully successful daily run",
+        description="Ping OUSD_HEARTBEAT_URL when it is set. Exit 0 when sent or not set, 1 when "
+        "it could not be delivered.",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
         format="%(asctime)s %(levelname)s %(message)s",
     )
+
+    if args.command in ("alert", "heartbeat"):
+        if args.chain:
+            parser.error(f"--chain does not apply to {args.command}")
+        return _alert(args.step, args.reason) if args.command == "alert" else _heartbeat()
 
     if args.command == "migrate":
         if args.chain:

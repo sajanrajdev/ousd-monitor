@@ -12,6 +12,14 @@ How the hosted run is set up: one Railway cron service that runs the pipeline on
 
 Any failure exits non-zero and stops there: a failed run releases and deploys nothing, and the live site keeps the last good data. A run that passes but publishes no new dataset also stops before the release. The run refuses to start if `OUSD_PUBLISHED_DIR` or `OUSD_DATASET_DIR` is set, as the site only reads the default path.
 
+## Alerts and heartbeat
+
+A failed step of the pipeline writes `data/alerts/<run_id>.json` from inside the run, so it works under `make run`. A failure outside the pipeline, such as a refused release, a failed deploy, a bad setting, or a `make run` that stopped before any step, writes `data/alerts/daily-<time>.json` through `ousd alert`. With `OUSD_ALERT_WEBHOOK_URL` set, each alert is also posted there as JSON: `text`, `run_id`, `job`, `step`, a scrubbed `reason` and `failed_at`.
+
+With `OUSD_HEARTBEAT_URL` set, `ousd heartbeat` pings it only after the whole run has succeeded: published, released and deployed, or built with the deploy off. `make run` gets a blank heartbeat URL, so the pipeline never pings early. A dead-man check on that URL notices a run that failed before it could alert, or never started.
+
+Both URLs are secrets, like the RPC URLs. They are read from the environment, never put on a command line or in a log, and scrubbed from any error. Unset, nothing is sent.
+
 The allowlisted steps fail closed: if the environment can't be listed, or holds a variable that can't be removed (such as one whose name isn't a shell identifier), they don't run.
 
 With `OUSD_DEPLOY=0` the run builds and verifies the release but doesn't deploy, and the log says so. Off Railway, a missing `VERCEL_TOKEN` does the same, for local tests. On Railway (where `RAILWAY_ENVIRONMENT_ID` is set) a missing token fails the run, so a deleted token can't stop deploys silently. `OUSD_DEPLOY` must be `0` or `1`.
@@ -49,6 +57,11 @@ Names only. Values go into the service's variables in Railway and nowhere else.
 | `VERCEL_ORG_ID` | Yes, to deploy | The Vercel team or account ID |
 | `VERCEL_PROJECT_ID` | Yes, to deploy | The Vercel project ID |
 | `OUSD_DEPLOY` | Optional | `0` builds the release without deploying. Only `0` or `1` |
+| `OUSD_ALERT_WEBHOOK_URL` | Optional, secret | Where each failure is posted as JSON. Unset sends nothing |
+| `OUSD_HEARTBEAT_URL` | Optional, secret | Pinged after a fully successful run, for a dead-man check. Unset sends nothing |
+| `OUSD_MAX_RUNTIME_SECONDS` | Optional | The whole pipeline run's limit. Default 10800 |
+| `OUSD_DBT_TIMEOUT_SECONDS` | Optional | The dbt build's limit. Default 1800 |
+| `OUSD_RATE_LIMIT_WAIT_SECONDS` | Optional | Total time a run may wait out servers' rate limits. Default 3600 |
 | `OUSD_GIT_COMMIT` | No, leave unset | The commit recorded in the dataset, for local runs. On Railway the entry point always sets it from `RAILWAY_GIT_COMMIT_SHA` |
 
 Railway sets `RAILWAY_GIT_COMMIT_SHA` itself on deploys from GitHub. The image has no `.git` and no `git`, so `pipeline/ousd/publish.py` reads the commit from `OUSD_GIT_COMMIT`, which `scripts/daily.sh` fills from `RAILWAY_GIT_COMMIT_SHA`. A deploy that isn't from GitHub (for example `railway up`) has no commit, and publish refuses every run. That is intended: a dataset that can't be traced isn't published. The fallback in `publish.py` lands in its own PR, as the file is security-sensitive; until it merges, the image refuses to publish.

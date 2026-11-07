@@ -3,19 +3,27 @@ may the object storage credentials backups use."""
 
 import json
 import logging
+import re
 import subprocess
 import sys
 import traceback
+from pathlib import Path
 
 import httpx
 import pytest
 from botocore.stub import Stubber
 from conftest import make_chain
-from ousd import backup, cli, probes
+from ousd import backup, checks, cli, probes
 from ousd.backup import BackupError
 from ousd.chains import Chain, missing_rpc_keys
 from ousd.decode import TRANSFER_TOPIC
-from ousd.http import HttpError, PoliteClient
+from ousd.http import (
+    SECRET_URL_VARIABLES,
+    HttpError,
+    PoliteClient,
+    scrub_secrets,
+    scrubbed_traceback,
+)
 from ousd.solana import SolanaChain, SolanaDataError, SolanaRpc, SolanaRpcError
 from ousd.sources import BlockscoutClient, RpcClient, RpcError
 from test_backup import refuse_every_request
@@ -1062,3 +1070,64 @@ def test_a_failing_backup_through_the_cli_never_shows_the_credentials(
     for secret in (KEY, ACCESS_KEY_ID):
         assert secret not in captured.out + captured.err + caplog.text
     assert "the local copy is kept" in captured.err
+
+
+def keyed_chain(url: str) -> BaseException:
+    """An error whose cause and context both carry the keyed URL and the bare key."""
+    try:
+        try:
+            raise ConnectionError(f"cannot reach {url}")
+        except ConnectionError as inner:
+            raise HttpError(f"rpc: denied for {KEY}") from inner
+    except HttpError:
+        try:
+            raise ValueError("decoding the reply failed")
+        except ValueError as outer:
+            return outer
+
+
+@pytest.mark.parametrize("url", PARAMS)
+def test_a_scrubbed_traceback_keeps_the_chain_but_not_the_key(url, monkeypatch):
+    monkeypatch.setenv("BASE_RPC_URL", url)
+    text = scrubbed_traceback(keyed_chain(url))
+    assert "Traceback" in text
+    assert "ConnectionError: cannot reach <BASE_RPC_URL>" in text
+    assert "HttpError: rpc: denied for <BASE_RPC_URL>" in text
+    assert "ValueError: decoding the reply failed" in text
+    assert not any(prefix in text for prefix in shown(KEY))
+
+
+@pytest.mark.parametrize("url", PARAMS)
+def test_a_check_that_cannot_run_logs_a_scrubbed_traceback_and_publishes_the_class(
+    url, monkeypatch, caplog
+):
+    monkeypatch.setenv("SOLANA_RPC_URL", url)
+    error = keyed_chain(url)
+
+    def broken():
+        raise error
+
+    result = checks._guarded("freshness", broken)
+
+    assert (result.status, result.detail) == ("failed", "could not run: ValueError")
+    assert "freshness could not run" in caplog.text
+    assert "ConnectionError: cannot reach <SOLANA_RPC_URL>" in caplog.text
+    assert not any(prefix in caplog.text for prefix in shown(KEY))
+
+
+@pytest.mark.parametrize("name", ["OUSD_ALERT_WEBHOOK_URL", "OUSD_HEARTBEAT_URL"])
+@pytest.mark.parametrize("url", PARAMS)
+def test_the_alert_and_heartbeat_urls_are_scrubbed_like_rpc_urls(name, url, monkeypatch):
+    monkeypatch.setenv(name, url)
+    assert scrub_secrets(f"posting to {url} with {KEY}") == f"posting to <{name}> with <{name}>"
+
+
+def test_every_url_variable_the_pipeline_reads_is_scrubbed():
+    root = Path(__file__).resolve().parent.parent / "pipeline"
+    named = {
+        name
+        for path in root.rglob("*.py")
+        for name in re.findall(r'"([A-Z][A-Z0-9_]*_URL)"', path.read_text())
+    }
+    assert named
+    assert named <= set(SECRET_URL_VARIABLES)

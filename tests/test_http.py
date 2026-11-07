@@ -1,11 +1,25 @@
+import _socket
 import logging
+import math
 import random
 import socket
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import httpx
 import pytest
-from ousd.http import MAX_SERVER_WAIT, HttpError, PoliteClient
+from ousd.http import (
+    MAX_SERVER_WAIT,
+    RATE_LIMIT_WAITS,
+    HttpError,
+    PoliteClient,
+    RateLimitBudgetSpent,
+    WaitBudget,
+    rate_limit_waits_capped,
+    scrub_secrets,
+)
 
 
 class TopOfRange(random.Random):
@@ -193,6 +207,39 @@ def test_a_trickling_response_is_cut_off_at_the_deadline_and_retried():
     assert clock.now == 1_000 + 65  # Stopped at the first chunk past the deadline.
 
 
+@contextmanager
+def silent_server(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """A URL on this machine that takes connections and never answers.
+
+    The kernel completes each connection from the listen backlog, so a client connects, sends its
+    request and then hears nothing. The suite refuses every connection, so this lets loopback
+    through and nothing else.
+    """
+
+    def loopback_only(self: socket.socket, address: Any) -> None:
+        if address[0] != "127.0.0.1":
+            raise RuntimeError(f"a test tried to open a connection to {address}")
+        _socket.socket.connect(self, address)
+
+    monkeypatch.setattr(socket.socket, "connect", loopback_only)
+    for name in ("ALL_PROXY", "HTTP_PROXY", "all_proxy", "http_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    with socket.create_server(("127.0.0.1", 0), backlog=16) as server:
+        yield f"http://127.0.0.1:{server.getsockname()[1]}/never"
+
+
+def test_a_server_that_connects_and_never_answers_is_cut_off_at_the_timeout(monkeypatch):
+    client = PoliteClient(
+        label="silent", min_interval=0, max_attempts=2, sleep=lambda _: None, timeout=0.2
+    )
+    with silent_server(monkeypatch) as url:
+        started = time.monotonic()
+        with pytest.raises(HttpError, match="silent: gave up after 2 attempts: ReadTimeout"):
+            client.request("GET", url)
+    # Two attempts of 0.2 s, where the old fixed timeout made each one a minute.
+    assert time.monotonic() - started < 10
+
+
 def test_a_slow_response_inside_the_deadline_succeeds():
     clock = FakeClock()
     stream = Trickle(clock, [b'{"ok":', b" true}"], seconds_per_chunk=25)
@@ -346,3 +393,70 @@ def test_a_non_ascii_digit_content_length_is_ignored_not_a_crash():
     client = client_for([ok], max_bytes=50)
 
     assert client.request_json("GET", "http://x.invalid") == {"a": 1}
+
+
+def test_a_reply_that_is_not_json_is_returned_as_bytes():
+    client = client_for([httpx.Response(200, text="OK")])
+    assert client.request("GET", "http://hc.invalid/ping") == b"OK"
+
+
+def test_server_waits_are_spent_from_the_budget_and_refused_past_it():
+    budget = WaitBudget()
+    budget.remaining = 100
+    sleeps: list[float] = []
+    client = client_for(
+        [
+            httpx.Response(429, headers={"retry-after": "60"}),
+            httpx.Response(200, json={"ok": True}),
+            httpx.Response(429, headers={"retry-after": "60"}),
+        ],
+        sleeps,
+        waits=budget,
+    )
+    assert client.request_json("GET", "http://api.invalid") == {"ok": True}
+    assert budget.remaining == 40
+    with pytest.raises(RateLimitBudgetSpent, match="60s rate limit wait would pass the run"):
+        client.request_json("GET", "http://api.invalid")
+    # Still an HttpError, for callers that catch any failed request.
+    assert issubclass(RateLimitBudgetSpent, HttpError)
+    # The refused wait is never slept.
+    assert sleeps == [60]
+
+
+def test_a_spent_window_counts_against_the_budget():
+    budget = WaitBudget()
+    budget.remaining = 10
+    sleeps: list[float] = []
+    spent = {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "30000"}
+    client = client_for([httpx.Response(200, json={}, headers=spent)], sleeps, waits=budget)
+    client.request_json("GET", "http://api.invalid")
+    with pytest.raises(RateLimitBudgetSpent, match="30s rate limit wait"):
+        client.request_json("GET", "http://api.invalid")
+    assert sleeps == []
+
+
+def test_backoff_without_a_server_hint_costs_nothing():
+    budget = WaitBudget()
+    budget.remaining = 0
+    client = client_for([httpx.Response(503), httpx.Response(200, json={})], waits=budget)
+    assert client.request_json("GET", "http://api.invalid") == {}
+
+
+def test_the_shared_budget_is_unlimited_outside_a_run_and_capped_inside_one():
+    assert math.isinf(RATE_LIMIT_WAITS.remaining)
+    with rate_limit_waits_capped(120) as budget:
+        assert budget is RATE_LIMIT_WAITS
+        assert RATE_LIMIT_WAITS.remaining == 120
+    assert math.isinf(RATE_LIMIT_WAITS.remaining)
+
+
+def test_scrub_secrets_removes_any_url_even_one_not_configured():
+    text = "redirected to https://elsewhere.invalid/k/abc?token=1 then gave up"
+    assert scrub_secrets(text, {}) == "redirected to <url> then gave up"
+
+
+@pytest.mark.parametrize("status", [301, 304, 308])
+def test_a_redirect_is_not_followed_and_not_taken_as_an_answer(status):
+    client = client_for([httpx.Response(status, text="moved")])
+    with pytest.raises(HttpError, match=f"HTTP {status}"):
+        client.request("GET", "http://hc.invalid/ping")

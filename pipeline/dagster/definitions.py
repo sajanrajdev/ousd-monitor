@@ -4,23 +4,39 @@ Load it only as a file (`dagster ... -f pipeline/dagster/definitions.py`). This 
 `__init__.py` and `pipeline/` is never on PYTHONPATH, or the folder could shadow `dagster`.
 
 Everything the run touches comes in through `Pipeline`, so tests swap the network, dbt and the
-clock for fakes. Nothing here puts a URL in run config or in a log: logs name a chain and an
-error class, never a message from a provider.
+clock for fakes. Nothing here puts a URL in run config or in a log: an error is logged and raised
+only after every configured URL, and any other URL, is scrubbed from it.
+
+`make run` uses `dagster job execute`, where no sensor runs, so failures are caught in the run
+itself: a failure hook writes the alert, and a run resource enforces the time limits.
 """
 
-import json
+import logging
+import math
 import os
+import signal
 import subprocess
 import sys
+import threading
 from collections.abc import Callable, Iterator, Sequence
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 import dagster as dg
 import duckdb
+from ousd.alerts import (
+    DEFAULT_ALERTS_DIR,
+    ClientFactory,
+    describe,
+    new_alert,
+    outbound_client,
+    ping_heartbeat,
+    raise_alert,
+)
 from ousd.chains import DEFAULT_BRIDGE_URL, DEFAULT_DB_PATH, Chain, load_chains, missing_rpc_keys
 from ousd.checks import (
     CHECK_NAMES,
@@ -29,7 +45,12 @@ from ousd.checks import (
     run_checks,
     unacceptable,
 )
-from ousd.http import PoliteClient
+from ousd.http import (
+    PoliteClient,
+    RateLimitBudgetSpent,
+    rate_limit_waits_capped,
+    scrubbed_traceback,
+)
 from ousd.ingest import sync_chain
 from ousd.migrations import SchemaOutOfDate
 from ousd.probes import build_probes, history_for, rpc_for, solana_rpc_for
@@ -39,16 +60,54 @@ from ousd.solana import SolanaChain, load_solana, sync_solana
 from ousd.sources import BridgeSnapshot, bridge_snapshot
 from ousd.store import Store, StoreConflict
 
+log = logging.getLogger(__name__)
+
 JOB_NAME = "ousd_daily"
 CRON = "0 6 * * *"
-DEFAULT_ALERTS_DIR = Path("data/alerts")
+RUN_LIMITS = "run_limits"
 
 # Public nodes only serve recent state, so reconciliation follows sync directly. Two retries,
 # five minutes apart, are for a node that is briefly down. A failed check is never retried.
 RETRIES = 2
 RETRY_DELAY = 300
 
+# Limits on one run, in seconds, each overridable from the environment. A normal run takes
+# minutes. These stop a stuck one long before the next day's run is due.
+MAX_RUNTIME_VARIABLE = "OUSD_MAX_RUNTIME_SECONDS"
+MAX_RUNTIME = 3 * 3600
+# dbt rebuilds in seconds, so a build still going after this is stuck.
+DBT_TIMEOUT_VARIABLE = "OUSD_DBT_TIMEOUT_SECONDS"
+DBT_TIMEOUT = 1800
+# Total time every client may spend waiting out servers' rate limits. One server may ask for up
+# to an hour (MAX_SERVER_WAIT), so this allows one such wait and no more.
+RATE_LIMIT_WAIT_VARIABLE = "OUSD_RATE_LIMIT_WAIT_SECONDS"
+RATE_LIMIT_WAIT = 3600
+# The exit status `timeout` uses, for a dbt build stopped at its limit.
+DBT_TIMED_OUT = 124
+# Once the run limit has fired, it fires again this often until the run ends, in case a broad
+# handler swallowed the first one.
+REFIRE_INTERVAL = 60
+# No limit may be longer than a week. A larger value is a typo, and setitimer refuses huge ones.
+LONGEST_LIMIT = 7 * 24 * 3600
+
 type AnyChain = Chain | SolanaChain
+
+
+def limit_from_env(name: str, default: float) -> float:
+    """Seconds from the environment, up to a week. Blank means the default.
+
+    Read when the definitions load, so a bad value stops `make run` at once, naming the variable,
+    rather than hours into a run."""
+    text = os.environ.get(name, "").strip()
+    if not text:
+        return default
+    try:
+        seconds = float(text)
+    except ValueError:
+        seconds = 0.0
+    if not 0 < seconds <= LONGEST_LIMIT:
+        raise ValueError(f"{name} must be a number of seconds above 0 and at most {LONGEST_LIMIT}")
+    return seconds
 
 
 def _dbt_executable() -> str:
@@ -56,10 +115,14 @@ def _dbt_executable() -> str:
     return str(beside_python) if beside_python.exists() else "dbt"
 
 
-def run_dbt_build() -> int:
-    """`dbt build` over the project, in the repo root, where every command runs."""
+def run_dbt_build(timeout: float = DBT_TIMEOUT) -> int:
+    """`dbt build` over the project, in the repo root, where every command runs. A build past its
+    time limit is killed and reported as DBT_TIMED_OUT."""
     command = [_dbt_executable(), "build", "--project-dir", "dbt", "--profiles-dir", "dbt"]
-    return subprocess.run(command, check=False).returncode
+    try:
+        return subprocess.run(command, check=False, timeout=timeout).returncode
+    except subprocess.TimeoutExpired:
+        return DBT_TIMED_OUT
 
 
 def _load_chains() -> list[AnyChain]:
@@ -108,9 +171,56 @@ class Pipeline:
     sync: Callable[[AnyChain, Store], str] = _sync_one
     probes: Callable[[Sequence[AnyChain], Store], list[ChainProbe]] = build_probes
     bridge: Callable[[], BridgeSnapshot] = _fetch_bridge
-    dbt_build: Callable[[], int] = run_dbt_build
+    dbt_build: Callable[[float], int] = run_dbt_build
     now: Callable[[], datetime] = _now
     retry_delay: int = RETRY_DELAY
+    outbound: ClientFactory = outbound_client
+    max_runtime: float = field(
+        default_factory=lambda: limit_from_env(MAX_RUNTIME_VARIABLE, MAX_RUNTIME)
+    )
+    dbt_timeout: float = field(
+        default_factory=lambda: limit_from_env(DBT_TIMEOUT_VARIABLE, DBT_TIMEOUT)
+    )
+    rate_limit_wait: float = field(
+        default_factory=lambda: limit_from_env(RATE_LIMIT_WAIT_VARIABLE, RATE_LIMIT_WAIT)
+    )
+
+
+class RunTimeout(dg.Failure):
+    """The run passed its time limit. Never retried: a retry would only run longer."""
+
+    def __init__(self, seconds: float) -> None:
+        super().__init__(f"the run passed its {seconds:g}s time limit", allow_retries=False)
+
+
+@contextmanager
+def _time_limit(seconds: float, log: Any) -> Iterator[Callable[[], bool]]:
+    """Raise RunTimeout wherever the run is once `seconds` pass, and again every REFIRE_INTERVAL
+    after that. It interrupts a sleep, and subprocess.run kills its child when interrupted.
+    Yields whether the limit fired.
+
+    A signal only reaches the main thread, which is where `dagster job execute` runs. Anywhere
+    else only the dagster/max_runtime tag applies, and only with the daemon's run monitoring on.
+    """
+    fired = False
+    if threading.current_thread() is not threading.main_thread():
+        if log:
+            log.warning("the run time limit is not enforced off the main thread")
+        yield lambda: fired
+        return
+
+    def expire(signum: int, frame: FrameType | None) -> None:
+        nonlocal fired
+        fired = True
+        raise RunTimeout(seconds)
+
+    previous = signal.signal(signal.SIGALRM, expire)
+    signal.setitimer(signal.ITIMER_REAL, seconds, REFIRE_INTERVAL)
+    try:
+        yield lambda: fired
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def _open_store(pipeline: Pipeline) -> Store:
@@ -142,7 +252,7 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
     run = pipeline or Pipeline()
     retry = dg.RetryPolicy(max_retries=RETRIES, delay=run.retry_delay)
 
-    @dg.asset(retry_policy=retry)
+    @dg.asset(retry_policy=retry, required_resource_keys={RUN_LIMITS})
     def raw_transfers(context: dg.AssetExecutionContext) -> None:
         chains = run.chains()
         store = _open_store(run)
@@ -153,15 +263,16 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
                 except StoreConflict as conflict:
                     # Proven disagreement with stored rows: a retry can't fix it.
                     raise dg.Failure(f"{chain.name}: {conflict}", allow_retries=False) from None
+                except RunTimeout:
+                    raise
+                except RateLimitBudgetSpent as exc:
+                    raise _final(context, f"{chain.name}: sync failed", exc) from None
                 except Exception as exc:
-                    # The class only: a provider's message can hold a URL.
-                    raise RuntimeError(
-                        f"{chain.name}: sync failed ({type(exc).__name__})"
-                    ) from None
+                    raise _scrubbed(context, f"{chain.name}: sync failed", exc) from None
         finally:
             store.close()
 
-    @dg.asset(deps=[raw_transfers], retry_policy=retry)
+    @dg.asset(deps=[raw_transfers], retry_policy=retry, required_resource_keys={RUN_LIMITS})
     def chain_reconciliations(context: dg.AssetExecutionContext) -> None:
         chains = run.chains()
         store = _open_store(run)
@@ -176,8 +287,12 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
         except StoreConflict as conflict:
             _refuse(run, context, "a stored row disagrees with the chain")
             raise dg.Failure(str(conflict), allow_retries=False) from None
+        except RunTimeout:
+            raise
+        except RateLimitBudgetSpent as exc:
+            raise _final(context, "reconciliation failed", exc) from None
         except Exception as exc:
-            raise RuntimeError(f"reconciliation failed ({type(exc).__name__})") from None
+            raise _scrubbed(context, "reconciliation failed", exc) from None
         finally:
             store.close()
         for name, status in result.chains.items():
@@ -191,16 +306,19 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
                 f"reconciliation is {result.status} at {result.scope} scope", allow_retries=False
             )
 
-    @dg.asset(deps=[chain_reconciliations])
+    @dg.asset(deps=[chain_reconciliations], required_resource_keys={RUN_LIMITS})
     def dbt_marts(context: dg.AssetExecutionContext) -> None:
-        if run.dbt_build() != 0:
-            _refuse(run, context, "dbt build failed")
-            raise dg.Failure("dbt build failed", allow_retries=False)
+        status = run.dbt_build(run.dbt_timeout)
+        if status != 0:
+            reason = "dbt build timed out" if status == DBT_TIMED_OUT else "dbt build failed"
+            _refuse(run, context, reason)
+            raise dg.Failure(reason, allow_retries=False)
 
     @dg.multi_asset_check(
         specs=[
             dg.AssetCheckSpec(name=name, asset=dbt_marts, blocking=True) for name in CHECK_NAMES
         ],
+        required_resource_keys={RUN_LIMITS},
     )
     def blocking_checks(context: dg.AssetCheckExecutionContext) -> Iterator[dg.AssetCheckResult]:
         """The seven checks, run once and recorded together under this run's id."""
@@ -231,7 +349,7 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
                 metadata={"status": result.status},
             )
 
-    @dg.asset(deps=[dbt_marts])
+    @dg.asset(deps=[dbt_marts], required_resource_keys={RUN_LIMITS})
     def published_dataset(context: dg.AssetExecutionContext) -> None:
         # Refuses by itself unless this run's seven recorded checks all passed.
         folder = publish(
@@ -244,19 +362,70 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
         )
         context.log.info(f"published {folder.name}")
 
+    @dg.resource
+    def run_limits(init_context: dg.InitResourceContext) -> Iterator[None]:
+        """Set up once for the whole run by the in-process executor, and torn down at its end,
+        however it ends."""
+        fired: Callable[[], bool] | None = None
+        try:
+            with (
+                _time_limit(run.max_runtime, init_context.log) as timed_out,
+                rate_limit_waits_capped(run.rate_limit_wait),
+            ):
+                fired = timed_out
+                yield
+        finally:
+            # The timer is off by now, so it can't interrupt this alert. A limit that fired
+            # outside a step leaves no step failure for the hook to see.
+            if fired is not None and fired() and init_context.run:
+                _alert(init_context.run.run_id, "run", RunTimeout(run.max_runtime))
+
+    def _alert(run_id: str, step: str, exc: BaseException | None) -> Path | None:
+        try:
+            alert = new_alert(run_id, JOB_NAME, step, describe(exc), run.now())
+            return raise_alert(run.alerts_dir, alert, run.outbound)
+        except Exception as error:
+            # Never in place of the run's own failure, which Dagster has recorded already.
+            log.error("alert not raised: %s", type(error).__name__)
+            return None
+
+    @dg.failure_hook
+    def alert_on_step_failure(context: dg.HookContext) -> None:
+        # In the run itself, so `dagster job execute` alerts too. A retried attempt is not a
+        # failure: only the last one is.
+        path = _alert(context.run_id, context.step_key or "run", context.op_exception)
+        written = f", alert in {path}" if path else ""
+        context.log.error(
+            f"run {context.run_id} of {JOB_NAME} failed at {context.step_key}{written}"
+        )
+
+    @dg.success_hook
+    def heartbeat_on_publish(context: dg.HookContext) -> None:
+        # Publishing is the last step, and it runs only after every check passed.
+        if context.step_key == published_dataset.key.to_python_identifier():
+            ping_heartbeat(run.outbound)
+
     job = dg.define_asset_job(
         JOB_NAME,
         selection=dg.AssetSelection.all() | dg.AssetSelection.all_asset_checks(),
         # One DuckDB writer per file: parallel steps would collide.
         executor_def=dg.in_process_executor,
+        hooks={alert_on_step_failure, heartbeat_on_publish},
+        # Only the daemon's run monitoring reads this, under `dagster dev`. `job execute` relies
+        # on the run_limits resource.
+        tags={dg.MAX_RUNTIME_SECONDS_TAG: str(math.ceil(run.max_runtime))},
     )
     schedule = dg.ScheduleDefinition(job=job, cron_schedule=CRON, execution_timezone="UTC")
 
     @dg.run_failure_sensor
     def alert_on_failure(context: dg.RunFailureSensorContext) -> None:
-        # Outbound alerts wait for the maintainer, so this only logs and writes a file.
-        write_alert(run.alerts_dir, context.dagster_run, run.now())
-        context.log.error(f"run {context.dagster_run.run_id} of {JOB_NAME} failed")
+        # Under `dagster dev` only. The hook has alerted for any failed step already, so this
+        # covers a run that died outside a step. It writes and posts only if nothing has.
+        failed = context.dagster_run
+        message = context.failure_event.message or "the run failed"
+        alert = new_alert(failed.run_id, failed.job_name, "run", message, run.now())
+        raise_alert(run.alerts_dir, alert, run.outbound)
+        context.log.error(f"run {failed.run_id} of {JOB_NAME} failed")
 
     return dg.Definitions(
         assets=[raw_transfers, chain_reconciliations, dbt_marts, published_dataset],
@@ -264,21 +433,21 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
         jobs=[job],
         schedules=[schedule],
         sensors=[alert_on_failure],
+        resources={RUN_LIMITS: run_limits},
     )
 
 
-def write_alert(alerts_dir: Path, failed: Any, moment: datetime) -> Path:
-    """One file per failed run. It holds the run, the job and when: no message and no config, as
-    either can carry a provider's text."""
-    alerts_dir.mkdir(parents=True, exist_ok=True)
-    path = alerts_dir / f"{failed.run_id}.json"
-    alert = {
-        "run_id": failed.run_id,
-        "job": failed.job_name,
-        "failed_at": moment.strftime("%Y-%m-%dT%H:%M:%SZ"),
-    }
-    path.write_text(json.dumps(alert, indent=2) + "\n")
-    return path
+def _scrubbed(context: dg.AssetExecutionContext, what: str, exc: Exception) -> RuntimeError:
+    """Log the scrubbed traceback, and return an error that carries the scrubbed message only.
+    Dagster records a raised error's causes as they are, so the caller raises it from None."""
+    context.log.error(f"{what}:\n{scrubbed_traceback(exc)}")
+    return RuntimeError(f"{what}: {describe(exc)}")
+
+
+def _final(context: dg.AssetExecutionContext, what: str, exc: Exception) -> dg.Failure:
+    """The same, as a failure the retry policy skips: a retry would meet the same spent budget."""
+    context.log.error(f"{what}:\n{scrubbed_traceback(exc)}")
+    return dg.Failure(f"{what}: {describe(exc)}", allow_retries=False)
 
 
 defs = build_definitions()

@@ -70,7 +70,7 @@ Bridge's comparison counts: a Bridge error or mismatch stops exit 0. It uses Bri
 
 `make run` runs the Dagster job `ousd_daily` in one process: `raw_transfers`, `chain_reconciliations`, `dbt_marts`, then `published_dataset`. It needs `BASE_RPC_URL` and `SOLANA_RPC_URL`, like `make sync`. The seven checks are blocking checks on `dbt_marts`, so a failed one stops the run before publish, marks the last published dataset stale, and publishes nothing. A reconciliation that isn't a full pass, or a failed dbt build, stops it the same way. Ingest and reconciliation retry twice, five minutes apart, when a source errors. A failed check or reconciliation never retries. Dagster's own state is kept in `data/.dagster`.
 
-The schedule (06:00 UTC every day) and the failure sensor are off until switched on in the UI that `make dagster-dev` serves, and run only while it is up. A failed run writes `data/alerts/<run_id>.json`, and nothing is sent anywhere. Don't run `make run` while another sync or `ousd` command holds the database.
+The schedule (06:00 UTC every day) and the failure sensor are off until switched on in the UI that `make dagster-dev` serves, and run only while it is up. A failed run writes `data/alerts/<run_id>.json`, including under `make run`. Nothing is sent anywhere unless `OUSD_ALERT_WEBHOOK_URL` or `OUSD_HEARTBEAT_URL` is set. Don't run `make run` while another sync or `ousd` command holds the database.
 
 ## The site
 
