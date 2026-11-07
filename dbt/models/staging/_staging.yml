@@ -1,32 +1,56 @@
 version: 2
 models:
   - name: stg_transfers
+    description: >
+      One row per OUSD transfer, as stored, with the UTC day added. Grain: one row per `chain`, `block_number`
+      and `log_index`.
     columns:
       - name: chain
+        description: '{{ doc("chain") }}'
         data_tests:
           - not_null
           - accepted_values:
               arguments:
                 values: [tempo, ethereum, base, solana]
       - name: block_number
+        description: 'The block (or Solana slot) the transfer was in.'
         data_tests: [not_null]
       - name: log_index
+        description: The transfer's position within its block.
         data_tests: [not_null]
       # block_hash is deliberately untested: Blockscout and Solana rows have none.
       - name: block_hash
+        description: 'The hash of the block. Empty for rows from Blockscout and Solana.'
       - name: block_timestamp
+        description: The block's time, in seconds since the Unix epoch.
         data_tests: [not_null]
       - name: day_utc
+        description: '{{ doc("utc_day") }} The day of the block time.'
         data_tests: [not_null]
       - name: tx_hash
+        description: 'The transaction the transfer belongs to.'
         data_tests: [not_null]
       - name: from_address
+        description: 'The sender. The zero address means a mint.'
         data_tests: [not_null]
       - name: to_address
+        description: 'The receiver. The zero address means a burn.'
         data_tests: [not_null]
       - name: value
+        description: '{{ doc("base_units") }}'
         data_tests: [not_null]
   - name: stg_sync_coverage
+    description: >
+      One row per chain: how far it has been ingested and its last complete UTC day.
+      Grain: one row per `chain`.
     columns:
       - name: chain
+        description: '{{ doc("chain") }}'
         data_tests: [unique, not_null]
+      - name: synced_through
+        description: The newest block (or Solana slot) ingested for the chain.
+      - name: last_transfer_timestamp
+        description: The time of the chain's newest transfer, in seconds since the Unix epoch.
+      - name: last_complete_day
+        description: >
+          {{ doc("utc_day") }} The chain's last complete day: the day before its newest transfer.

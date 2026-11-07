@@ -358,7 +358,8 @@ def _dbt_problems(sources: Sources) -> list[str]:
         problems.append(f"newest dbt command was {args.get('which')}, not build")
     if narrowed := [name for name in _NARROWING_ARGS if args.get(name)]:
         problems.append(f"dbt build was narrowed by {', '.join(narrowed)}")
-    nodes = results.get("results", [])
+    # dbt records an exposure as a no-op in every build, as it has nothing to run.
+    nodes = [n for n in results.get("results", []) if not n["unique_id"].startswith("exposure.")]
     kinds = {node["unique_id"].split(".")[0] for node in nodes}
     if not {"model", "test"} <= kinds:
         problems.append("dbt build ran no models or no tests")

@@ -1,53 +1,122 @@
 version: 2
 models:
   - name: mart_supply_journey
+    config:
+      contract: {enforced: true}
     description: >
       Per chain and day: issuer inventory, placed, venue and free-floating supply.
-      `issuer_labeled` is false where no issuer label exists for the chain, so inventory
-      is understated there and the held-by-issuer amount sits in free_floating.
+      `issuer_labeled` is false where no issuer label exists for the chain, so inventory is
+      understated there and the held-by-issuer amount sits in free_floating. Grain: one row per
+      `chain` and `day_utc`.
     columns:
       - name: chain
+        data_type: varchar
+        description: >
+          {{ doc("chain") }}
         data_tests: [not_null]
       - name: day_utc
+        data_type: date
+        description: >
+          {{ doc("utc_day") }}
         data_tests: [not_null]
       - name: total_supply
+        data_type: hugeint
+        description: >
+          Supply held by all wallets at the close of the day. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: issuer_inventory
+        data_type: hugeint
+        description: >
+          Supply held by wallets labeled as the issuer's or on its redemption route. {{
+          doc("base_units") }}
         data_tests: [not_null]
       - name: placed_supply
+        data_type: hugeint
+        description: >
+          Supply that has stayed put over the 14-day placed window: for each wallet with a full
+          window of history, the lowest balance over the window, counted when it is at least $1M.
+          Only wallets with no label, or labeled exchange-linked, count. Includes exchange-linked
+          placed. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: placed_exchange_linked
-        description: The part of placed_supply in wallets labeled `exchange_linked`.
+        data_type: hugeint
+        description: >
+          The part of placed supply in wallets labeled `exchange_linked`. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: venue_dex
+        data_type: hugeint
+        description: >
+          Supply held by wallets labeled as DEX pools. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: venue_lending
+        data_type: hugeint
+        description: >
+          Supply held by wallets labeled as lending markets. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: venue_exchange
+        data_type: hugeint
+        description: >
+          Supply held by wallets a public source names as an exchange's. A floor, as unnamed custody
+          is not counted. {{ doc("base_units") }}
         data_tests: [not_null]
       - name: free_floating
+        data_type: hugeint
+        description: >
+          The rest of supply: total less issuer inventory, placed and venue supply. {{
+          doc("base_units") }}
         data_tests: [not_null]
       - name: placed_wallets
+        data_type: bigint
+        description: How many wallets hold placed supply.
         data_tests: [not_null]
       - name: holders
+        data_type: bigint
+        description: How many wallets hold a balance above zero.
         data_tests: [not_null]
       - name: holders_over_1m
+        data_type: bigint
+        description: How many wallets hold at least $1M.
         data_tests: [not_null]
       - name: top10_value
+        data_type: hugeint
+        description: >
+          The balance held by the ten largest wallets. {{ doc("base_units") }}
       - name: issuer_labeled
+        data_type: boolean
+        description: >
+          Whether the chain has any issuer label. When false, issuer inventory reads zero because it
+          is unknown.
         data_tests: [not_null]
   - name: mart_exchange_holdings
+    config:
+      contract: {enforced: true}
     description: >
       Per chain, day and named exchange: what wallets a public source names as that exchange's
-      hold. A floor, as custody no source names isn't here. Adds up to venue_exchange.
+      hold. A floor, as custody no source names isn't here. Adds up to venue_exchange. Grain: one
+      row per `chain`, `day_utc` and `entity`.
     columns:
       - name: chain
+        data_type: varchar
+        description: >
+          {{ doc("chain") }}
         data_tests: [not_null]
       - name: day_utc
+        data_type: date
+        description: >
+          {{ doc("utc_day") }}
         data_tests: [not_null]
       - name: entity
+        data_type: varchar
+        description: >
+          The exchange's name, as a public source gives it.
         data_tests: [not_null]
       - name: wallets
+        data_type: bigint
+        description: >
+          How many of the exchange's named wallets hold a balance that day.
         data_tests: [not_null]
       - name: balance
+        data_type: hugeint
+        description: >
+          What those wallets hold in total. {{ doc("base_units") }}
         data_tests: [not_null]

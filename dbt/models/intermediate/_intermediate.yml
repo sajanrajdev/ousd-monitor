@@ -1,34 +1,98 @@
 version: 2
 models:
   - name: int_wallet_events
+    description: >
+      Each transfer as two wallet legs, one out and one in, with the wallet's running balance.
+      The zero address has no wallet. Grain: one row per `chain`, `address`, `block_number`,
+      `log_index` and `side`.
     columns:
       - name: chain
+        description: '{{ doc("chain") }}'
         data_tests: [not_null]
       - name: address
+        description: The wallet the leg belongs to.
         data_tests: [not_null]
+      - name: block_number
+        description: The block (or Solana slot) of the transfer.
+      - name: log_index
+        description: The transfer's position within its block.
+      - name: side
+        description: Which leg of the transfer this is, 0 for the sender and 1 for the receiver.
+      - name: day_utc
+        description: '{{ doc("utc_day") }}'
+      - name: delta
+        description: 'The change to the wallet''s balance, negative when it sends. {{ doc("base_units") }}'
       - name: running_balance
+        description: 'The wallet''s balance after this leg. {{ doc("base_units") }}'
         data_tests: [not_null]
   - name: int_wallet_days
+    description: >
+      Each wallet's balance at the close of each UTC day, from its first day to the chain's last
+      complete day, including days with no movement. Grain: one row per `chain`, `address` and
+      `day_utc`.
     columns:
       - name: chain
+        description: '{{ doc("chain") }}'
         data_tests: [not_null]
       - name: address
+        description: The wallet.
         data_tests: [not_null]
       - name: day_utc
+        description: '{{ doc("utc_day") }}'
         data_tests: [not_null]
       - name: close_balance
+        description: 'The balance at the end of the day. {{ doc("base_units") }}'
         data_tests: [not_null]
+      - name: day_min
+        description: 'The lowest balance the wallet held after any movement that day. {{ doc("base_units") }}'
   - name: int_wallet_placed
+    description: >
+      Each wallet-day with its label category and the balance that has stayed put over the
+      placed window. Grain: one row per `chain`, `address` and `day_utc`.
     columns:
       - name: chain
+        description: '{{ doc("chain") }}'
         data_tests: [not_null]
       - name: address
+        description: The wallet.
         data_tests: [not_null]
       - name: day_utc
+        description: '{{ doc("utc_day") }}'
         data_tests: [not_null]
+      - name: close_balance
+        description: 'The balance at the end of the day. {{ doc("base_units") }}'
+      - name: category
+        description: The wallet's label category. Empty when the wallet has no label.
+      - name: still_value
+        description: >
+          The lowest the balance has been over the placed window. Empty until the wallet has a
+          full window of history. {{ doc("base_units") }}
   - name: int_chain_days
+    description: >
+      The calendar of UTC days for each chain, from its first day with any wallet movement to its
+      last complete day. The activity marts are built on it. Grain: one row per `chain` and
+      `day_utc`.
     columns:
       - name: chain
+        description: '{{ doc("chain") }}'
         data_tests: [not_null]
       - name: day_utc
+        description: '{{ doc("utc_day") }}'
         data_tests: [not_null]
+  - name: int_tx_net
+    description: >
+      Each address's net money in or out of each transaction, over remaining transfers only.
+      Grain: one row per `chain`, `tx_hash` and `address`.
+    columns:
+      - name: chain
+        description: '{{ doc("chain") }}'
+      - name: tx_hash
+        description: The transaction.
+      - name: address
+        description: The address the net applies to.
+      - name: net_value
+        description: 'Money in less money out. {{ doc("base_units") }}'
+      - name: day_utc
+        description: '{{ doc("utc_day") }}'
+      - name: category
+        description: The address's label category. Empty when it has no label.

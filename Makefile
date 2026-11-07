@@ -1,5 +1,5 @@
-.PHONY: check lint types test build models sync reconcile publish preview run daily dagster-dev \
-	py-lint py-types py-test py-build \
+.PHONY: check lint types test build models dbt-docs sync reconcile publish preview run daily \
+	dagster-dev py-lint py-types py-test py-build \
 	web-tools web-install web-lint web-types web-test web-samples web-build web-release web-browser \
 	web-shots web-acceptance
 
@@ -36,6 +36,15 @@ py-build:
 
 models:
 	uv run --locked dbt build --project-dir dbt --profiles-dir dbt
+
+# One self-contained HTML page of the models, sources, exposures and lineage, at
+# dbt/target/docs/static_index.html (dbt/target/ is ignored). --target-path is relative to the dbt
+# project directory, so `target/docs` lands there. It has its own target path because
+# docs generate overwrites run_results.json, which the dbt check reads from dbt/target. It reads
+# column types from the marts database, so run `make models` first.
+dbt-docs:
+	uv run --locked dbt docs generate --static --project-dir dbt --profiles-dir dbt \
+		--target-path target/docs
 
 sync:
 	uv run --locked $(ENV_FILE) ousd sync

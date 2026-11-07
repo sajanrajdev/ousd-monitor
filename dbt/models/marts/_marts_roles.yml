@@ -1,28 +1,133 @@
 version: 2
 models:
   - name: mart_chain_roles
+    config:
+      contract: {enforced: true}
     description: >
       One row per chain at its own latest complete day (`as_of_day`). Shares are integer basis
-      points from floor division, so they sum to at most 10000.
+      points from floor division, so they sum to at most 10000. Grain: one row per `chain`.
     columns:
       - name: chain
+        data_type: varchar
+        description: >
+          {{ doc("chain") }}
         data_tests: [not_null, unique]
       - name: as_of_day
+        data_type: date
+        description: >
+          {{ doc("utc_day") }} The chain's latest complete day, which can differ between chains.
         data_tests: [not_null]
       - name: total_supply
+        data_type: hugeint
+        description: >
+          The chain's supply on its as-of day. {{ doc("base_units") }}
         data_tests: [not_null]
+      - name: supply_share_bps
+        data_type: integer
+        description: >
+          The chain's share of supply across all chains. {{ doc("bps") }}
+      - name: placed_share_of_chain_bps
+        data_type: integer
+        description: >
+          Placed supply as a share of the chain's own supply. {{ doc("bps") }}
+      - name: minted_30d
+        data_type: hugeint
+        description: >
+          Value minted in the 30 days to the as-of day. {{ doc("base_units") }}
+      - name: burned_30d
+        data_type: hugeint
+        description: >
+          Value burned in the 30 days to the as-of day. {{ doc("base_units") }}
+      - name: dex_flow_30d
+        data_type: hugeint
+        description: >
+          Net flow to and from DEX pools in the 30 days. {{ doc("base_units") }}
+      - name: lending_flow_30d
+        data_type: hugeint
+        description: >
+          Net flow to and from lending markets in the 30 days. {{ doc("base_units") }}
+      - name: clean_30d
+        data_type: hugeint
+        description: >
+          Clean volume in the 30 days. {{ doc("base_units") }}
+      - name: clean_everyday_30d
+        data_type: hugeint
+        description: >
+          Everyday clean volume in the 30 days. {{ doc("base_units") }}
+      - name: clean_everyday_share_bps
+        data_type: integer
+        description: >
+          The chain's share of everyday clean volume across all chains in the 30 days. Empty when no
+          chain has any. {{ doc("bps") }}
+      - name: dex_flow_share_bps
+        data_type: integer
+        description: >
+          The chain's share of DEX flow across all chains in the 30 days. Empty when no chain has any.
+          {{ doc("bps") }}
   - name: mart_reconciliation
+    config:
+      contract: {enforced: true}
     description: >
       The newest recorded result per chain and the newest Bridge comparison, beside the newest
-      finished run. A Bridge row says which run it belongs to (`run_id`) and whether that is
-      the latest run (`in_latest_run`); a chain row has neither, as `reconciliations` records
-      no run.
+      finished run. A Bridge row says which run it belongs to (`run_id`) and whether that is the
+      latest run (`in_latest_run`); a chain row has neither, as the mart does not carry a run for chain rows.
+      Grain: one row per chain, plus one Bridge row.
     columns:
       - name: kind
+        data_type: varchar
+        description: >
+          Whether the row is a single chain's supply result or the Bridge comparison across chains.
         data_tests:
           - not_null
           - accepted_values:
               arguments:
                 values: [chain, bridge]
       - name: subject
+        data_type: varchar
+        description: The chain, or `all_chains` for the Bridge comparison.
         data_tests: [not_null]
+      - name: block_number
+        data_type: bigint
+        description: >
+          The block the chain's supply was read at. Empty on the Bridge row.
+      - name: passed
+        data_type: boolean
+        description: Whether the two figures agree.
+      - name: checked_at
+        data_type: timestamp with time zone
+        description: When the comparison was made.
+      - name: event_value
+        data_type: hugeint
+        description: >
+          The figure rebuilt from events: minted less burned for a chain, the chains' summed supply
+          for Bridge. {{ doc("base_units") }}
+      - name: reference_value
+        data_type: hugeint
+        description: >
+          The figure it is compared with: the chain's reported supply, or the issuer's reported total.
+          {{ doc("base_units") }}
+      - name: difference
+        data_type: hugeint
+        description: >
+          The rebuilt figure less the reference. Zero is an exact match. {{ doc("base_units") }}
+      - name: run_id
+        data_type: varchar
+        description: >
+          The run that made a Bridge comparison. Empty on chain rows, as the mart does not carry a run for them.
+      - name: latest_run_id
+        data_type: varchar
+        description: The newest finished run.
+      - name: latest_run_scope
+        data_type: varchar
+        description: >
+          Whether the newest finished run covered every chain or only some.
+      - name: latest_run_status
+        data_type: varchar
+        description: How the newest finished run ended.
+      - name: latest_run_finished_at
+        data_type: timestamp with time zone
+        description: When the newest finished run ended.
+      - name: in_latest_run
+        data_type: boolean
+        description: >
+          Whether a Bridge comparison belongs to the newest finished run. Empty on chain rows.

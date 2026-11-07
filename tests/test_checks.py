@@ -500,6 +500,28 @@ def test_dbt_tests_passes_only_on_a_clean_node_status(world, status):
     assert world.run_checks()["dbt_tests"].status == "failed"
 
 
+def test_dbt_tests_ignores_an_exposure_that_was_a_no_op(world):
+    path = world.sources.run_results
+    results = json.loads(path.read_text())
+    results["results"].append({"unique_id": "exposure.ousd_monitor.site", "status": "no-op"})
+    path.write_text(json.dumps(results))
+    assert world.run_checks()["dbt_tests"].status == "passed"
+
+
+@pytest.mark.parametrize("kind", ["model", "test"])
+@pytest.mark.parametrize("status", ["no-op", "skipped", "error", "fail", "warn"])
+def test_dbt_tests_still_fails_a_model_or_test_that_did_not_pass(world, kind, status):
+    path = world.sources.run_results
+    results = json.loads(path.read_text())
+    results["results"].append({"unique_id": "exposure.ousd_monitor.site", "status": "no-op"})
+    node = next(r for r in results["results"] if r["unique_id"].startswith(kind))
+    node["status"] = status
+    path.write_text(json.dumps(results))
+    result = world.run_checks()["dbt_tests"]
+    assert result.status == "failed"
+    assert "1 dbt nodes" in result.detail
+
+
 @pytest.mark.parametrize("kind,word", [("model", "no models"), ("test", "no models or no tests")])
 def test_dbt_tests_needs_both_models_and_tests(world, kind, word):
     path = world.sources.run_results
