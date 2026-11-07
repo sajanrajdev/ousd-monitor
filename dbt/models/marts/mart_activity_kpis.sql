@@ -1,3 +1,4 @@
+-- KPI rows exist only on days the journey has supply, so a quiet day with no supply gets none.
 with journey as (
     select
         chain,

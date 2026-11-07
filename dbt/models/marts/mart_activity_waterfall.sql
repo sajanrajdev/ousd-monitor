@@ -38,14 +38,23 @@ tx_part as (
 )
 
 select
-    r.*,
+    d.chain,
+    d.day_utc,
+    cast(coalesce(r.headline_value, 0) as hugeint) as headline_value,
+    cast(coalesce(r.minted, 0) as hugeint) as minted,
+    cast(coalesce(r.burned, 0) as hugeint) as burned,
+    cast(coalesce(r.fees, 0) as hugeint) as fees,
+    cast(coalesce(r.fee_liquidity, 0) as hugeint) as fee_liquidity,
+    cast(coalesce(r.issuer_flows, 0) as hugeint) as issuer_flows,
+    cast(coalesce(r.same_entity, 0) as hugeint) as same_entity,
+    cast(coalesce(r.transfer_count, 0) as bigint) as transfer_count,
+    cast(coalesce(r.fee_count, 0) as bigint) as fee_count,
     cast(coalesce(x.same_tx_netting, 0) as hugeint) as same_tx_netting,
     cast(coalesce(x.dex_flow, 0) as hugeint) as dex_flow,
     cast(coalesce(x.lending_flow, 0) as hugeint) as lending_flow,
     cast(coalesce(x.clean_large, 0) as hugeint) as clean_large,
     cast(coalesce(x.clean_everyday, 0) as hugeint) as clean_everyday,
-    coalesce(x.clean_tx_count, 0) as clean_tx_count
-from rows_part as r
-left join tx_part as x on x.chain = r.chain and x.day_utc = r.day_utc
-inner join {{ ref('stg_sync_coverage') }} as c on c.chain = r.chain
-where r.day_utc <= c.last_complete_day
+    cast(coalesce(x.clean_tx_count, 0) as bigint) as clean_tx_count
+from {{ ref('int_chain_days') }} as d
+left join rows_part as r on r.chain = d.chain and r.day_utc = d.day_utc
+left join tx_part as x on x.chain = d.chain and x.day_utc = d.day_utc

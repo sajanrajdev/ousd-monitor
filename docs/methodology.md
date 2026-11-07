@@ -107,6 +107,8 @@ A transfer to Tempo's fee manager that is the last OUSD transfer in its transact
 
 Rolling 7-day clean volume divided by 7, then by circulating supply. The common definition is different: transfer volume over total supply. We show ours, an everyday version, and the common one, because they differ widely.
 
+Quiet days, with no transfers, are rows of zeros in the activity series. Active wallets is a rolling 7-day count, so it can be nonzero on a quiet day. KPI rows exist only on days with supply.
+
 ### Velocity's two denominators
 
 Ours divides by circulating supply, and the common one divides by total supply. Circulating supply is smaller, so ours can exceed the common one. An invented example: a chain has 1,000 of supply, of which 100 is issuer inventory and 700 is placed, so circulating supply is 200. Over 7 days it moves 140 in headline volume and 70 in clean volume. Headline velocity is 140 / 7 / 1,000 = 2% a day. Velocity is 70 / 7 / 200 = 5% a day. The clean figure is higher, though less value moved, because it is divided by a smaller base.

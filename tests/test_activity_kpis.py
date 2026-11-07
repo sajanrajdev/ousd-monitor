@@ -270,3 +270,49 @@ def test_velocity_needs_seven_calendar_days_of_history_not_seven_rows(gap_marts)
     assert kpi(gap_marts, "ethereum", 2)["velocity"] is None
     assert kpi(gap_marts, "ethereum", 6)["velocity"] is not None
     assert kpi(gap_marts, "ethereum", 6)["clean_7d"] == 4 * 5 * OUSD
+
+
+def test_quiet_days_are_rows_with_zero_activity_and_a_rolling_window(gap_marts):
+    # Days 3 to 5 have no transfers: still one row each, with the window carried across them.
+    for index in (3, 4, 5):
+        day = kpi(gap_marts, "ethereum", index)
+        # Active wallets are a rolling count, so the senders from days 0 to 2 still count.
+        assert day["active"] == kpi(gap_marts, "ethereum", 2)["active"]
+        assert day["clean_7d"] == 3 * 5 * OUSD
+    assert kpi(gap_marts, "ethereum", 3)["velocity"] is None  # under a full week of history
+    days = [
+        r[0]
+        for r in gap_marts.execute(
+            "select day_utc from mart_activity_kpis where chain = 'ethereum' order by day_utc"
+        ).fetchall()
+    ]
+    assert days == [FIRST_DAY + timedelta(days=i) for i in range(10)]
+
+
+def no_supply_rows():
+    """Day 0 mints and burns the same balance, so no wallet holds anything at its close."""
+    g = Builder("ethereum")
+    g.send(0, [(ZERO_ADDRESS, HEARTBEAT_FROM, 5 * OUSD)])
+    g.send(0, [(HEARTBEAT_FROM, ZERO_ADDRESS, 5 * OUSD)], offset=200)
+    g.send(1, [(ZERO_ADDRESS, HEARTBEAT_FROM, 50 * OUSD)])
+    for day in (2, 3):
+        g.send(day, [(HEARTBEAT_FROM, RECEIVER, 5 * OUSD)])
+    g.send(4, [(HEARTBEAT_FROM, RECEIVER, 1)])  # makes day 3 the last complete day
+    return g.rows
+
+
+def test_kpi_mart_has_no_row_for_a_day_without_supply(tmp_path):
+    conn = build_marts(tmp_path, no_supply_rows(), [], {"ethereum": 1000})
+    try:
+        calendar = conn.execute(
+            "select day_utc from mart_activity_waterfall order by day_utc"
+        ).fetchall()
+        journey = conn.execute(
+            "select day_utc from mart_supply_journey order by day_utc"
+        ).fetchall()
+        kpis = conn.execute("select day_utc from mart_activity_kpis order by day_utc").fetchall()
+    finally:
+        conn.close()
+    assert [r[0] for r in calendar] == [FIRST_DAY + timedelta(days=i) for i in range(4)]
+    assert [r[0] for r in journey] == [FIRST_DAY + timedelta(days=i) for i in range(1, 4)]
+    assert kpis == journey

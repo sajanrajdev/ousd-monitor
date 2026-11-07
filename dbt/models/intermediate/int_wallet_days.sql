@@ -16,13 +16,7 @@ wallets as (
 ),
 
 chain_days as (
-    select
-        c.chain,
-        cast(unnest(generate_series(min(b.day_utc), c.last_complete_day, interval 1 day)) as date)
-            as day_utc
-    from day_bounds as b
-    inner join {{ ref('stg_sync_coverage') }} as c on c.chain = b.chain
-    group by c.chain, c.last_complete_day
+    select chain, day_utc from {{ ref('int_chain_days') }}
 ),
 
 spine as (

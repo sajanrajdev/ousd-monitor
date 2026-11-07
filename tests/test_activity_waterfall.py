@@ -346,7 +346,9 @@ def test_amount_above_2_pow_64_survives_the_waterfall(tmp_path):
     conn = build_marts(tmp_path, rows, [], {"tempo": 10})
     try:
         row = conn.execute(
-            "select headline_value, clean_everyday, clean_large from mart_activity_waterfall"
+            "select headline_value, clean_everyday, clean_large from mart_activity_waterfall "
+            "where headline_value = ?",
+            [big],
         ).fetchone()
     finally:
         conn.close()
@@ -467,3 +469,24 @@ def test_clean_tx_count_counts_transactions_at_or_above_the_minimum(marts):
         "select count(*) from int_tx_decomposition where clean_value > 0 and clean_value < 1000000"
     ).fetchone()
     assert below >= 1  # the fixture has clean transactions under the minimum, on other days
+
+
+def test_days_without_transfers_are_rows_of_zeros(tmp_path):
+    transfers = (
+        route(1, "t0", [(ZERO_ADDRESS, A, 5 * OUSD)], chain="ethereum", day=0)
+        + route(2, "t4", [(A, B, 2 * OUSD)], chain="ethereum", day=4)
+        + route(3, "t5", [(B, A, 1)], chain="ethereum", day=5)
+    )
+    conn = build_marts(tmp_path, transfers, [], {"ethereum": 10})
+    rows = conn.execute(
+        "select day_utc, headline_value, transfer_count, clean_tx_count, fee_count, minted, "
+        "burned, fees, fee_liquidity, issuer_flows, same_entity, same_tx_netting, dex_flow, "
+        "lending_flow, clean_large, clean_everyday "
+        "from mart_activity_waterfall where chain = 'ethereum' order by day_utc"
+    ).fetchall()
+    conn.close()
+    assert [r[0] for r in rows] == [date(2023, 11, 15 + i) for i in range(5)]
+    assert rows[0][1:6] == (5 * OUSD, 1, 0, 0, 5 * OUSD)
+    for quiet in rows[1:4]:
+        assert quiet[1:] == (0,) * 15
+    assert rows[4][1:3] == (2 * OUSD, 1)
