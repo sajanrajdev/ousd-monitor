@@ -8,10 +8,12 @@ OUSD is a stablecoin issued by Bridge for Open Standard, with launch liquidity c
 
 ## Status
 
-Building. Nothing is deployed and nothing here is live.
+First public version.
 
-- **Data pipeline:** done. It ingests all four chains, reconciles them against `totalSupply()` and against Bridge's reported total, models the results with dbt, runs seven blocking checks and publishes a versioned dataset. The latest recorded reconciliation is in [the build log](docs/build-log.md), with the time it ran.
-- **Site:** built. Its views, the methodology page and browser acceptance are done, and they pass on a local build from a real dataset. The results are in [the build log](docs/build-log.md). Review and release are next, tracked in [the plan](docs/implementation-plan.md).
+- **Data pipeline:** it ingests all four chains, reconciles them against `totalSupply()` and against Bridge's reported total, models the results with dbt, runs seven blocking checks and publishes a versioned dataset. The latest recorded reconciliation is in [the build log](docs/build-log.md), with the time it ran.
+- **Site:** a static site built from the latest dataset that passed every check. Each page shows when its data was read, and warns when that is more than 36 hours old.
+- **Daily run:** a Railway cron job runs the pipeline at 06:00 UTC and deploys a preview of the site only when every check passes. Production is promoted by hand. See [deploying the daily run](docs/deploy.md).
+- **Next:** tracked in [the plan](docs/implementation-plan.md).
 
 More: [the PRD](docs/PRD.md), [the architecture](docs/architecture.md) and [the design system](docs/design-system.md).
 
@@ -111,3 +113,7 @@ make web-shots     # local screenshots of the samples
 - **Late logs:** each run reads the newest stored blocks again, in case a lagging node returned too few logs the first time.
 - **Failures:** each HTTP attempt has a 120 second deadline, and failures are retried with backoff. Provider URLs never reach logs or errors, as they can hold keys.
 - **Reconciliation:** `totalSupply()` is read by block hash, so it can't land on a competing fork. Bridge's total is compared with the sum of all four chains, each at a block near Bridge's own time.
+
+## License
+
+[MIT](LICENSE). The data comes from public chains and Bridge's public API; the entity labels in `labels/` each cite their own public source.
