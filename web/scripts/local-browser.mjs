@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize, sep } from "node:path";
 import { chromium } from "playwright";
+import { securityHeaders } from "./vercel-config.ts";
 
 const CONTENT_TYPES = {
   ".css": "text/css",
@@ -14,7 +15,9 @@ const CONTENT_TYPES = {
   ".woff2": "font/woff2",
 };
 
-export function serve(root) {
+// With the headers the deployed site sends, by default, so a script the policy blocks fails here as
+// a console error. Pass {} to serve without them.
+export function serve(root, headers = securityHeaders(root), port = 0) {
   const server = createServer((request, response) => {
     const { pathname } = new URL(request.url, "http://localhost");
     const relative = normalize(decodeURIComponent(pathname)).replace(/^[/\\]+/, "");
@@ -23,12 +26,15 @@ export function serve(root) {
       response.writeHead(404).end();
       return;
     }
-    response.writeHead(200, { "content-type": CONTENT_TYPES[extname(file)] ?? "text/plain" });
+    response.writeHead(200, {
+      ...headers,
+      "content-type": CONTENT_TYPES[extname(file)] ?? "text/plain",
+    });
     response.end(readFileSync(file));
   });
   return new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => resolve(server));
+    server.listen(port, "127.0.0.1", () => resolve(server));
   });
 }
 

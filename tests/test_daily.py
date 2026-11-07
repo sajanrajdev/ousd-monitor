@@ -1,5 +1,6 @@
 """scripts/daily.sh, run on an isolated copy with stand-ins for make and vercel on PATH."""
 
+import json
 import os
 import shutil
 import stat
@@ -43,7 +44,7 @@ case "$1" in
   web-release)
     [ -f "$FAKES/release-fails" ] && exit 1
     mkdir -p web/.release/v1/sub
-    echo '<html></html>' > web/.release/v1/index.html
+    echo '<html><script>self.x=1</script></html>' > web/.release/v1/index.html
     echo 'x' > web/.release/v1/sub/a.txt
     ln -sfn v1 web/.release/latest
     ;;
@@ -95,6 +96,9 @@ def root(tmp_path: Path, shell: str) -> Path:
     (tmp_path / "scripts").mkdir()
     for name in ("daily.sh", "deploy-result.mjs"):
         shutil.copy(REPO / "scripts" / name, tmp_path / "scripts" / name)
+    (tmp_path / "web" / "scripts").mkdir(parents=True)
+    for name in ("vercel-config.mjs", "vercel-config.ts"):
+        shutil.copy(REPO / "web" / "scripts" / name, tmp_path / "web" / "scripts" / name)
     (tmp_path / "data" / "published").mkdir(parents=True)
     (tmp_path / "shell").write_text(shell)
     fakes = tmp_path / "fakes"
@@ -180,7 +184,17 @@ def test_no_value_reaches_a_command_line(root):
 def test_uploads_only_the_verified_release_as_build_output(root):
     assert daily(root).returncode == 0
     uploaded = root / "fakes" / "uploaded" / "output"
-    assert (uploaded / "config.json").read_text().strip() == '{"version": 3}'
+    config = json.loads((uploaded / "config.json").read_text())
+    assert config["version"] == 3
+    (route,) = config["routes"]
+    assert route["continue"] is True
+    headers = route["headers"]
+    assert headers["X-Content-Type-Options"] == "nosniff"
+    assert headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+    assert "frame-ancestors 'none'" in headers["Content-Security-Policy"]
+    assert "'unsafe-inline'" not in headers["Content-Security-Policy"].split("style-src")[0]
+    # The release's one inline script is allowed by its hash.
+    assert "'sha256-" in headers["Content-Security-Policy"]
     assert (uploaded / "static" / "index.html").is_file()
     assert (uploaded / "static" / "sub" / "a.txt").is_file()
     assert not (uploaded / "static").is_symlink()
