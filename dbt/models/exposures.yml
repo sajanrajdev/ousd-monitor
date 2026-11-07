@@ -6,7 +6,7 @@ exposures:
     type: analysis
     maturity: high
     owner:
-      name: maintainer
+      name: Open USD Monitor
     url: https://example.invalid/dataset  # Placeholder until the dataset has a public home.
     description: >
       The versioned files that `ousd publish` writes after the blocking checks pass. Each file is
@@ -25,7 +25,7 @@ exposures:
     type: application
     maturity: low
     owner:
-      name: maintainer
+      name: Open USD Monitor
     url: https://example.invalid/site  # Placeholder until the site has its public address.
     description: >
       The static site. It reads only the published dataset at build time, so it depends on

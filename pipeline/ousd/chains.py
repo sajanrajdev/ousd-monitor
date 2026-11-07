@@ -83,10 +83,10 @@ def load_chains(env: Mapping[str, str] = os.environ) -> dict[str, Chain]:
             # Unset gives "", and the CLI stops with a message naming BASE_RPC_URL.
             rpc_url=env.get("BASE_RPC_URL", "").strip(),
             # The first block with code, found by bisecting eth_getCode: block 48,631,940 has none.
-            # The first mint is block 50,497,983. See docs/plans/2026-11-03-003-base-source-plan.md.
+            # The first mint is block 50,497,983.
             start_block=48_631_941,
             # The provider accepts spans of up to 10,000 blocks, and refuses 50,000. A span over
-            # the 20,000 result cap is split by the client. See the same plan.
+            # the 20,000 result cap is split by the client.
             max_log_range=10_000,
             # Finality lags about 725 blocks at the tip, as measured in the plan. This covers
             # that lag with room to spare, and sync widens it if finality stalls.

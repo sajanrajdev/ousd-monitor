@@ -75,7 +75,7 @@ For a wallet with no issuer, venue or system label: the lowest its balance has b
 
 ### Exchange-linked placed
 
-Part of placed supply, not an addition to it. A wallet counts if it has no public name, held at least $1M on 2026-11-03, took at least one transfer of $1M or more from wallets a public source names as an exchange, took every inflow of $1 or more from those wallets, and sent at most 2% of its inflows anywhere else. The list is fixed as of that day and changes only through a reviewed labels change, and it isn't re-tested after that date. A wallet could belong to the exchange, to its clients or to someone else, and the chain can't tell them apart. A wallet's funding and a label site's name are leads, not sources, so none of these is named. The site gives a count and this rule, with no address.
+Part of placed supply, not an addition to it. A wallet counts if it has no public name, held at least $1M on 2026-11-03, took at least one transfer of $1M or more from wallets a public source names as an exchange, took every inflow of $1 or more from those wallets, and sent at most 2% of its inflows anywhere else. The list is fixed as of that day and changes only through a reviewed labels change, and it isn't re-tested after that date. A wallet could belong to the exchange, to its clients or to someone else, and the chain can't tell them apart. A wallet's funding and a label site's name are leads, not sources, so none of these is named. The site gives a count and this rule, with no address. The research behind the rule, and how far the headline depends on it, is in `docs/evidence/exchange-holdings.md` in the repository.
 
 ### Free-floating supply
 

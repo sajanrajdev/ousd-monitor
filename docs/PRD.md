@@ -78,7 +78,7 @@ Also: a short written "what changed this week" note, for sharing and for readers
 
 ## 7. Metric definitions
 
-Tested against real data on 2026-11-03 for Tempo and part of Ethereum: Base and Solana may still change them. Publish every one on the methodology page.
+Tested against real data on all four chains. Publish every one on the methodology page.
 
 | Metric | Definition |
 |---|---|

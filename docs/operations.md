@@ -4,7 +4,7 @@ How to run the pipeline, what its exit codes mean, and how to keep it healthy. F
 
 ## Running it locally
 
-You need [uv](https://docs.astral.sh/uv/), which installs Python 3.12 and the dependencies. The site also needs Node 22.12 or newer and npm.
+You need [uv](https://docs.astral.sh/uv/), which installs Python 3.12 and the dependencies. The site also needs Node 22.12+ or 24, and npm. The optional endpoint overrides `TEMPO_RPC_URL`, `ETHEREUM_RPC_URL`, `ETHEREUM_BLOCKSCOUT_URL`, `BRIDGE_API_URL` and `OUSD_MARTS_DB_PATH` (see `.env.example`) default to public endpoints and the `data/` folder.
 
 `make check` runs lint, types and tests for the pipeline and the site with no chain access and no `.env`. A clean install does reach package registries.
 
@@ -81,7 +81,7 @@ A failed run writes `data/alerts/<run_id>.json` from a failure hook inside the r
 
 With `OUSD_ALERT_WEBHOOK_URL` set, each alert is also posted there as JSON: `text`, `run_id`, `job`, `step`, a scrubbed `reason` and `failed_at`.
 
-With `OUSD_HEARTBEAT_URL` set, `ousd heartbeat` pings that URL only after a whole run has succeeded: published, released and deployed, or built with the deploy off. `make run` gets a blank heartbeat URL, so the pipeline never pings early. A dead-man check on that URL notices a run that failed before it could alert, or never started.
+With `OUSD_HEARTBEAT_URL` set, `ousd heartbeat` pings that URL only after a whole run has succeeded: published, released and deployed, or built with the deploy off. A plain `make run` with the URL set pings once the run publishes, from the `heartbeat_on_publish` hook in `pipeline/dagster/definitions.py`. The hosted run (`scripts/daily.sh`) blanks the URL for its `make run`, so the pipeline never pings early, and pings itself after the deploy. A dead-man check on that URL notices a run that failed before it could alert, or never started.
 
 Both URLs are secrets, like the RPC URLs. They are read from the environment, never put on a command line or in a log, and scrubbed from any error. With neither set, nothing is sent anywhere.
 
@@ -91,7 +91,7 @@ Both URLs are secrets, like the RPC URLs. They are read from the environment, ne
 
 ### Backup
 
-`make backup` (or `ousd backup`) takes the writer lock, runs `CHECKPOINT` so the file holds every change, copies it to `OUSD_BACKUP_DIR` (default `data/backups`) as `ousd-YYYYMMDDTHHMMSSZ.duckdb` (UTC), and releases the lock. DuckDB's lock is a POSIX record lock, which a process loses when it closes any descriptor on the file, so the copy reads through one descriptor opened before the lock is taken and closed after it is released. It then hashes the copy, opens it read-only to prove DuckDB can read it, and writes `<name>.sha256` in the format `sha256sum -c` reads. The checksum is written last, so a copy without one is incomplete. Like the other writers, it exits 2 with "database in use" while another process holds the file, and copies nothing. It applies no migrations: a copy keeps the schema it was taken at. Each copy is the size of the database, about 90 MB now.
+`make backup` (or `ousd backup`) takes the writer lock, runs `CHECKPOINT` so the file holds every change, copies it to `OUSD_BACKUP_DIR` (default `data/backups`) as `ousd-YYYYMMDDTHHMMSSZ.duckdb` (UTC), and releases the lock. DuckDB's lock is a POSIX record lock, which a process loses when it closes any descriptor on the file, so the copy reads through one descriptor opened before the lock is taken and closed after it is released. It then hashes the copy, opens it read-only to prove DuckDB can read it, and writes `<name>.sha256` in the format `sha256sum -c` reads. The checksum is written last, so a copy without one is incomplete. Like the other writers, it exits 2 with "database in use" while another process holds the file, and copies nothing. It applies no migrations: a copy keeps the schema it was taken at. Each copy is the size of the database, about 90 MB as of November 2026.
 
 ### Upload
 
@@ -106,7 +106,7 @@ After each backup, in the folder, and after an upload, among the objects directl
 ### Restore
 
 1. Stop every writer. On the host, set the start command to `sleep infinity` with no cron schedule, as in the first seeding in [deploying the daily run](deploy.md#first-seeding).
-2. Put the copy and its `.sha256` in one folder. From a bucket, use any S3 tool given the bucket's credentials, for example `aws s3 cp s3://<bucket>/<prefix>/ousd-<stamp>.duckdb .`, then the same for `ousd-<stamp>.duckdb.sha256`.
+2. Put the copy and its `.sha256` in one folder. From a bucket, use any S3 tool given the bucket's credentials, for example `aws s3 cp s3://<bucket>/<prefix>/ousd-<stamp>.duckdb .`, then the same for `ousd-<stamp>.duckdb.sha256`. When `OUSD_BACKUP_ENDPOINT_URL` is set, add `--endpoint-url "$OUSD_BACKUP_ENDPOINT_URL"` to each command.
 3. Run `ousd restore <folder>/ousd-<stamp>.duckdb`, with `OUSD_DB_PATH` pointing at the target. It checks the copy against its checksum, and that DuckDB opens it, before changing anything. It exits 1 on a mismatch, a missing checksum, or a copy at a schema newer than the code. If a database is already there it refuses, unless you pass `--force`. Then it takes the writer lock (exit 2 if another process holds it), swaps the copy in atomically, and keeps the old file as `<target>.replaced-<stamp>`. The lock covers the old file, so no writer has it open while it is kept and swapped out. It doesn't cover the restored file, which is complete before the swap, so a writer may open it straight after. Delete the kept file once the restore is checked. A damaged database can't be locked, so `--force` refuses it: move it aside, then restore without `--force`.
 4. A copy older than the code is migrated as usual: the next writer, or `ousd migrate`, applies the pending migrations. `ousd check` and `ousd publish` only read, so until then they exit 2 and say to run `ousd migrate`. `restore` prints when this applies. A copy newer than the code is refused, because nothing could open it until the code is updated.
 5. Verify offline with `ousd migrate`, `make models`, then `ousd check --run-id <id>`. Every check reads stored data except freshness, which fails for a copy whose newest transfer or reconciliation is over 36 hours old. The next `make run` catches up from the cursor.

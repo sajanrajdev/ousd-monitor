@@ -1,7 +1,7 @@
 """Base: its chain entry, the log filter, and how its provider's replies are handled.
 
 Nothing here opens a connection. Provider replies reproduce the text the provider returned when
-measured, see docs/plans/2026-11-03-003-base-source-plan.md.
+measured. See docs/architecture.md.
 """
 
 import dataclasses

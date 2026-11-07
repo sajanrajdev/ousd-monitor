@@ -1,6 +1,6 @@
 # Lessons learned
 
-Honest notes on what went wrong and what the data taught us, grouped by area and dated. Newest last. Each fix named here has a test.
+Honest notes on what went wrong and what the data taught us, grouped by area and dated. Newest last.
 
 ## Ingestion and reconciliation, 2026-11-03
 
@@ -119,9 +119,6 @@ These were found before any real run, by reviews that reproduced each one agains
 
 **The first dataset schema's wording promised more than a static page can do.** It described a failed run as marking the page stale. A failed run does mark the last published dataset stale, but a static page shows that only after it is rebuilt. Until then, only the clock tells a page it is old, and it does so once the data is more than 36 hours old, in the reader's browser. So a failed run can go unseen on a page that nobody rebuilds for up to 36 hours. The page now compares times with the reader's clock, and the daily hosted run is what rebuilds it.
 
-### Known limits
-
-
 ### Acceptance
 
 Acceptance ran on a local build from real dataset 20261104T163224Z and from the samples, at 320, 390, 768, 1056 and 1440 px.
@@ -145,6 +142,11 @@ Acceptance ran on a local build from real dataset 20261104T163224Z and from the 
 - A physical touch device.
 - A live refused publish on real data. That a failed check stops publishing is proved by tests and by a marked copy.
 - Credits actually charged by the Solana provider are unknown.
+
+### Practical tips for the site checks
+
+- **Run `verify-output` from `web/`.** It reads `scripts/blocked-names.json` and the dataset schemas relative to the working directory, so run from the repository root of a worktree it can't find them.
+- **Keep the `verify-output` tests in several files.** Each whole-page test plants a full site, and one file holding them all crashed its CI worker with an out-of-memory error (SIGABRT) four times as the checks grew. Each file gets a worker of its own, and shared setup lives in `tests/verify-output-fixture.ts` and `tests/verify-output-panels-fixture.ts`. The heap growth behind it is still not understood.
 
 ## The dashboard rework, 2026-11-05
 
