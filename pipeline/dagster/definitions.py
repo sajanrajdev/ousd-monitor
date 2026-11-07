@@ -29,6 +29,7 @@ from typing import Any
 import dagster as dg
 import duckdb
 from ousd.alerts import (
+    DEFAULT_ALERTS_DIR,
     ClientFactory,
     describe,
     new_alert,
@@ -58,7 +59,6 @@ log = logging.getLogger(__name__)
 
 JOB_NAME = "ousd_daily"
 CRON = "0 6 * * *"
-DEFAULT_ALERTS_DIR = Path("data/alerts")
 RUN_LIMITS = "run_limits"
 
 # Public nodes only serve recent state, so reconciliation follows sync directly. Two retries,

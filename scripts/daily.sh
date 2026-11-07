@@ -13,6 +13,10 @@
 # OUSD_DEPLOY=0, or no VERCEL_TOKEN off Railway, builds and verifies the release without deploying.
 # On Railway a missing token fails the run. The deploy is a preview: a deployment that lands in
 # production fails the run. It never prints a variable's value.
+#
+# A failure the pipeline didn't alert on raises an alert (`ousd alert`), and only a run that got
+# all the way through pings the heartbeat (`ousd heartbeat`). Both read their URLs from the
+# environment, so no URL is ever on a command line here.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,6 +27,29 @@ say() { printf '[daily %s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 fail() {
   say "FAILED: $*"
   exit 1
+}
+
+# The pipeline's own CLI, with what make run gets: everything but the Vercel variables.
+ENV_FILE=()
+[ -f .env ] && ENV_FILE=(--env-file .env)
+ousd() {
+  env -u VERCEL_TOKEN -u VERCEL_ORG_ID -u VERCEL_PROJECT_ID \
+    uv run --locked ${ENV_FILE[@]+"${ENV_FILE[@]}"} ousd "$@"
+}
+alert_and_fail() {
+  local step="$1"
+  shift
+  ousd alert --step "$step" --reason "$*" || say "The alert could not be raised."
+  fail "$@"
+}
+alerts_in() {
+  [ -d data/alerts ] || { echo 0; return; }
+  find data/alerts -name '*.json' | wc -l | tr -d ' '
+}
+finish() {
+  ousd heartbeat || say "The heartbeat was not delivered."
+  say "Done in $((SECONDS - started))s."
+  exit 0
 }
 
 # What the site build and the Vercel CLI may see. Nothing that can hold a provider URL or key.
@@ -65,11 +92,11 @@ with_only() {
 
 case "${OUSD_DEPLOY:-1}" in
   0 | 1) ;;
-  *) fail "OUSD_DEPLOY must be 0 or 1." ;;
+  *) alert_and_fail config "OUSD_DEPLOY must be 0 or 1." ;;
 esac
 # The site reads data/published/latest, so the pipeline must publish there.
 for name in OUSD_PUBLISHED_DIR OUSD_DATASET_DIR; do
-  [ -z "${!name+x}" ] || fail "$name is set. The daily run publishes and releases the default path only."
+  [ -z "${!name+x}" ] || alert_and_fail config "$name is set. The daily run publishes and releases the default path only."
 done
 
 # An image has no checkout, so the commit comes from the deploy that built it. Railway's value
@@ -80,36 +107,40 @@ fi
 
 latest_before="$(readlink data/published/latest 2>/dev/null || true)"
 
+alerts_before="$(alerts_in)"
+# A blank heartbeat URL, which wins over .env: the run is fully successful only once deployed.
 say "Pipeline: make run (the Vercel variables are removed from its environment)."
-env -u VERCEL_TOKEN -u VERCEL_ORG_ID -u VERCEL_PROJECT_ID make run ||
+if ! env -u VERCEL_TOKEN -u VERCEL_ORG_ID -u VERCEL_PROJECT_ID OUSD_HEARTBEAT_URL= make run; then
+  # The pipeline alerts on a failed step. One that failed before any step ran alerts here.
+  [ "$(alerts_in)" != "$alerts_before" ] ||
+    alert_and_fail pipeline "make run exited non-zero, so nothing is released or deployed."
   fail "make run exited non-zero, so nothing is released or deployed."
+fi
 
 latest_after="$(readlink data/published/latest 2>/dev/null || true)"
 [ -n "$latest_after" ] && [ "$latest_after" != "$latest_before" ] ||
-  fail "make run passed but published no new dataset, so nothing is released or deployed."
+  alert_and_fail pipeline "make run passed but published no new dataset, so nothing is released or deployed."
 say "Published dataset: $latest_after."
 
 say "Release: make web-release (allowlisted environment, no RPC variables)."
 with_only "${SAFE_VARS[*]}" make web-release ||
-  fail "make web-release refused or failed, so nothing is deployed."
+  alert_and_fail release "make web-release refused or failed, so nothing is deployed."
 
 release_dir="$ROOT/web/.release/latest"
-[ -f "$release_dir/index.html" ] || fail "web/.release/latest has no index.html."
+[ -f "$release_dir/index.html" ] || alert_and_fail release "web/.release/latest has no index.html."
 
 if [ "${OUSD_DEPLOY:-1}" = "0" ]; then
   say "Deploy skipped: OUSD_DEPLOY=0. The release is built and verified in web/.release/latest."
-  say "Done in $((SECONDS - started))s."
-  exit 0
+  finish
 fi
 if [ -z "${VERCEL_TOKEN:-}" ]; then
   [ -z "${RAILWAY_ENVIRONMENT_ID:-}" ] ||
-    fail "VERCEL_TOKEN is not set on Railway. Set it, or OUSD_DEPLOY=0 to build without deploying."
+    alert_and_fail deploy "VERCEL_TOKEN is not set on Railway. Set it, or OUSD_DEPLOY=0 to build without deploying."
   say "Deploy skipped: VERCEL_TOKEN is not set. The release is built and verified in web/.release/latest."
-  say "Done in $((SECONDS - started))s."
-  exit 0
+  finish
 fi
 for name in VERCEL_ORG_ID VERCEL_PROJECT_ID; do
-  [ -n "${!name:-}" ] || fail "$name is not set, so the Vercel project is unknown. Nothing is deployed."
+  [ -n "${!name:-}" ] || alert_and_fail deploy "$name is not set, so the Vercel project is unknown. Nothing is deployed."
 done
 
 # The verified folder, as the Build Output API wants it: static/ and config.json, nothing else.
@@ -127,8 +158,8 @@ status=0
 result="$(with_only "${SAFE_VARS[*]} ${VERCEL_VARS[*]} VERCEL_TELEMETRY_DISABLED NO_UPDATE_NOTIFIER" \
   vercel deploy --prebuilt --cwd "$work" --non-interactive)" || status=$?
 url="$(printf '%s' "$result" | node "$ROOT/scripts/deploy-result.mjs")" ||
-  fail "vercel deploy did not make a preview (see above)."
-[ "$status" -eq 0 ] || fail "vercel deploy exited $status."
+  alert_and_fail deploy "vercel deploy did not make a preview (see the run's log)."
+[ "$status" -eq 0 ] || alert_and_fail deploy "vercel deploy exited $status."
 
 say "Preview deployed: $url"
-say "Done in $((SECONDS - started))s."
+finish

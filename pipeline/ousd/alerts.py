@@ -1,10 +1,11 @@
 """Telling someone how the daily run went: a file per failed run, and two optional outbound calls.
 
 A failure always writes `data/alerts/<run_id>.json`. With OUSD_ALERT_WEBHOOK_URL set it is also
-posted there, and with OUSD_HEARTBEAT_URL set a run that published pings that URL, so a dead-man
-check notices a run that failed before it could alert, or never started. Both URLs are secrets:
-they are read from the environment when used, sent only through PoliteClient, which never logs a
-URL, and scrubbed from any error.
+posted there. With OUSD_HEARTBEAT_URL set a fully successful run pings that URL, so a dead-man
+check notices a run that failed before it could alert, or never started: a pipeline run once it
+publishes, or under scripts/daily.sh, which blanks the URL for the pipeline, once it deploys.
+Both URLs are secrets: they are read from the environment when used, sent only through
+PoliteClient, which never logs a URL, and scrubbed from any error.
 """
 
 import json
@@ -20,6 +21,7 @@ from ousd.http import HttpError, PoliteClient, WaitBudget, scrub_secrets
 
 log = logging.getLogger(__name__)
 
+DEFAULT_ALERTS_DIR = Path("data/alerts")
 WEBHOOK_VARIABLE = "OUSD_ALERT_WEBHOOK_URL"
 HEARTBEAT_VARIABLE = "OUSD_HEARTBEAT_URL"
 # Enough to say what broke. The traceback is in the run's log.

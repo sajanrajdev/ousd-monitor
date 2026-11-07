@@ -27,8 +27,13 @@ FAKE_MAKE = """#!/bin/sh
 FAKES="$(pwd)/fakes"
 env | cut -d= -f1 | sort > "$FAKES/make-$1.env"
 printf '%s\\n' "$*" >> "$FAKES/calls"
+[ -n "${OUSD_HEARTBEAT_URL+x}" ] && [ -z "$OUSD_HEARTBEAT_URL" ] && touch "$FAKES/no-heartbeat-$1"
 case "$1" in
   run)
+    if [ -f "$FAKES/run-fails-alerted" ]; then
+      mkdir -p data/alerts && echo '{}' > data/alerts/run-1.json
+      exit 1
+    fi
     [ -f "$FAKES/run-fails" ] && exit 1
     [ -f "$FAKES/run-publishes-nothing" ] && exit 0
     n=$(ls data/published | wc -l | tr -d ' ')
@@ -63,6 +68,18 @@ printf '"target":"%s","readyState":"READY"},"message":"ready"}\n' "$target"
 """
 
 
+# Stands in for `uv run --locked ousd alert|heartbeat`, apart from the make and vercel calls.
+FAKE_UV = """#!/bin/sh
+FAKES="$(pwd)/fakes"
+env | cut -d= -f1 | sort > "$FAKES/uv.env"
+printf '%s\\n' "$*" >> "$FAKES/uv-calls"
+case "$*" in *heartbeat*) [ -f "$FAKES/heartbeat-fails" ] && exit 1 ;; esac
+exit 0
+"""
+WEBHOOK = "https://hooks.example.invalid/services/hook-secret-777"
+HEARTBEAT = "https://hc-ping.example.invalid/ping-secret-888"
+
+
 def _executable(path: Path, text: str) -> None:
     path.write_text(text)
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
@@ -84,6 +101,7 @@ def root(tmp_path: Path, shell: str) -> Path:
     (fakes / "bin").mkdir(parents=True)
     _executable(fakes / "bin" / "make", FAKE_MAKE)
     _executable(fakes / "bin" / "vercel", FAKE_VERCEL)
+    _executable(fakes / "bin" / "uv", FAKE_UV)
     return tmp_path
 
 
@@ -287,3 +305,75 @@ def test_the_commit_comes_from_the_deploy(root):
 
 def test_the_script_is_executable():
     assert os.access(REPO / "scripts" / "daily.sh", os.X_OK)
+
+
+def uv_calls(root: Path) -> list[str]:
+    path = root / "fakes" / "uv-calls"
+    return path.read_text().splitlines() if path.exists() else []
+
+
+HEARTBEAT_CALL = "run --locked ousd heartbeat"
+
+
+def alert_call(step: str, reason: str) -> str:
+    return f"run --locked ousd alert --step {step} --reason {reason}"
+
+
+def test_only_a_deployed_run_pings_the_heartbeat_and_make_run_never_does(root):
+    result = daily(root, OUSD_HEARTBEAT_URL=HEARTBEAT, OUSD_ALERT_WEBHOOK_URL=WEBHOOK)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert uv_calls(root) == [HEARTBEAT_CALL]
+    # Blank for the pipeline, which would otherwise ping before the release and deploy.
+    assert (root / "fakes" / "no-heartbeat-run").exists()
+    assert not set(VERCEL) & names(root, "uv")
+    for line in calls(root) + uv_calls(root):
+        assert HEARTBEAT not in line
+        assert WEBHOOK not in line
+
+
+def test_a_run_built_without_deploying_is_still_a_success(root):
+    assert daily(root, OUSD_DEPLOY="0").returncode == 0
+    assert uv_calls(root) == [HEARTBEAT_CALL]
+
+
+def test_an_undelivered_heartbeat_does_not_fail_a_deployed_run(root):
+    (root / "fakes" / "heartbeat-fails").touch()
+    result = daily(root)
+    assert result.returncode == 0
+    assert "The heartbeat was not delivered." in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("fake", "step", "reason"),
+    [
+        ("release-fails", "release", "make web-release refused or failed, so nothing is deployed."),
+        ("deploy-fails", "deploy", "vercel deploy did not make a preview (see the run's log)."),
+        (
+            "run-publishes-nothing",
+            "pipeline",
+            "make run passed but published no new dataset, so nothing is released or deployed.",
+        ),
+        ("run-fails", "pipeline", "make run exited non-zero, so nothing is released or deployed."),
+    ],
+)
+def test_a_failure_the_pipeline_did_not_alert_on_raises_one_and_never_pings(
+    root, fake, step, reason
+):
+    (root / "fakes" / fake).touch()
+    result = daily(root)
+    assert result.returncode != 0
+    assert uv_calls(root) == [alert_call(step, reason)]
+
+
+def test_a_failed_run_that_alerted_itself_is_not_alerted_twice(root):
+    (root / "fakes" / "run-fails-alerted").touch()
+    result = daily(root)
+    assert result.returncode != 0
+    assert uv_calls(root) == []
+
+
+def test_a_bad_setting_alerts_before_anything_runs(root):
+    result = daily(root, OUSD_DEPLOY="maybe")
+    assert result.returncode != 0
+    assert uv_calls(root) == [alert_call("config", "OUSD_DEPLOY must be 0 or 1.")]
+    assert calls(root) == []

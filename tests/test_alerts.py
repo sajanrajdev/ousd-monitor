@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
-from ousd import alerts
+from ousd import alerts, cli
 from ousd.alerts import Alert, describe, new_alert, ping_heartbeat, post_alert, raise_alert
 from ousd.http import PoliteClient
 
@@ -197,3 +197,68 @@ def test_the_real_outbound_client_never_waits_out_a_rate_limit(monkeypatch):
     assert ping_heartbeat(env={"OUSD_HEARTBEAT_URL": HEARTBEAT}) is False
     assert sleeps == []
     assert len(requests) == 2
+
+
+def mock_outbound(monkeypatch, status: int) -> list[httpx.Request]:
+    requests: list[httpx.Request] = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(status, text="ok")
+
+    real = alerts.PoliteClient
+    monkeypatch.setattr(
+        alerts,
+        "PoliteClient",
+        lambda **options: real(
+            transport=httpx.MockTransport(handle), sleep=lambda seconds: None, **options
+        ),
+    )
+    return requests
+
+
+def test_the_cli_alert_records_a_daily_step_and_posts_it(monkeypatch, tmp_path, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OUSD_ALERT_WEBHOOK_URL", WEBHOOK)
+    requests = mock_outbound(monkeypatch, 200)
+    reason = f"make web-release failed near {KEYED_URL}"
+    assert cli.main(["alert", "--step", "release", "--reason", reason]) == 0
+    [path] = (tmp_path / "data" / "alerts").glob("daily-*.json")
+    alert = json.loads(path.read_text())
+    assert (alert["job"], alert["step"]) == ("daily", "release")
+    assert alert["reason"] == "make web-release failed near <url>"
+    assert path.stem == alert["run_id"]
+    assert len(requests) == 1
+    assert WEBHOOK not in capsys.readouterr().out
+
+
+def test_the_cli_alert_exits_0_even_when_nothing_can_be_delivered(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OUSD_ALERT_WEBHOOK_URL", WEBHOOK)
+    mock_outbound(monkeypatch, 500)
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "alerts").write_text("not a folder")
+    assert cli.main(["alert", "--step", "deploy", "--reason", "vercel deploy exited 1."]) == 0
+
+
+def test_the_cli_heartbeat_says_what_happened(monkeypatch, capsys):
+    monkeypatch.delenv("OUSD_HEARTBEAT_URL", raising=False)
+    assert cli.main(["heartbeat"]) == 0
+    assert "not set, so nothing was sent" in capsys.readouterr().out
+
+    monkeypatch.setenv("OUSD_HEARTBEAT_URL", HEARTBEAT)
+    requests = mock_outbound(monkeypatch, 200)
+    assert cli.main(["heartbeat"]) == 0
+    assert [str(request.url) for request in requests] == [HEARTBEAT]
+
+    mock_outbound(monkeypatch, 503)
+    assert cli.main(["heartbeat"]) == 1
+    captured = capsys.readouterr()
+    assert "heartbeat: not delivered" in captured.err
+    assert "655443322110" not in captured.out + captured.err
+
+
+@pytest.mark.parametrize("command", [["alert", "--step", "s", "--reason", "r"], ["heartbeat"]])
+def test_the_cli_alert_commands_take_no_chain(command):
+    with pytest.raises(SystemExit):
+        cli.main(["--chain", "tempo", *command])
