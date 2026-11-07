@@ -41,6 +41,7 @@ from ousd.checks import (
     utc_moment,
     utc_text,
 )
+from ousd.migrations import SchemaOutOfDate
 from ousd.solana import OUSD_MINT
 from ousd.store import LatestReconciliation, Store, StoredCheck
 from ousd.verdict import ChainFigures, VerdictInputs, build_verdict, known_limits
@@ -254,20 +255,62 @@ def _chain_role_rows(tables: Mapping[str, Sequence[Mapping[str, Any]]]) -> list[
     return _by_chain_and_day(rows)
 
 
+# A chain_supply check of a finished run that passed at the row's pin with the row's figures.
+_PROVEN_BY = """
+    SELECT c.run_id
+    FROM reconciliation_checks AS c
+    INNER JOIN reconciliation_runs AS r ON r.run_id = c.run_id
+    WHERE c.check_name = 'chain_supply' AND c.subject = ? AND c.status = 'pass'
+      AND c.pin_height = ? AND r.finished_at IS NOT NULL
+      AND c.reference_value = CAST(? AS HUGEINT) AND c.observed_value = CAST(? AS HUGEINT)
+"""
+
+
 def _run_of_chain_row(store: Store, row: Mapping[str, Any]) -> str | None:
-    """`reconciliations` records no run, so a chain row's run is the finished one that recorded its
-    figures in a supply check."""
+    """The run its `reconciliations` row was filed under, when that run proved its figures in a
+    supply check. Only a row written before run_id existed falls back to the finished run that
+    proved its figures. None when unclear."""
+    recorded: set[str | None] = {
+        run_id
+        for (run_id,) in store.db.execute(
+            """
+            SELECT run_id FROM reconciliations
+            WHERE chain = ? AND block_number = ? AND checked_at = ?
+              AND onchain_supply = CAST(? AS HUGEINT) AND minted - burned = CAST(? AS HUGEINT)
+            """,
+            [
+                row["subject"],
+                row["block_number"],
+                row["checked_at"],
+                str(row["reference_value"]),
+                str(row["event_value"]),
+            ],
+        ).fetchall()
+    }
+    if len(recorded) != 1:
+        # No such row, or rows filed under different runs: no run can be named.
+        return None
+    (run_id,) = recorded
+    figures = [
+        row["subject"],
+        row["block_number"],
+        str(row["reference_value"]),
+        str(row["event_value"]),
+    ]
+    if run_id is not None:
+        found = store.db.execute(
+            _PROVEN_BY + " AND c.run_id = ? LIMIT 1", [*figures, run_id]
+        ).fetchone()
+        return run_id if found else None
+    # Without a run_id, only a row checked before migration 1 added the column may fall back. A
+    # later one was written outside any run, so it is no run's.
     found = store.db.execute(
-        """
-        SELECT c.run_id
-        FROM reconciliation_checks AS c
-        INNER JOIN reconciliation_runs AS r ON r.run_id = c.run_id
-        WHERE c.check_name = 'chain_supply' AND c.subject = ? AND c.status = 'pass'
-          AND c.pin_height = ? AND r.finished_at IS NOT NULL
-          AND c.reference_value = CAST(? AS HUGEINT) AND c.observed_value = CAST(? AS HUGEINT)
+        _PROVEN_BY
+        + """
+          AND ? < (SELECT applied_at FROM schema_migrations WHERE version = 1)
         ORDER BY c.recorded_at DESC, c.attempt DESC LIMIT 1
         """,
-        [row["subject"], row["block_number"], str(row["reference_value"]), str(row["event_value"])],
+        [*figures, row["checked_at"]],
     ).fetchone()
     return found[0] if found else None
 
@@ -1106,15 +1149,18 @@ def _read_and_build(
     allow_partial: bool,
     sources: Sources,
 ) -> tuple[str, dict[str, bytes]]:
-    # Store would create a missing file, and an empty database is not a refusal to explain.
+    # A missing file would read as in use, and that is not the refusal to explain.
     if not raw_path.is_file():
         raise PublishRefused("the raw database does not exist")
     if not marts_path.is_file():
         raise PublishRefused("the marts database does not exist, so run dbt first")
     try:
-        store = Store(raw_path)
+        store = Store(raw_path, read_only=True)
     except duckdb.IOException as exc:
         raise PublishUnavailable("the raw database is in use by another process") from exc
+    except SchemaOutOfDate as exc:
+        # Says nothing about the data, so the last good dataset isn't called stale.
+        raise PublishUnavailable(str(exc)) from exc
     try:
         marts = duckdb.connect(str(marts_path), read_only=True)
     except duckdb.IOException as exc:

@@ -542,6 +542,15 @@ def _guarded(name: str, check: Callable[[], CheckResult]) -> CheckResult:
         return CheckResult(name, "failed", True, f"could not run: {type(exc).__name__}")
 
 
+@dataclass(frozen=True)
+class EvaluatedChecks:
+    """The seven results, when they ran, and the state of the data they saw."""
+
+    results: list[CheckResult]
+    moment: datetime
+    fingerprint: str | None
+
+
 def run_checks(
     store: Store,
     marts: duckdb.DuckDBPyConnection,
@@ -551,6 +560,19 @@ def run_checks(
     sources: Sources | None = None,
 ) -> list[CheckResult]:
     """Run all seven and record them under run_id, replacing any earlier rows of that run."""
+    evaluated = evaluate_checks(store, marts, allow_partial, now, sources)
+    record_checks(store, run_id, evaluated)
+    return evaluated.results
+
+
+def evaluate_checks(
+    store: Store,
+    marts: duckdb.DuckDBPyConnection,
+    allow_partial: bool = False,
+    now: datetime | None = None,
+    sources: Sources | None = None,
+) -> EvaluatedChecks:
+    """Run all seven without recording anything, so a read-only store will do."""
     moment = utc_moment(now)
     files = sources or Sources()
     present = present_chains(store)
@@ -578,13 +600,17 @@ def run_checks(
     except Exception:
         # Publish refuses a missing fingerprint, so this can't let anything through.
         fingerprint = None
+    return EvaluatedChecks(results, moment, fingerprint)
+
+
+def record_checks(store: Store, run_id: str, evaluated: EvaluatedChecks) -> None:
+    """Record them under run_id, replacing any earlier rows of that run."""
     store.replace_check_results(
         run_id,
-        [(r.name, r.status, r.blocking, r.detail) for r in results],
-        moment,
-        fingerprint,
+        [(r.name, r.status, r.blocking, r.detail) for r in evaluated.results],
+        evaluated.moment,
+        evaluated.fingerprint,
     )
-    return results
 
 
 def unacceptable(statuses: Mapping[str, str], allow_partial: bool = False) -> list[str]:

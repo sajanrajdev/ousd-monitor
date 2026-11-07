@@ -1,4 +1,4 @@
-"""Command line entry point: `ousd sync`, `reconcile`, `check` and `publish`."""
+"""Command line entry point: `ousd sync`, `reconcile`, `check`, `publish` and `migrate`."""
 
 import argparse
 import logging
@@ -19,9 +19,10 @@ from ousd.chains import (
     load_chains,
     missing_rpc_keys,
 )
-from ousd.checks import DEFAULT_MARTS_PATH, run_checks, unacceptable
+from ousd.checks import DEFAULT_MARTS_PATH, evaluate_checks, record_checks, unacceptable
 from ousd.http import HttpError, PoliteClient
 from ousd.ingest import sync_chain
+from ousd.migrations import SchemaOutOfDate, migrate
 from ousd.probes import build_probes, history_for, rpc_for, solana_rpc_for
 from ousd.publish import DEFAULT_PUBLISHED_DIR, PublishRefused, PublishUnavailable, publish
 from ousd.reconcile import (
@@ -292,7 +293,7 @@ def _check(run_id: str, allow_partial: bool) -> int:
     """Run the seven checks over stored data and record them. It needs no key and no network."""
     raw_path = Path(os.environ.get("OUSD_DB_PATH", DEFAULT_DB_PATH))
     marts_path = Path(os.environ.get("OUSD_MARTS_DB_PATH", DEFAULT_MARTS_PATH))
-    # Store would create a missing file, and the checks need one that holds the runs.
+    # The checks need a file that holds the runs, and an empty database is no answer.
     if not raw_path.is_file():
         print("error: the raw database does not exist; check OUSD_DB_PATH", file=sys.stderr)
         return 1
@@ -300,9 +301,13 @@ def _check(run_id: str, allow_partial: bool) -> int:
         print("error: the marts database does not exist; run dbt first", file=sys.stderr)
         return 1
     try:
-        store = Store(raw_path)
+        store = Store(raw_path, read_only=True)
     except duckdb.IOException:
         print("error: database in use: another process holds it", file=sys.stderr)
+        return 2
+    except SchemaOutOfDate as stale:
+        # Not a verdict on the data, so not exit 1, as with a database in use.
+        print(f"error: {stale}", file=sys.stderr)
         return 2
     try:
         marts = duckdb.connect(str(marts_path), read_only=True)
@@ -311,10 +316,25 @@ def _check(run_id: str, allow_partial: bool) -> int:
         print("error: marts in use: another process holds them", file=sys.stderr)
         return 2
     try:
-        results = run_checks(store, marts, run_id, allow_partial)
+        evaluated = evaluate_checks(store, marts, allow_partial)
     finally:
         marts.close()
         store.close()
+    # The writer lock only for this one write. The results carry the fingerprint of what they
+    # saw, so publish refuses them if the data moved in between.
+    try:
+        writer = Store(raw_path)
+    except duckdb.IOException:
+        print("error: database in use: another process holds it", file=sys.stderr)
+        return 2
+    except SchemaOutOfDate as stale:
+        print(f"error: {stale}", file=sys.stderr)
+        return 2
+    try:
+        record_checks(writer, run_id, evaluated)
+    finally:
+        writer.close()
+    results = evaluated.results
     for result in results:
         print(f"{result.name}: {result.status.upper()}: {result.detail}")
     problems = unacceptable({r.name: r.status for r in results}, allow_partial)
@@ -324,6 +344,31 @@ def _check(run_id: str, allow_partial: bool) -> int:
     )
     print(f"RESULT: {outcome}")
     return 1 if problems else 0
+
+
+def _migrate() -> int:
+    """Bring the raw database's schema up to date. It needs no key and no network."""
+    raw_path = Path(os.environ.get("OUSD_DB_PATH", DEFAULT_DB_PATH))
+    if not raw_path.is_file():
+        print("error: the raw database does not exist; check OUSD_DB_PATH", file=sys.stderr)
+        return 1
+    try:
+        db = duckdb.connect(str(raw_path))
+    except duckdb.IOException:
+        print("error: database in use: another process holds it", file=sys.stderr)
+        return 2
+    try:
+        applied = migrate(db)
+    except SchemaOutOfDate as newer:
+        # Not a verdict on the data, so not exit 1, as with check and publish.
+        print(f"error: {newer}", file=sys.stderr)
+        return 2
+    finally:
+        db.close()
+    for migration in applied:
+        print(f"applied: {migration.version} {migration.name}")
+    print("schema is up to date")
+    return 0
 
 
 def _publish(run_id: str, allow_partial: bool) -> int:
@@ -369,7 +414,8 @@ def main(argv: list[str] | None = None) -> int:
             name,
             help=summary,
             description=summary,
-            epilog="Exit 0 on success, 1 on a failure or refusal, 2 when a database is in use. "
+            epilog="Exit 0 on success, 1 on a failure or refusal, 2 when a database is in use "
+            "or needs `ousd migrate`. "
             "Paths: OUSD_DB_PATH, OUSD_MARTS_DB_PATH, OUSD_PUBLISHED_DIR.",
         )
         command.add_argument("--run-id", required=True, help="the run these checks belong to")
@@ -378,12 +424,24 @@ def main(argv: list[str] | None = None) -> int:
             action="store_true",
             help="local preview only, never a release: tolerate missing chains",
         )
+    commands.add_parser(
+        "migrate",
+        help="apply pending schema migrations to the raw database",
+        description="Apply pending schema migrations to the raw database. Any writer does this "
+        "when it opens the database; check and publish only read, so they refuse until it is "
+        "done. Exit 0 on success, 1 on a failure, 2 when the database is in use.",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
         format="%(asctime)s %(levelname)s %(message)s",
     )
+
+    if args.command == "migrate":
+        if args.chain:
+            parser.error("--chain does not apply to migrate: it covers the whole database")
+        return _migrate()
 
     if args.command in ("check", "publish"):
         if args.chain:
@@ -430,6 +488,9 @@ def main(argv: list[str] | None = None) -> int:
             else "error: cannot open the database; check OUSD_DB_PATH",
             file=sys.stderr,
         )
+        return 2
+    except SchemaOutOfDate as newer:
+        print(f"error: {newer}", file=sys.stderr)
         return 2
     try:
         if args.command == "sync":

@@ -1043,6 +1043,26 @@ def run_reconciliation(
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.time,
 ) -> RunResult:
+    """Run the checks and record the result, as _run_reconciliation explains. Afterwards the store
+    files nothing under the run, even one that raised and so stays unfinished."""
+    try:
+        return _run_reconciliation(
+            probes, store, report, bridge=bridge, census=census, sleep=sleep, clock=clock
+        )
+    finally:
+        store.leave_run()
+
+
+def _run_reconciliation(
+    probes: Sequence[ChainProbe],
+    store: Store,
+    report: Report,
+    *,
+    bridge: Callable[[], BridgeSnapshot] | None = None,
+    census: Collection[str] = (),
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.time,
+) -> RunResult:
     """Run the checks and record the result, which is what the publish gate reads.
 
     `report` hears each outcome as it happens. Only a chain that can't be read, or a store

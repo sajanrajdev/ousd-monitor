@@ -4,6 +4,7 @@ from conftest import ALICE, BOB, make_chain, rows
 from ousd.chains import REQUIRED_CHAINS
 from ousd.cli import format_units
 from ousd.decode import ZERO_ADDRESS, Transfer
+from ousd.reconcile import run_reconciliation
 from ousd.store import BalanceSample, ChainPin, Store, StoreConflict
 
 
@@ -486,6 +487,43 @@ def test_a_failed_check_write_leaves_no_samples(store):
     assert store.db.execute("SELECT count(*) FROM balance_samples").fetchone() == (0,)
     with pytest.raises(ValueError):
         store.record_check(run, "nonsense", "testnet", 1, "pass")
+
+
+def test_a_reconciliation_is_filed_under_the_open_run_only(store):
+    store.record_reconciliation("testnet", 1, 5, 0, 5, True)
+    run = store.start_run("full")
+    store.record_reconciliation("testnet", 2, 5, 0, 5, True)
+    store.finish_run(run, "pass", 0)
+    store.record_reconciliation("testnet", 3, 5, 0, 5, True)
+
+    filed = store.db.execute("SELECT block_number, run_id FROM reconciliations ORDER BY ALL")
+    assert filed.fetchall() == [(1, None), (2, run), (3, None)]
+
+
+def test_a_failed_finish_leaves_the_run_open_for_its_reconciliations(store):
+    run = store.start_run("full")
+    with pytest.raises(KeyError):
+        store.finish_run("another", "pass", 0)
+    store.record_reconciliation("testnet", 2, 5, 0, 5, True)
+
+    assert store.db.execute("SELECT run_id FROM reconciliations").fetchall() == [(run,)]
+
+
+def test_nothing_is_filed_under_a_run_that_raised(store, monkeypatch):
+    def refuse(run_id, status, code):
+        raise KeyError(run_id)
+
+    monkeypatch.setattr(store, "finish_run", refuse)
+    with pytest.raises(KeyError):
+        run_reconciliation([], store, lambda event: None)
+    store.record_reconciliation("testnet", 2, 5, 0, 5, True)
+
+    assert store.db.execute("SELECT run_id FROM reconciliations").fetchall() == [(None,)]
+    # The run itself stays unfinished, so it can't read as a pass.
+    unfinished = store.db.execute(
+        "SELECT count(*) FROM reconciliation_runs WHERE finished_at IS NULL"
+    ).fetchone()
+    assert unfinished == (1,)
 
 
 def test_a_run_cannot_be_finished_twice(store):

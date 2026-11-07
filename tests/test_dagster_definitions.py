@@ -376,6 +376,22 @@ def test_the_store_is_closed_between_assets(module, world, calls):
     Store(world.raw).close()
 
 
+def test_a_schema_newer_than_the_code_fails_the_asset_once_and_names_no_path(module, world, calls):
+    with world.store() as store:
+        store.db.execute("INSERT INTO schema_migrations (version, name) VALUES (999, 'later')")
+    pipeline = pipeline_for(module, world, calls)
+    with pytest.raises(dg.Failure) as stopped:
+        module._open_store(pipeline)
+    assert stopped.value.allow_retries is False
+    assert "newer than this code" in str(stopped.value.description)
+    assert str(world.path) not in str(stopped.value.description)
+
+    result = run_job(module, pipeline)
+    assert not result.success
+    assert calls.sync == 0
+    assert str(world.path) not in everything_logged(result)
+
+
 def test_the_run_failure_alert_holds_no_message(module, tmp_path):
     class Failed:
         run_id = "run-1"
