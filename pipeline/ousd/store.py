@@ -3,7 +3,7 @@
 import contextlib
 import json
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -103,6 +103,20 @@ _NET = (
     "(CASE WHEN from_address = $zero THEN value ELSE 0 END)"
     " - (CASE WHEN to_address = $zero THEN value ELSE 0 END)"
 )
+
+
+@contextlib.contextmanager
+def checkpointed(path: str | Path) -> Iterator[None]:
+    """Hold the writer lock on the raw database with every change checkpointed into the file, so
+    while the block runs no process can write and the file alone is the whole database. That is
+    what lets backup copy it and restore replace it. It applies no migrations: a copy keeps the
+    schema it was taken at. Raises duckdb.IOException when another process holds the file."""
+    db = duckdb.connect(str(path))
+    try:
+        db.execute("CHECKPOINT")
+        yield
+    finally:
+        db.close()
 
 
 def _text(value: int | None) -> str | None:
