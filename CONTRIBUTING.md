@@ -21,7 +21,7 @@ Ethereum and Tempo ingestion work on public endpoints. Base and Solana have no p
 
 ## DuckDB has one writer
 
-Every step that writes to `data/ousd.duckdb` (`make sync`, `reconcile`, `models`, `publish`, `run`) needs the database to itself. The second to start exits with "database in use". Run them one at a time.
+`make sync` and `reconcile` write `data/ousd.duckdb`. `make models` writes `data/marts.duckdb` and attaches `data/ousd.duckdb` read-only. `publish` and `run` chain these steps. DuckDB allows one writer per file, and a read-only attach still needs the file free of a writer, so run the steps one at a time. The second to start exits with code 2 and "database in use".
 
 ## Commits and pull requests
 

@@ -24,5 +24,5 @@ body:
   - type: input
     id: version
     attributes:
-      label: Commit or dataset version
-      description: The commit, or the dataset version from the site footer.
+      label: Commit, or page URL and "as of" time
+      description: The commit, or the page URL and the "as of" time shown on the card.

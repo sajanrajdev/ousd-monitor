@@ -19,10 +19,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Dataset version
-      description: Shown in the site footer.
-    validations:
-      required: true
+      label: Page URL and "as of" time
+      description: The page URL and the "as of" time shown on the card.
   - type: textarea
     id: expected
     attributes:
