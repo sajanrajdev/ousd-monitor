@@ -31,6 +31,7 @@ from ousd.chains import (
 from ousd.checks import DEFAULT_MARTS_PATH, evaluate_checks, record_checks, unacceptable
 from ousd.http import HttpError, PoliteClient
 from ousd.ingest import sync_chain
+from ousd.logs import UnknownLogFormat, chain_context, configure_logging
 from ousd.migrations import LATEST, SchemaOutOfDate, migrate
 from ousd.probes import build_probes, history_for, rpc_for, solana_rpc_for
 from ousd.publish import DEFAULT_PUBLISHED_DIR, PublishRefused, PublishUnavailable, publish
@@ -83,13 +84,15 @@ def _say(text: str) -> None:
 def _sync(chains: Sequence[Chain | SolanaChain], store: Store) -> int:
     for chain in chains:
         if isinstance(chain, SolanaChain):
-            solana = sync_solana(chain, solana_rpc_for(chain), store)
+            with chain_context(chain.name):
+                solana = sync_solana(chain, solana_rpc_for(chain), store)
             print(
                 f"{solana.chain}: synced to slot {solana.tip}, "
                 f"{solana.transfers_stored} transfers stored"
             )
             continue
-        result = sync_chain(chain, rpc_for(chain), store, history_for(chain))
+        with chain_context(chain.name):
+            result = sync_chain(chain, rpc_for(chain), store, history_for(chain))
         reorg = f", reorg repaired at {result.reorg_fork_block}" if result.reorg_fork_block else ""
         print(
             f"{result.chain}: synced to {result.tip} (finalized {result.finalized}), "
@@ -588,10 +591,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    logging.basicConfig(
-        level=logging.INFO if args.verbose else logging.WARNING,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+    try:
+        configure_logging(args.verbose)
+    except UnknownLogFormat as exc:
+        if args.command not in ("alert", "heartbeat"):
+            parser.error(str(exc))
+        # A typo must not silence the alert of a run that has failed.
+        os.environ.pop("OUSD_LOG_FORMAT", None)
+        configure_logging(args.verbose)
+        logging.getLogger(__name__).warning("%s: using plain logs", exc)
 
     if args.command in ("alert", "heartbeat"):
         if args.chain:

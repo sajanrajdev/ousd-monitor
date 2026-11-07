@@ -1131,3 +1131,23 @@ def test_every_url_variable_the_pipeline_reads_is_scrubbed():
     }
     assert named
     assert named <= set(SECRET_URL_VARIABLES)
+
+
+@pytest.mark.parametrize("url", PARAMS)
+def test_json_log_lines_and_alert_summaries_hide_a_keyed_url(url, monkeypatch):
+    from ousd.alerts import clean_summary
+    from ousd.logs import JsonFormatter
+
+    monkeypatch.setenv("BASE_RPC_URL", url)
+    try:
+        raise ConnectionError(f"cannot reach {url}: key {KEY} refused")
+    except ConnectionError as exc:
+        record = logging.LogRecord(
+            "ousd.test", logging.ERROR, __file__, 1, "failed %s", (url,), (type(exc), exc, None)
+        )
+    line = JsonFormatter().format(record)
+    summary = json.dumps(clean_summary({"base": {"error": f"failed at {url} {KEY}"}}))
+    for text in (line, summary):
+        assert KEY not in text
+        assert KEY[:12] not in text
+        assert "provider.invalid" not in text
