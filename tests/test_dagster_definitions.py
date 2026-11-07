@@ -4,17 +4,25 @@ throwaway database. The module is loaded as a file, the way `dagster -f` loads i
 import csv
 import importlib.util
 import json
+import math
+import os
 import shutil
+import signal
+import subprocess
+import sys
+import time
 from datetime import timedelta
 from pathlib import Path
 
 import dagster as dg
+import httpx
 import pytest
 from conftest import FakeRpc, make_chain, rows
 from dbt_helpers import invoke_dbt
 from ousd import checks as ousd_checks
 from ousd.chains import REQUIRED_CHAINS
 from ousd.checks import CHECK_NAMES, CheckResult
+from ousd.http import RATE_LIMIT_WAITS, PoliteClient
 from ousd.ingest import sync_chain
 from ousd.reconcile import RunResult
 from ousd.store import Status, Store
@@ -23,6 +31,10 @@ from publish_world import NOW, World, build_world
 DEFINITIONS = Path(__file__).resolve().parent.parent / "pipeline" / "dagster" / "definitions.py"
 KEYS = ["raw_transfers", "chain_reconciliations", "dbt_marts", "published_dataset"]
 LEAK = "https://rpc.example.invalid/v2/not-a-real-key"
+KEY = "k3y9aZ7QwErTyUiOpAsDfGhJkLzXcVbNm1234567890"
+KEYED_URL = f"https://base-rpc.provider.invalid/v2/{KEY}"
+WEBHOOK = "https://hooks.example.invalid/services/T000/B000/w3bh00kS3cr3tT0k3n"
+HEARTBEAT = "https://hc-ping.example.invalid/5f0e1d2c-3b4a-4968-8776-655443322110"
 
 
 def load_definitions():
@@ -392,26 +404,51 @@ def test_a_schema_newer_than_the_code_fails_the_asset_once_and_names_no_path(mod
     assert str(world.path) not in everything_logged(result)
 
 
-def test_the_run_failure_alert_holds_no_message(module, tmp_path):
-    class Failed:
-        run_id = "run-1"
-        job_name = "ousd_daily"
-        message = LEAK
+def test_the_failure_sensor_stays_for_dagster_dev_and_alerts_only_once(
+    module, world, calls, outbound
+):
+    calls.dbt_exit = 1
+    pipeline = pipeline_for(module, world, calls, outbound=outbound)
+    defs = module.build_definitions(pipeline)
+    assert [s.name for s in defs.sensors] == ["alert_on_failure"]
+    with dg.instance_for_test() as instance:
+        result = defs.resolve_job_def(module.JOB_NAME).execute_in_process(
+            instance=instance, raise_on_error=False
+        )
+        assert not result.success
+        failure = next(
+            e for e in result.all_events if e.event_type == dg.DagsterEventType.RUN_FAILURE
+        )
 
-    path = module.write_alert(tmp_path / "alerts", Failed(), NOW)
-    assert path == tmp_path / "alerts" / "run-1.json"
-    alert = json.loads(path.read_text())
-    assert alert == {"run_id": "run-1", "job": "ousd_daily", "failed_at": "2026-11-04T06:00:00Z"}
-    assert LEAK not in path.read_text()
-    assert [s.name for s in module.build_definitions().sensors] == ["alert_on_failure"]
+        def evaluate():
+            context = dg.build_run_status_sensor_context(
+                sensor_name="alert_on_failure",
+                dagster_event=failure,
+                dagster_instance=instance,
+                dagster_run=result.dagster_run,
+            ).for_run_failure()
+            defs.sensors[0](context)
+
+        # The hook already alerted, so the sensor adds nothing.
+        evaluate()
+        assert [a["step"] for a in alerts_in(world)] == ["dbt_marts"]
+        assert len(outbound.to(WEBHOOK)) == 1
+        # A run that died outside a step left no alert, and then the sensor writes one.
+        (world.path / "alerts" / f"{result.run_id}.json").unlink()
+        evaluate()
+    [alert] = alerts_in(world)
+    assert alert["step"] == "run"
+    assert "Steps failed" in alert["reason"]
+    assert len(outbound.to(WEBHOOK)) == 2
 
 
 def test_the_real_dbt_command_builds_the_project_with_the_repo_profile(module, monkeypatch):
     seen = {}
 
-    def fake_run(command, check):
+    def fake_run(command, check, timeout):
         seen["command"] = command
         seen["check"] = check
+        seen["timeout"] = timeout
 
         class Done:
             returncode = 3
@@ -428,6 +465,7 @@ def test_the_real_dbt_command_builds_the_project_with_the_repo_profile(module, m
         "dbt",
     ]
     assert seen["check"] is False
+    assert seen["timeout"] == 1800
 
 
 def test_missing_keys_stop_the_run_before_any_sync_and_name_only_variables(module, monkeypatch):
@@ -451,3 +489,296 @@ def test_a_pass_over_a_partial_scope_is_not_a_pass(module, world, calls):
     assert not result.success
     assert calls.reconcile == 1
     assert calls.dbt == 0
+
+
+class Outbound:
+    """Records every outbound request instead of sending it."""
+
+    def __init__(self, status: int = 200):
+        self.status = status
+        self.requests: list[httpx.Request] = []
+
+    def __call__(self, label: str) -> PoliteClient:
+        return PoliteClient(
+            label=label,
+            min_interval=0,
+            max_attempts=3,
+            transport=httpx.MockTransport(self.handle),
+            sleep=lambda seconds: None,
+        )
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return httpx.Response(self.status, text="ok")
+
+    def to(self, url: str) -> list[httpx.Request]:
+        return [request for request in self.requests if str(request.url) == url]
+
+
+def alerts_in(world: World) -> list[dict]:
+    folder = world.path / "alerts"
+    return [json.loads(path.read_text()) for path in sorted(folder.glob("*.json"))]
+
+
+@pytest.fixture
+def outbound(monkeypatch):
+    monkeypatch.setenv("OUSD_ALERT_WEBHOOK_URL", WEBHOOK)
+    monkeypatch.setenv("OUSD_HEARTBEAT_URL", HEARTBEAT)
+    return Outbound()
+
+
+def test_a_failed_run_writes_the_alert_in_process(module, world, calls):
+    calls.dbt_exit = 1
+    result = run_job(module, pipeline_for(module, world, calls))
+    assert not result.success
+    assert alerts_in(world) == [
+        {
+            "run_id": result.run_id,
+            "job": "ousd_daily",
+            "step": "dbt_marts",
+            "reason": "Failure: dbt build failed",
+            "failed_at": "2026-11-04T06:00:00Z",
+        }
+    ]
+
+
+def test_a_failed_blocking_check_alerts_too(module, world, calls, monkeypatch):
+    monkeypatch.setattr(
+        ousd_checks,
+        "freshness",
+        lambda store, chains, now: CheckResult("freshness", "failed", True, "forced"),
+    )
+    result = run_job(module, pipeline_for(module, world, calls))
+    assert not result.success
+    [alert] = alerts_in(world)
+    assert alert["step"] == "blocking_checks"
+    assert "freshness" in alert["reason"]
+
+
+def test_a_failure_posts_the_summary_and_never_pings_the_heartbeat(
+    module, world, calls, outbound, capsys, caplog
+):
+    calls.fail_sync_times = 99
+    result = run_job(module, pipeline_for(module, world, calls, outbound=outbound))
+    assert not result.success
+    assert outbound.to(HEARTBEAT) == []
+    [posted] = outbound.to(WEBHOOK)
+    assert posted.method == "POST"
+    body = json.loads(posted.content)
+    assert body["run_id"] == result.run_id
+    assert body["step"] == "raw_transfers"
+    assert body["failed_at"] == "2026-11-04T06:00:00Z"
+    assert body["reason"].startswith("RuntimeError: tempo: sync failed: RuntimeError: <url>")
+    assert body["text"].startswith(f"ousd_daily run {result.run_id} failed at raw_transfers")
+    assert LEAK not in posted.content.decode()
+    # Retried attempts are not failures: one alert, for the last.
+    assert calls.sync == 3
+    assert len(alerts_in(world)) == 1
+    captured = capsys.readouterr()
+    for text in (everything_logged(result), caplog.text, captured.out, captured.err):
+        assert WEBHOOK not in text
+        assert "w3bh00kS3cr3tT0k3n" not in text
+        assert HEARTBEAT not in text
+
+
+def test_an_undeliverable_webhook_never_shows_its_url_or_hides_the_failure(
+    module, world, calls, monkeypatch, capsys, caplog
+):
+    monkeypatch.setenv("OUSD_ALERT_WEBHOOK_URL", WEBHOOK)
+    outbound = Outbound(status=500)
+    calls.dbt_exit = 1
+    result = run_job(module, pipeline_for(module, world, calls, outbound=outbound))
+    assert not result.success
+    assert len(outbound.to(WEBHOOK)) == 3
+    assert alerts_in(world)[0]["step"] == "dbt_marts"
+    assert "alert webhook: not delivered" in caplog.text
+    captured = capsys.readouterr()
+    for text in (everything_logged(result), caplog.text, captured.out, captured.err):
+        assert "w3bh00kS3cr3tT0k3n" not in text
+        assert "hooks.example.invalid" not in text
+
+
+def test_a_successful_run_pings_the_heartbeat_once_and_alerts_nothing(
+    module, world, calls, outbound
+):
+    result = run_job(module, pipeline_for(module, world, calls, outbound=outbound))
+    assert result.success
+    [ping] = outbound.requests
+    assert str(ping.url) == HEARTBEAT
+    assert ping.method == "GET"
+    assert alerts_in(world) == []
+
+
+def test_without_the_urls_nothing_is_sent(module, world, calls, monkeypatch):
+    monkeypatch.delenv("OUSD_ALERT_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("OUSD_HEARTBEAT_URL", raising=False)
+    outbound = Outbound()
+    assert run_job(module, pipeline_for(module, world, calls, outbound=outbound)).success
+    calls.dbt_exit = 1
+    assert not run_job(module, pipeline_for(module, world, calls, outbound=outbound)).success
+    assert outbound.requests == []
+    assert len(alerts_in(world)) == 1
+
+
+def test_a_keyed_url_inside_an_exception_chain_never_reaches_the_log(
+    module, world, calls, monkeypatch, capsys, caplog
+):
+    monkeypatch.setenv("BASE_RPC_URL", KEYED_URL)
+
+    def sync(chain, store):
+        try:
+            raise ConnectionError(f"cannot reach {KEYED_URL}: key {KEY} refused")
+        except ConnectionError as exc:
+            raise ValueError("upstream said no") from exc
+
+    result = run_job(module, pipeline_for(module, world, calls, sync=sync))
+    assert not result.success
+    captured = capsys.readouterr()
+    # Dagster's console log, where context.log writes.
+    logged = captured.err
+    # The traceback is kept, with its cause, so the log says where the error came from.
+    assert "Traceback" in logged
+    assert "ConnectionError: cannot reach <BASE_RPC_URL>: key <BASE_RPC_URL> refused" in logged
+    assert "direct cause" in logged
+    events = everything_logged(result)
+    for text in (events, logged, caplog.text, captured.out, json.dumps(alerts_in(world))):
+        assert KEY not in text
+        assert KEY[:12] not in text
+        assert "base-rpc.provider.invalid" not in text
+
+
+def test_the_run_time_limit_fires_stops_the_step_without_a_retry_and_alerts(
+    module, world, calls, outbound
+):
+    def stuck_sync(chain, store):
+        calls.sync += 1
+        time.sleep(30)
+        return "never"
+
+    started = time.monotonic()
+    result = run_job(
+        module,
+        pipeline_for(module, world, calls, sync=stuck_sync, outbound=outbound, max_runtime=0.5),
+    )
+    assert time.monotonic() - started < 20
+    assert not result.success
+    assert calls.sync == 1
+    [alert] = alerts_in(world)
+    assert alert["step"] == "raw_transfers"
+    assert alert["reason"] == "RunTimeout: the run passed its 0s time limit"
+    assert len(outbound.to(WEBHOOK)) == 1
+    assert outbound.to(HEARTBEAT) == []
+
+
+def test_a_time_limit_that_fires_between_steps_still_alerts(module, world, calls):
+    # The limit lands in Dagster's own wait before a retry, outside any step.
+    calls.fail_sync_times = 99
+    result = run_job(module, pipeline_for(module, world, calls, retry_delay=30, max_runtime=0.5))
+    assert not result.success
+    assert calls.sync == 1
+    [alert] = alerts_in(world)
+    assert alert["run_id"] == result.run_id
+    assert alert["step"] == "run"
+    assert alert["reason"] == "RunTimeout: the run passed its 0s time limit"
+
+
+def test_the_limits_are_lifted_once_the_run_ends(module, world, calls):
+    before = signal.getsignal(signal.SIGALRM)
+    assert run_job(module, pipeline_for(module, world, calls, rate_limit_wait=5)).success
+    assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+    assert signal.getsignal(signal.SIGALRM) == before
+    assert math.isinf(RATE_LIMIT_WAITS.remaining)
+
+
+def test_a_rate_limit_wait_past_the_runs_cap_fails_instead_of_sleeping(module, world, calls):
+    slept: list[float] = []
+    client = PoliteClient(
+        label="rpc",
+        min_interval=0,
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(429, headers={"retry-after": "1800"})
+        ),
+        sleep=slept.append,
+    )
+
+    def sync(chain, store):
+        calls.sync += 1
+        client.request_json("POST", "http://rpc.invalid", json={})
+        return "never"
+
+    result = run_job(
+        module, pipeline_for(module, world, calls, sync=sync, rate_limit_wait=600, retry_delay=0)
+    )
+    assert not result.success
+    assert slept == []
+    assert "rate limit wait would pass the run's limit" in alerts_in(world)[0]["reason"]
+
+
+def test_the_job_carries_the_max_runtime_tag_for_the_daemon(module, monkeypatch):
+    monkeypatch.setenv("OUSD_MAX_RUNTIME_SECONDS", "5400")
+    job = module.build_definitions(module.Pipeline()).resolve_job_def("ousd_daily")
+    assert job.tags[dg.MAX_RUNTIME_SECONDS_TAG] == "5400"
+    monkeypatch.delenv("OUSD_MAX_RUNTIME_SECONDS")
+    job = module.build_definitions(module.Pipeline()).resolve_job_def("ousd_daily")
+    assert job.tags[dg.MAX_RUNTIME_SECONDS_TAG] == str(3 * 3600)
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "soon", "inf", "nan"])
+def test_a_limit_that_is_not_a_positive_number_is_refused_by_name(module, monkeypatch, value):
+    monkeypatch.setenv("OUSD_DBT_TIMEOUT_SECONDS", value)
+    with pytest.raises(ValueError, match="OUSD_DBT_TIMEOUT_SECONDS must be a positive"):
+        module.run_dbt_build()
+
+
+def test_a_blank_limit_means_the_default(module, monkeypatch):
+    monkeypatch.setenv("OUSD_RATE_LIMIT_WAIT_SECONDS", " ")
+    assert module.Pipeline().rate_limit_wait == 3600
+
+
+def test_a_dbt_build_past_its_timeout_is_reported_as_timed_out(module, world, calls, monkeypatch):
+    monkeypatch.setenv("OUSD_DBT_TIMEOUT_SECONDS", "90")
+
+    def too_slow(command, check, timeout):
+        assert timeout == 90
+        raise subprocess.TimeoutExpired(command, timeout)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(module.subprocess, "run", too_slow)
+        assert module.run_dbt_build() == module.DBT_TIMED_OUT
+
+    publish_once(world)
+    timed_out = pipeline_for(module, world, calls, dbt_build=lambda: module.DBT_TIMED_OUT)
+    result = run_job(module, timed_out)
+    assert not result.success
+    assert alerts_in(world)[0]["reason"] == "Failure: dbt build timed out"
+    assert json.loads(latest_files(world)["manifest.json"])["stale"] is True
+
+
+def test_dagster_job_execute_writes_the_alert_file(tmp_path):
+    """The scheduled path: `make run` runs exactly this, where no sensor is evaluated."""
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in {"BASE_RPC_URL", "SOLANA_RPC_URL", "OUSD_ALERT_WEBHOOK_URL"}
+    }
+    env["DAGSTER_HOME"] = str(tmp_path / ".dagster")
+    (tmp_path / ".dagster").mkdir()
+    dagster = Path(sys.executable).with_name("dagster")
+    # Without the keys the run fails in its first step, before any network or database.
+    finished = subprocess.run(
+        [str(dagster), "job", "execute", "-f", str(DEFINITIONS), "-j", "ousd_daily"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    assert finished.returncode != 0
+    [path] = (tmp_path / "data" / "alerts").glob("*.json")
+    alert = json.loads(path.read_text())
+    assert path.stem == alert["run_id"]
+    assert alert["job"] == "ousd_daily"
+    assert alert["step"] == "raw_transfers"
+    assert "BASE_RPC_URL" in alert["reason"]
+    assert not (tmp_path / "data" / "ousd.duckdb").exists()

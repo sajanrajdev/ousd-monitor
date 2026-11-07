@@ -1,0 +1,146 @@
+"""The alert file, the optional webhook and the optional heartbeat, with no network."""
+
+import json
+import logging
+from datetime import UTC, datetime
+
+import httpx
+import pytest
+from ousd import alerts
+from ousd.alerts import Alert, describe, new_alert, ping_heartbeat, post_alert, raise_alert
+from ousd.http import PoliteClient
+
+NOW = datetime(2026, 11, 4, 6, 0, tzinfo=UTC)
+KEY = "k3y9aZ7QwErTyUiOpAsDfGhJkLzXcVbNm1234567890"
+KEYED_URL = f"https://base-rpc.provider.invalid/v2/{KEY}"
+WEBHOOK = "https://hooks.example.invalid/services/T000/B000/w3bh00kS3cr3tT0k3n"
+HEARTBEAT = "https://hc-ping.example.invalid/5f0e1d2c-3b4a-4968-8776-655443322110"
+
+
+class Outbound:
+    def __init__(self, status: int = 200):
+        self.status = status
+        self.requests: list[httpx.Request] = []
+        self.labels: list[str] = []
+
+    def __call__(self, label: str) -> PoliteClient:
+        self.labels.append(label)
+        return PoliteClient(
+            label=label,
+            min_interval=0,
+            max_attempts=alerts.OUTBOUND_ATTEMPTS,
+            transport=httpx.MockTransport(self.handle),
+            sleep=lambda seconds: None,
+        )
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return httpx.Response(self.status, text="ok")
+
+
+@pytest.fixture(autouse=True)
+def debug_logging(caplog):
+    caplog.set_level(logging.DEBUG)
+
+
+def an_alert(run_id: str = "run-1", reason: str = "Failure: dbt build failed") -> Alert:
+    return new_alert(run_id, "ousd_daily", "dbt_marts", reason, NOW, env={})
+
+
+def test_the_alert_file_holds_the_run_the_step_the_reason_and_when(tmp_path):
+    path = alerts.write_alert(tmp_path / "alerts", an_alert())
+    assert path is not None
+    assert path == tmp_path / "alerts" / "run-1.json"
+    assert json.loads(path.read_text()) == {
+        "run_id": "run-1",
+        "job": "ousd_daily",
+        "step": "dbt_marts",
+        "reason": "Failure: dbt build failed",
+        "failed_at": "2026-11-04T06:00:00Z",
+    }
+
+
+def test_a_run_alerts_once_and_the_first_failure_wins(tmp_path):
+    outbound = Outbound()
+    env = {"OUSD_ALERT_WEBHOOK_URL": WEBHOOK}
+    first = raise_alert(tmp_path, an_alert(reason="first"), outbound, env)
+    second = raise_alert(tmp_path, an_alert(reason="second"), outbound, env)
+    assert first is not None
+    assert second is None
+    assert json.loads(first.read_text())["reason"] == "first"
+    assert len(outbound.requests) == 1
+
+
+def test_the_reason_is_scrubbed_of_configured_and_unknown_urls():
+    env = {"BASE_RPC_URL": KEYED_URL}
+    alert = new_alert(
+        "r", "ousd_daily", "s", f"saw {KEYED_URL}, {KEY} and http://x.invalid/a", NOW, env
+    )
+    assert alert.reason == "saw <BASE_RPC_URL>, <BASE_RPC_URL> and <url>"
+
+
+def test_describe_names_the_class_scrubs_and_cuts_to_one_line():
+    env = {"BASE_RPC_URL": KEYED_URL}
+    text = describe(RuntimeError(f"line one\nkey {KEY}\n" + "x" * 900), env)
+    assert text.startswith("RuntimeError: line one key <BASE_RPC_URL> x")
+    assert "\n" not in text
+    assert len(text) == alerts.REASON_LIMIT
+    assert describe(TimeoutError(), env) == "TimeoutError"
+    assert describe(None, env) == "unknown error"
+
+
+def test_without_a_webhook_nothing_is_posted(tmp_path):
+    outbound = Outbound()
+    assert raise_alert(tmp_path, an_alert(), outbound, {}) is not None
+    assert post_alert(an_alert(), outbound, {"OUSD_ALERT_WEBHOOK_URL": "  "}) is False
+    assert outbound.labels == []
+
+
+def test_the_webhook_gets_a_short_json_summary():
+    outbound = Outbound()
+    assert post_alert(an_alert(), outbound, {"OUSD_ALERT_WEBHOOK_URL": WEBHOOK})
+    [request] = outbound.requests
+    assert request.method == "POST"
+    assert str(request.url) == WEBHOOK
+    assert json.loads(request.content) == {
+        "text": "ousd_daily run run-1 failed at dbt_marts: Failure: dbt build failed",
+        "run_id": "run-1",
+        "job": "ousd_daily",
+        "step": "dbt_marts",
+        "reason": "Failure: dbt build failed",
+        "failed_at": "2026-11-04T06:00:00Z",
+    }
+
+
+@pytest.mark.parametrize("status", [404, 500])
+def test_an_undeliverable_webhook_is_logged_without_its_url_and_never_raises(status, caplog):
+    outbound = Outbound(status=status)
+    assert post_alert(an_alert(), outbound, {"OUSD_ALERT_WEBHOOK_URL": WEBHOOK}) is False
+    assert "alert webhook: not delivered" in caplog.text
+    assert "w3bh00kS3cr3tT0k3n" not in caplog.text
+    assert "hooks.example.invalid" not in caplog.text
+
+
+def test_a_webhook_that_echoes_its_url_is_scrubbed(caplog):
+    class Echo(Outbound):
+        def handle(self, request):
+            return httpx.Response(403, text=f"no such hook {request.url}")
+
+    assert post_alert(an_alert(), Echo(), {"OUSD_ALERT_WEBHOOK_URL": WEBHOOK}) is False
+    assert "no such hook" in caplog.text
+    assert "w3bh00kS3cr3tT0k3n" not in caplog.text
+
+
+def test_the_heartbeat_pings_only_when_set():
+    outbound = Outbound()
+    assert ping_heartbeat(outbound, {}) is False
+    assert outbound.requests == []
+    assert ping_heartbeat(outbound, {"OUSD_HEARTBEAT_URL": HEARTBEAT})
+    [request] = outbound.requests
+    assert (request.method, str(request.url)) == ("GET", HEARTBEAT)
+
+
+def test_a_failed_heartbeat_is_logged_without_its_url_and_never_raises(caplog):
+    assert ping_heartbeat(Outbound(status=503), {"OUSD_HEARTBEAT_URL": HEARTBEAT}) is False
+    assert "heartbeat: not delivered" in caplog.text
+    assert "655443322110" not in caplog.text

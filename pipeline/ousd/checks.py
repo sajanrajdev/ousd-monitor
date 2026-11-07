@@ -7,6 +7,8 @@ what it found, so a pass can only ever come from the store.
 import csv
 import hashlib
 import json
+import logging
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -17,7 +19,10 @@ import duckdb
 import yaml
 
 from ousd.chains import REQUIRED_CHAINS
+from ousd.http import scrubbed_traceback
 from ousd.store import LatestReconciliation, Store
+
+log = logging.getLogger(__name__)
 
 DEFAULT_MARTS_PATH = "data/marts.duckdb"
 CHECK_NAMES = (
@@ -559,10 +564,12 @@ def data_fingerprint(store: Store, marts: duckdb.DuckDBPyConnection, sources: So
 
 
 def _guarded(name: str, check: Callable[[], CheckResult]) -> CheckResult:
-    """A check that can't run has not passed. The class name only: a message can hold a path."""
+    """A check that can't run has not passed. The detail is published, so it names the class
+    only, as a message can hold a path. The log gets the scrubbed traceback."""
     try:
         return check()
     except Exception as exc:
+        log.error("%s could not run:\n%s", name, scrubbed_traceback(exc))
         return CheckResult(name, "failed", True, f"could not run: {type(exc).__name__}")
 
 

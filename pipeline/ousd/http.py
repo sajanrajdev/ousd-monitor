@@ -3,10 +3,13 @@
 import json
 import logging
 import math
+import os
 import random
 import re
 import time
-from collections.abc import Callable
+import traceback
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import parse_qsl, quote, quote_plus, unquote, urlsplit
@@ -32,6 +35,20 @@ MIN_SECRET_PART = 8
 MAX_RESPONSE_BYTES = 64 * 1024 * 1024
 # Pauses at least this long are logged, so a quiet process means a hang and not a wait.
 VISIBLE_WAIT = 5.0
+# Variables whose values are URLs that can hold a key. Text bound for a log or an alert is scrubbed
+# of each one that is set.
+SECRET_URL_VARIABLES = (
+    "TEMPO_RPC_URL",
+    "ETHEREUM_RPC_URL",
+    "ETHEREUM_BLOCKSCOUT_URL",
+    "BASE_RPC_URL",
+    "SOLANA_RPC_URL",
+    "BRIDGE_API_URL",
+    "OUSD_ALERT_WEBHOOK_URL",
+    "OUSD_HEARTBEAT_URL",
+)
+# Any URL at all, for what scrubbing by known URLs can miss, such as a provider's redirect.
+_ANY_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"<>]+")
 
 
 def _retry_after(value: str, now: float) -> float:
@@ -93,8 +110,72 @@ def _url_parts(url: str) -> set[str] | None:
     return {part for part in found if len(part) >= MIN_SECRET_PART or part == host}
 
 
+def scrub(text: str, url: str, label: str) -> str:
+    """Remove a URL and its parts from text a server or library produced.
+
+    Besides the URL, host and path, this hides each host label, path segment, query value,
+    username and password of 8 or more characters, because a provider may echo the bare key.
+    Longer parts go first and everything is replaced in one pass, so inserted labels are
+    never rewritten.
+    """
+    parts = _url_parts(url)
+    if parts is None:
+        # Nothing says what to hide, so none of the text is trusted.
+        return f"<{label}> error (details withheld)"
+    secrets = {part for part in (url, *parts) if len(part) > 1}
+    if not secrets:
+        return text
+    pattern = "|".join(re.escape(part) for part in sorted(secrets, key=len, reverse=True))
+    return re.sub(pattern, lambda _: f"<{label}>", text, flags=re.IGNORECASE)
+
+
+def scrub_secrets(text: str, env: Mapping[str, str] | None = None) -> str:
+    """Text with every configured URL, its parts and then any other URL removed."""
+    values = os.environ if env is None else env
+    for name in SECRET_URL_VARIABLES:
+        if url := values.get(name, "").strip():
+            text = scrub(text, url, name)
+    return _ANY_URL.sub("<url>", text)
+
+
+def scrubbed_traceback(exc: BaseException, env: Mapping[str, str] | None = None) -> str:
+    """The whole chain of causes, scrubbed, so a log keeps where an error came from."""
+    return scrub_secrets("".join(traceback.format_exception(exc)), env).rstrip()
+
+
 class HttpError(RuntimeError):
     """A response that retrying will not fix, or the last failure after all retries."""
+
+
+class WaitBudget:
+    """Seconds every client together may still spend waiting out servers' rate limits.
+
+    Unlimited until a run sets a limit, so a one-off command or a test never shares one.
+    """
+
+    def __init__(self) -> None:
+        self.remaining = math.inf
+
+    def spend(self, seconds: float, label: str) -> None:
+        if seconds > self.remaining:
+            raise HttpError(
+                f"{label}: a {seconds:.0f}s rate limit wait would pass the run's limit"
+                f" ({self.remaining:.0f}s left)"
+            )
+        self.remaining -= seconds
+
+
+RATE_LIMIT_WAITS = WaitBudget()
+
+
+@contextmanager
+def rate_limit_waits_capped(seconds: float) -> Iterator[WaitBudget]:
+    """Cap the waits on servers' rate limits for the length of a run, then lift the cap."""
+    RATE_LIMIT_WAITS.remaining = seconds
+    try:
+        yield RATE_LIMIT_WAITS
+    finally:
+        RATE_LIMIT_WAITS.remaining = math.inf
 
 
 class PoliteClient:
@@ -113,6 +194,7 @@ class PoliteClient:
         max_bytes: int = MAX_RESPONSE_BYTES,
         rng: random.Random | None = None,
         wall_clock: Callable[[], float] = time.time,
+        waits: WaitBudget = RATE_LIMIT_WAITS,
     ) -> None:
         self._client = httpx.Client(
             headers={"User-Agent": USER_AGENT}, timeout=60.0, transport=transport
@@ -128,10 +210,18 @@ class PoliteClient:
         # Tests seed this to make the jittered delays repeatable.
         self._rng = rng or random.Random()
         self._wall_clock = wall_clock
+        self._waits = waits
         self._last_request = 0.0
         self._pause_next = 0.0
 
     def request_json(self, method: str, url: str, **kwargs: Any) -> Any:
+        return self._request(method, url, json.loads, **kwargs)
+
+    def request(self, method: str, url: str, **kwargs: Any) -> bytes:
+        """The same, for a reply that is not JSON, such as a webhook's "ok"."""
+        return self._request(method, url, bytes, **kwargs)
+
+    def _request[T](self, method: str, url: str, parse: Callable[[bytes], T], **kwargs: Any) -> T:
         failure = ""
         server_wait = 0.0
         for attempt in range(self._max_attempts):
@@ -140,6 +230,8 @@ class PoliteClient:
                 # together do not retry together. A server's own hint is still a floor.
                 jittered = self._rng.uniform(0, self._backoff * 2 ** (attempt - 1))
                 delay = max(jittered, server_wait)
+                if server_wait:
+                    self._waits.spend(server_wait, self._label)
                 log.warning("%s: retrying in %.0fs: %s", self._label, delay, failure)
                 self._sleep(delay)
             # A hint only applies to the response that gave it, not to later failures.
@@ -169,28 +261,14 @@ class PoliteClient:
                 detail = self.scrub(body.decode(errors="replace"), url)[:200]
                 raise HttpError(f"{self._label}: HTTP {response.status_code}: {detail}")
             try:
-                return json.loads(body)
+                return parse(body)
             except ValueError:
                 failure = "response was not JSON"
         raise HttpError(f"{self._label}: gave up after {self._max_attempts} attempts: {failure}")
 
     def scrub(self, text: str, url: str) -> str:
-        """Remove a URL and its parts from text a server or library produced.
-
-        Besides the URL, host and path, this hides each host label, path segment, query value,
-        username and password of 8 or more characters, because a provider may echo the bare key.
-        Longer parts go first and everything is replaced in one pass, so inserted labels are
-        never rewritten.
-        """
-        parts = _url_parts(url)
-        if parts is None:
-            # Nothing says what to hide, so none of the text is trusted.
-            return f"<{self._label}> error (details withheld)"
-        secrets = {part for part in (url, *parts) if len(part) > 1}
-        if not secrets:
-            return text
-        pattern = "|".join(re.escape(part) for part in sorted(secrets, key=len, reverse=True))
-        return re.sub(pattern, lambda _: f"<{self._label}>", text, flags=re.IGNORECASE)
+        """Remove a URL and its parts from text, labelled with this client's name."""
+        return scrub(text, url, self._label)
 
     def _fetch(self, method: str, url: str, **kwargs: Any) -> tuple[httpx.Response, bytes]:
         """Read a whole response, raising a retryable timeout once the deadline passes."""
@@ -214,6 +292,8 @@ class PoliteClient:
 
     def _throttle(self) -> None:
         wait = max(self._pause_next, self._last_request + self._min_interval - self._clock())
+        if self._pause_next:
+            self._waits.spend(self._pause_next, self._label)
         self._pause_next = 0.0
         if wait >= VISIBLE_WAIT:
             log.warning("%s: rate limit window spent, pausing %.0fs", self._label, wait)

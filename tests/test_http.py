@@ -1,11 +1,20 @@
 import logging
+import math
 import random
 import socket
 from typing import Any
 
 import httpx
 import pytest
-from ousd.http import MAX_SERVER_WAIT, HttpError, PoliteClient
+from ousd.http import (
+    MAX_SERVER_WAIT,
+    RATE_LIMIT_WAITS,
+    HttpError,
+    PoliteClient,
+    WaitBudget,
+    rate_limit_waits_capped,
+    scrub_secrets,
+)
 
 
 class TopOfRange(random.Random):
@@ -346,3 +355,61 @@ def test_a_non_ascii_digit_content_length_is_ignored_not_a_crash():
     client = client_for([ok], max_bytes=50)
 
     assert client.request_json("GET", "http://x.invalid") == {"a": 1}
+
+
+def test_a_reply_that_is_not_json_is_returned_as_bytes():
+    client = client_for([httpx.Response(200, text="OK")])
+    assert client.request("GET", "http://hc.invalid/ping") == b"OK"
+
+
+def test_server_waits_are_spent_from_the_budget_and_refused_past_it():
+    budget = WaitBudget()
+    budget.remaining = 100
+    sleeps: list[float] = []
+    client = client_for(
+        [
+            httpx.Response(429, headers={"retry-after": "60"}),
+            httpx.Response(200, json={"ok": True}),
+            httpx.Response(429, headers={"retry-after": "60"}),
+        ],
+        sleeps,
+        waits=budget,
+    )
+    assert client.request_json("GET", "http://api.invalid") == {"ok": True}
+    assert budget.remaining == 40
+    with pytest.raises(HttpError, match="60s rate limit wait would pass the run's limit"):
+        client.request_json("GET", "http://api.invalid")
+    # The refused wait is never slept.
+    assert sleeps == [60]
+
+
+def test_a_spent_window_counts_against_the_budget():
+    budget = WaitBudget()
+    budget.remaining = 10
+    sleeps: list[float] = []
+    spent = {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "30000"}
+    client = client_for([httpx.Response(200, json={}, headers=spent)], sleeps, waits=budget)
+    client.request_json("GET", "http://api.invalid")
+    with pytest.raises(HttpError, match="30s rate limit wait"):
+        client.request_json("GET", "http://api.invalid")
+    assert sleeps == []
+
+
+def test_backoff_without_a_server_hint_costs_nothing():
+    budget = WaitBudget()
+    budget.remaining = 0
+    client = client_for([httpx.Response(503), httpx.Response(200, json={})], waits=budget)
+    assert client.request_json("GET", "http://api.invalid") == {}
+
+
+def test_the_shared_budget_is_unlimited_outside_a_run_and_capped_inside_one():
+    assert math.isinf(RATE_LIMIT_WAITS.remaining)
+    with rate_limit_waits_capped(120) as budget:
+        assert budget is RATE_LIMIT_WAITS
+        assert RATE_LIMIT_WAITS.remaining == 120
+    assert math.isinf(RATE_LIMIT_WAITS.remaining)
+
+
+def test_scrub_secrets_removes_any_url_even_one_not_configured():
+    text = "redirected to https://elsewhere.invalid/k/abc?token=1 then gave up"
+    assert scrub_secrets(text, {}) == "redirected to <url> then gave up"
