@@ -52,6 +52,12 @@ SECRET_URL_VARIABLES = (
     "OUSD_BACKUP_URL",
     "OUSD_BACKUP_ENDPOINT_URL",
 )
+# Variables whose values are credentials, not URLs. Each value that is set is removed as it is,
+# JSON-escaped and URL-quoted, so a plain line and a JSON line both lose it.
+SECRET_VALUE_VARIABLES = (
+    "OUSD_BACKUP_ACCESS_KEY_ID",
+    "OUSD_BACKUP_SECRET_ACCESS_KEY",
+)
 # Any URL at all, for what scrubbing by known URLs can miss, such as a provider's redirect.
 _ANY_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"<>]+")
 
@@ -140,6 +146,12 @@ def scrub_secrets(text: str, env: Mapping[str, str] | None = None) -> str:
     for name in SECRET_URL_VARIABLES:
         if url := values.get(name, "").strip():
             text = scrub(text, url, name)
+    for name in SECRET_VALUE_VARIABLES:
+        value = values.get(name, "").strip()
+        if len(value) >= MIN_SECRET_PART:
+            forms = {value, json.dumps(value)[1:-1], quote(value, safe=""), quote_plus(value)}
+            for form in sorted(forms, key=len, reverse=True):
+                text = text.replace(form, f"<{name}>")
     return _ANY_URL.sub("<url>", text)
 
 

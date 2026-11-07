@@ -5,7 +5,9 @@ import logging
 import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Any
 
+import dagster as dg
 import httpx
 import pytest
 from ousd import alerts, cli
@@ -291,3 +293,107 @@ def test_the_cli_heartbeat_says_what_happened(monkeypatch, capsys):
 def test_the_cli_alert_commands_take_no_chain(command):
     with pytest.raises(SystemExit):
         cli.main(["--chain", "tempo", *command])
+
+
+SUMMARY: dict[str, dict[str, Any]] = {
+    "tempo": {"sync": "ok", "cursor": 10, "tip": 12, "lag": 2, "reorg_depth": 0, "rows_added": 5},
+    "bridge": {"reconciliation": "pass"},
+}
+
+
+def test_an_alert_without_a_summary_reads_as_it_always_did(tmp_path):
+    path = alerts.write_alert(tmp_path / "alerts", an_alert())
+    assert path is not None
+    assert "chains" not in json.loads(path.read_text())
+
+
+def test_an_alert_carries_the_per_chain_summary_in_the_file_and_the_post(tmp_path, monkeypatch):
+    monkeypatch.setenv(alerts.WEBHOOK_VARIABLE, WEBHOOK)
+    outbound = Outbound()
+    alert = new_alert("run-1", "ousd_daily", "dbt_marts", "boom", NOW, env={}, chains=SUMMARY)
+    path = raise_alert(tmp_path / "alerts", alert, outbound)
+    assert path is not None
+    assert json.loads(path.read_text())["chains"] == SUMMARY
+    assert json.loads(outbound.requests[0].content)["chains"] == SUMMARY
+
+
+def test_the_summary_stays_small_and_flat():
+    many: dict[str, dict[str, Any]] = {
+        f"chain{n}": {f"k{m}": m for m in range(30)} for n in range(30)
+    }
+    many["nested"] = {"list": [1, 2], "map": {"a": 1}, "text": "x" * 500, "ok": True}
+    cleaned = alerts.clean_summary(many)
+    assert len(cleaned) == alerts.SUMMARY_CHAINS
+    assert all(len(facts) <= alerts.SUMMARY_FIELDS for facts in cleaned.values())
+    small = alerts.clean_summary({"nested": many["nested"]})["nested"]
+    assert small == {"text": "x" * alerts.SUMMARY_TEXT, "ok": True}
+
+
+def test_the_summary_is_scrubbed(monkeypatch):
+    env = {"BASE_RPC_URL": KEYED_URL}
+    cleaned = alerts.clean_summary({"base": {"error": f"cannot reach {KEYED_URL} ({KEY})"}}, env)
+    text = json.dumps(cleaned)
+    assert KEY not in text
+    assert "provider.invalid" not in text
+
+
+def test_a_heartbeat_with_a_summary_is_a_post_of_json_and_without_one_a_get():
+    outbound = Outbound()
+    env = {"OUSD_HEARTBEAT_URL": HEARTBEAT}
+    assert ping_heartbeat(outbound, env, chains=SUMMARY)
+    assert ping_heartbeat(outbound, env)
+    posted, bare = outbound.requests
+    assert (posted.method, str(posted.url)) == ("POST", HEARTBEAT)
+    assert json.loads(posted.content) == {"chains": SUMMARY}
+    assert (bare.method, bare.content) == ("GET", b"")
+
+
+def test_a_heartbeat_endpoint_that_refuses_a_post_still_gets_its_get():
+    class GetOnly(Outbound):
+        def handle(self, request):
+            self.requests.append(request)
+            return httpx.Response(200 if request.method == "GET" else 405, text="x")
+
+    outbound = GetOnly()
+    assert ping_heartbeat(outbound, {"OUSD_HEARTBEAT_URL": HEARTBEAT}, chains=SUMMARY)
+    assert [r.method for r in outbound.requests][-1] == "GET"
+
+
+def test_a_post_that_raises_something_other_than_a_delivery_failure_sends_nothing(caplog):
+    class TimedOut(dg.Failure):
+        pass
+
+    class Raising(Outbound):
+        def handle(self, request):
+            self.requests.append(request)
+            raise TimedOut("the run passed its time limit")
+
+    outbound = Raising()
+    assert ping_heartbeat(outbound, {"OUSD_HEARTBEAT_URL": HEARTBEAT}, chains=SUMMARY) is False
+    assert [r.method for r in outbound.requests] == ["POST"]
+    assert "heartbeat: not delivered: TimedOut" in caplog.text
+
+
+def test_a_refused_post_is_logged_before_the_get_goes_out(caplog):
+    class GetOnly(Outbound):
+        def handle(self, request):
+            self.requests.append(request)
+            return httpx.Response(200 if request.method == "GET" else 405, text="x")
+
+    assert ping_heartbeat(GetOnly(), {"OUSD_HEARTBEAT_URL": HEARTBEAT}, chains=SUMMARY)
+    assert "heartbeat: POST not delivered" in caplog.text
+    assert "5f0e1d2c-3b4a-4968-8776-655443322110" not in caplog.text
+
+
+def test_summary_keys_are_cut_and_scrubbed():
+    cleaned = alerts.clean_summary(
+        {"a": {"k" * 500: 1, f"at {KEYED_URL}": 2}}, {"BASE_RPC_URL": KEYED_URL}
+    )
+    [(first, _), (second, _)] = cleaned["a"].items()
+    assert len(first) == alerts.SUMMARY_TEXT
+    assert KEY not in second
+
+
+def test_non_finite_numbers_are_dropped_from_the_summary():
+    cleaned = alerts.clean_summary({"a": {"x": float("nan"), "y": float("inf"), "z": 1.5}})
+    assert cleaned == {"a": {"z": 1.5}}

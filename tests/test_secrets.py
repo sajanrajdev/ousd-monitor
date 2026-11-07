@@ -1131,3 +1131,40 @@ def test_every_url_variable_the_pipeline_reads_is_scrubbed():
     }
     assert named
     assert named <= set(SECRET_URL_VARIABLES)
+
+
+@pytest.mark.parametrize("url", PARAMS)
+def test_json_log_lines_and_alert_summaries_hide_a_keyed_url(url, monkeypatch):
+    from ousd.alerts import clean_summary
+    from ousd.logs import JsonFormatter
+
+    monkeypatch.setenv("BASE_RPC_URL", url)
+    try:
+        raise ConnectionError(f"cannot reach {url}: key {KEY} refused")
+    except ConnectionError as exc:
+        record = logging.LogRecord(
+            "ousd.test", logging.ERROR, __file__, 1, "failed %s", (url,), (type(exc), exc, None)
+        )
+    line = JsonFormatter().format(record)
+    summary = json.dumps(clean_summary({"base": {"error": f"failed at {url} {KEY}"}}))
+    for text in (line, summary):
+        assert KEY not in text
+        assert KEY[:12] not in text
+        assert "provider.invalid" not in text
+
+
+@pytest.mark.parametrize("name", ["OUSD_BACKUP_ACCESS_KEY_ID", "OUSD_BACKUP_SECRET_ACCESS_KEY"])
+def test_backup_credentials_are_hidden_in_plain_and_json_lines(name, monkeypatch):
+    from ousd.logs import JsonFormatter
+
+    secret = 'AKIA/xY+9"q\\Zr8Tu2Wv3Ab'
+    monkeypatch.setenv(name, secret)
+    assert secret not in scrub_secrets(f"denied for {secret}")
+    assert scrub_secrets(f"denied for {secret}") == f"denied for <{name}>"
+    record = logging.LogRecord(
+        "ousd.test", logging.ERROR, __file__, 1, "denied for %s", (secret,), None
+    )
+    line = JsonFormatter().format(record)
+    assert secret not in line
+    assert json.dumps(secret)[1:-1] not in line
+    assert f"<{name}>" in line

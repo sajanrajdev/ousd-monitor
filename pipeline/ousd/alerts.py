@@ -10,12 +10,14 @@ PoliteClient, which never logs a URL, and scrubbed from any error.
 
 import json
 import logging
+import math
 import os
 import tempfile
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from ousd.http import HttpError, PoliteClient, WaitBudget, scrub_secrets
 
@@ -26,6 +28,13 @@ WEBHOOK_VARIABLE = "OUSD_ALERT_WEBHOOK_URL"
 HEARTBEAT_VARIABLE = "OUSD_HEARTBEAT_URL"
 # Enough to say what broke. The traceback is in the run's log.
 REASON_LIMIT = 500
+# A per-chain summary stays small: a few chains, a few short facts each.
+SUMMARY_CHAINS = 8
+SUMMARY_FIELDS = 10
+SUMMARY_TEXT = 80
+
+type ChainSummary = Mapping[str, Mapping[str, Any]]
+
 # An alert must not hold up a run that has already failed for long: a few short attempts, each
 # bounded from connecting to the last byte, and no waiting out a server's rate limit, however
 # long it asks for.
@@ -47,18 +56,47 @@ def outbound_client(label: str) -> PoliteClient:
     )
 
 
+def clean_summary(
+    chains: ChainSummary | None, env: Mapping[str, str] | None = None
+) -> dict[str, dict[str, Any]]:
+    """What a payload may carry about each chain: numbers, flags and short scrubbed words, for a
+    few chains. Nested values, long text and the rest are dropped, so the payload stays small."""
+    cleaned: dict[str, dict[str, Any]] = {}
+    for name, facts in list((chains or {}).items())[:SUMMARY_CHAINS]:
+        kept: dict[str, Any] = {}
+        for key, value in list(facts.items())[:SUMMARY_FIELDS]:
+            if isinstance(value, float) and not math.isfinite(value):
+                continue
+            label = scrub_secrets(str(key), env)[:SUMMARY_TEXT]
+            if isinstance(value, bool) or value is None or isinstance(value, int | float):
+                kept[label] = value
+            elif isinstance(value, str):
+                kept[label] = scrub_secrets(value, env)[:SUMMARY_TEXT]
+        cleaned[scrub_secrets(str(name), env)[:SUMMARY_TEXT]] = kept
+    return cleaned
+
+
 @dataclass(frozen=True)
 class Alert:
-    """What failed, and when. Every text in it has been scrubbed."""
+    """What failed, and when. Every text in it has been scrubbed. `chains` is the per-chain
+    summary of the run so far, when there is one."""
 
     run_id: str
     job: str
     step: str
     reason: str
     failed_at: str
+    chains: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def summary(self) -> str:
         return f"{self.job} run {self.run_id} failed at {self.step}: {self.reason}"
+
+    def payload(self) -> dict[str, Any]:
+        """The fields, with no empty `chains`, so a run without a summary reads as it always did."""
+        fields = asdict(self)
+        if not fields["chains"]:
+            del fields["chains"]
+        return fields
 
 
 def describe(exc: BaseException | None, env: Mapping[str, str] | None = None) -> str:
@@ -77,6 +115,7 @@ def new_alert(
     reason: str,
     moment: datetime,
     env: Mapping[str, str] | None = None,
+    chains: ChainSummary | None = None,
 ) -> Alert:
     return Alert(
         run_id=run_id,
@@ -84,6 +123,7 @@ def new_alert(
         step=step,
         reason=scrub_secrets(reason, env)[:REASON_LIMIT],
         failed_at=moment.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        chains=clean_summary(chains, env),
     )
 
 
@@ -97,7 +137,7 @@ def write_alert(alerts_dir: Path, alert: Alert) -> Path | None:
     # this ends, a failed write included.
     with tempfile.NamedTemporaryFile("w", dir=alerts_dir, suffix=".tmp", delete=False) as handle:
         try:
-            handle.write(json.dumps(asdict(alert), indent=2) + "\n")
+            handle.write(json.dumps(alert.payload(), indent=2) + "\n")
             handle.close()
             os.link(handle.name, path)
         except FileExistsError:
@@ -122,7 +162,7 @@ def post_alert(
     if not url:
         return False
     # "text" is what chat webhooks show. The rest is for anything that reads the fields.
-    payload = {"text": alert.summary(), **asdict(alert)}
+    payload = {"text": alert.summary(), **alert.payload()}
     try:
         client("alert webhook").request("POST", url, json=payload)
     except Exception as exc:
@@ -160,14 +200,26 @@ def raise_alert(
 
 
 def ping_heartbeat(
-    client: ClientFactory = outbound_client, env: Mapping[str, str] | None = None
+    client: ClientFactory = outbound_client,
+    env: Mapping[str, str] | None = None,
+    chains: ChainSummary | None = None,
 ) -> bool:
-    """Ping the heartbeat when one is set. Only a run that published calls this. Never raises: a
-    missed ping is what the dead-man check is for."""
+    """Ping the heartbeat when one is set. Only a run that published calls this. With a per-chain
+    summary the ping is a POST of JSON, and a bare GET if that fails; without one, a bare GET.
+    Never raises: a missed ping is what the dead-man check is for."""
     url = _secret_url(HEARTBEAT_VARIABLE, env)
     if not url:
         return False
     try:
+        summary = clean_summary(chains, env)
+        if summary:
+            try:
+                client("heartbeat").request("POST", url, json={"chains": summary})
+                return True
+            except HttpError as exc:
+                # A dead-man endpoint that takes only GET still gets its ping, but only after a
+                # delivery failure. Any other error, such as the run's time limit, is not one.
+                log.warning("heartbeat: POST not delivered: %s", _undelivered(exc, env))
         client("heartbeat").request("GET", url)
     except Exception as exc:
         log.warning("heartbeat: not delivered: %s", _undelivered(exc, env))

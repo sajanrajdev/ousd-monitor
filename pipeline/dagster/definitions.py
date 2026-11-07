@@ -11,6 +11,8 @@ only after every configured URL, and any other URL, is scrubbed from it.
 itself: a failure hook writes the alert, and a run resource enforces the time limits.
 """
 
+import hashlib
+import json
 import logging
 import math
 import os
@@ -18,6 +20,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
@@ -51,11 +54,19 @@ from ousd.http import (
     rate_limit_waits_capped,
     scrubbed_traceback,
 )
-from ousd.ingest import sync_chain
+from ousd.ingest import SyncResult, sync_chain
+from ousd.logs import JsonFormatter, UnknownLogFormat, chain_context, log_format, run_id_var
 from ousd.migrations import SchemaOutOfDate
 from ousd.probes import build_probes, history_for, rpc_for, solana_rpc_for
 from ousd.publish import DEFAULT_PUBLISHED_DIR, mark_stale, publish
-from ousd.reconcile import FULL_SCOPE, ChainProbe, RunResult, run_reconciliation
+from ousd.reconcile import (
+    FULL_SCOPE,
+    BridgeFigures,
+    ChainProbe,
+    CheckOutcome,
+    RunResult,
+    run_reconciliation,
+)
 from ousd.solana import SolanaChain, load_solana, sync_solana
 from ousd.sources import BridgeSnapshot, bridge_snapshot
 from ousd.store import Store, StoreConflict
@@ -84,6 +95,8 @@ RATE_LIMIT_WAIT_VARIABLE = "OUSD_RATE_LIMIT_WAIT_SECONDS"
 RATE_LIMIT_WAIT = 3600
 # The exit status `timeout` uses, for a dbt build stopped at its limit.
 DBT_TIMED_OUT = 124
+# The sync facts an alert or a heartbeat repeats for each chain.
+SUMMARY_SYNC_FIELDS = ("cursor", "tip", "lag", "reorg_depth", "rows_added")
 # Once the run limit has fired, it fires again this often until the run ends, in case a broad
 # handler swallowed the first one.
 REFIRE_INTERVAL = 60
@@ -135,12 +148,42 @@ def _load_chains() -> list[AnyChain]:
     return chains
 
 
-def _sync_one(chain: AnyChain, store: Store) -> str:
+def _sync_one(chain: AnyChain, store: Store) -> SyncResult:
     if isinstance(chain, SolanaChain):
-        solana = sync_solana(chain, solana_rpc_for(chain), store)
-        return f"{solana.chain}: synced to slot {solana.tip}, {solana.transfers_stored} stored"
-    result = sync_chain(chain, rpc_for(chain), store, history_for(chain))
-    return f"{result.chain}: synced to {result.tip}, {result.transfers_stored} stored"
+        return sync_solana(chain, solana_rpc_for(chain), store)
+    return sync_chain(chain, rpc_for(chain), store, history_for(chain))
+
+
+def _sync_line(chain: AnyChain, result: SyncResult) -> str:
+    where = "slot " if isinstance(chain, SolanaChain) else ""
+    return f"{result.chain}: synced to {where}{result.tip}, {result.transfers_stored} stored"
+
+
+def _chain_sync_facts(
+    chain: AnyChain,
+    store: Store,
+    result: SyncResult,
+    cursor_before: int | None,
+    rows_before: int,
+    seconds: float,
+) -> dict[str, Any]:
+    """What one chain's sync did, for the run view. Heights are blocks, or slots on Solana.
+
+    `rows_added` is the net change in stored transfers, so a reorg that dropped more than it
+    re-read shows as negative. `lag` is the tip minus the new cursor. `reorg_depth` is the cursor
+    before the sync minus the block the chain was rolled back to, 0 when nothing was."""
+    cursor = store.synced_through(chain.name)
+    fork = result.reorg_fork_block
+    depth = 0 if fork is None or cursor_before is None else max(0, cursor_before - fork)
+    return {
+        "unit": "slot" if isinstance(chain, SolanaChain) else "block",
+        "rows_added": store.transfer_count(chain.name) - rows_before,
+        "cursor": cursor,
+        "tip": result.tip,
+        "lag": None if cursor is None else max(0, result.tip - cursor),
+        "reorg_depth": depth,
+        "duration_seconds": round(seconds, 3),
+    }
 
 
 def _fetch_bridge() -> BridgeSnapshot:
@@ -168,7 +211,7 @@ class Pipeline:
     alerts_dir: Path = DEFAULT_ALERTS_DIR
     sources: Sources = field(default_factory=Sources)
     chains: Callable[[], Sequence[AnyChain]] = _load_chains
-    sync: Callable[[AnyChain, Store], str] = _sync_one
+    sync: Callable[[AnyChain, Store], SyncResult] = _sync_one
     probes: Callable[[Sequence[AnyChain], Store], list[ChainProbe]] = build_probes
     bridge: Callable[[], BridgeSnapshot] = _fetch_bridge
     dbt_build: Callable[[float], int] = run_dbt_build
@@ -248,18 +291,75 @@ def _refuse(pipeline: Pipeline, context: dg.AssetExecutionContext, reason: str) 
         context.log.warning("the last published dataset is marked stale")
 
 
+@dg.logger(
+    config_schema={"log_level": dg.Field(str, is_required=False, default_value="DEBUG")},
+)
+def json_console_logger(init_context: dg.InitLoggerContext) -> logging.Logger:
+    """Dagster's console logger with one JSON object per line, scrubbed before it is encoded.
+    Like Dagster's own, it logs from DEBUG unless `log_level` says otherwise."""
+    logger = logging.Logger("ousd_json_console")
+    handler = logging.StreamHandler()
+    handler.setFormatter(JsonFormatter())
+    logger.addHandler(handler)
+    logger.setLevel(str(init_context.logger_config["log_level"]).upper())
+    return logger
+
+
+def _json_module_logs() -> Callable[[], None]:
+    """In JSON mode, send the `ousd` loggers' lines through the JSON formatter for the run.
+    Under `dagster job execute` nothing else configures Python logging, so they would reach
+    Python's fallback handler as plain text. Returns what undoes it. Nothing is added when the
+    root logger already has a JSON handler, as the CLI installs, so no line is written twice."""
+    try:
+        if log_format() != "json":
+            return lambda: None
+    except UnknownLogFormat:
+        return lambda: None
+    if any(isinstance(h.formatter, JsonFormatter) for h in logging.getLogger().handlers):
+        return lambda: None
+    handler = logging.StreamHandler()
+    handler.setFormatter(JsonFormatter())
+    package = logging.getLogger("ousd")
+    package.addHandler(handler)
+    return lambda: package.removeHandler(handler)
+
+
 def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
     run = pipeline or Pipeline()
     retry = dg.RetryPolicy(max_retries=RETRIES, delay=run.retry_delay)
+    # Per run, then per chain: the few facts an alert or a heartbeat carries. Filled by the
+    # assets in this process, so it is empty for a failure the sensor sees from another one.
+    summaries: dict[str, dict[str, dict[str, Any]]] = {}
+
+    def note(run_id: str, name: str, **facts: Any) -> None:
+        summaries.setdefault(run_id, {}).setdefault(name, {}).update(facts)
 
     @dg.asset(retry_policy=retry, required_resource_keys={RUN_LIMITS})
-    def raw_transfers(context: dg.AssetExecutionContext) -> None:
+    def raw_transfers(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
         chains = run.chains()
         store = _open_store(run)
+        per_chain: dict[str, dict[str, Any]] = {}
+        started = time.monotonic()
         try:
             for chain in chains:
+                note(context.run.run_id, chain.name, sync="failed")
+                began = time.monotonic()
                 try:
-                    context.log.info(run.sync(chain, store))
+                    cursor_before = store.synced_through(chain.name)
+                    rows_before = store.transfer_count(chain.name)
+                    with chain_context(chain.name):
+                        result = run.sync(chain, store)
+                        context.log.info(_sync_line(chain, result))
+                    facts = _chain_sync_facts(
+                        chain, store, result, cursor_before, rows_before, time.monotonic() - began
+                    )
+                    per_chain[chain.name] = facts
+                    note(
+                        context.run.run_id,
+                        chain.name,
+                        sync="ok",
+                        **{k: facts[k] for k in SUMMARY_SYNC_FIELDS},
+                    )
                 except StoreConflict as conflict:
                     # Proven disagreement with stored rows: a retry can't fix it.
                     raise dg.Failure(f"{chain.name}: {conflict}", allow_retries=False) from None
@@ -271,19 +371,27 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
                     raise _scrubbed(context, f"{chain.name}: sync failed", exc) from None
         finally:
             store.close()
+        return dg.MaterializeResult(
+            metadata={
+                "chains": dg.MetadataValue.json(per_chain),
+                "duration_seconds": round(time.monotonic() - started, 3),
+            }
+        )
 
     @dg.asset(deps=[raw_transfers], retry_policy=retry, required_resource_keys={RUN_LIMITS})
-    def chain_reconciliations(context: dg.AssetExecutionContext) -> None:
+    def chain_reconciliations(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
         chains = run.chains()
         store = _open_store(run)
+        bridge_figures: list[BridgeFigures] = []
+
+        def watch(event: Any) -> None:
+            if isinstance(event, BridgeFigures):
+                bridge_figures.append(event)
+
+        started = time.monotonic()
         try:
             probes = run.probes(chains, store)
-            result: RunResult = run_reconciliation(
-                probes,
-                store,
-                lambda event: None,
-                bridge=run.bridge,
-            )
+            result: RunResult = run_reconciliation(probes, store, watch, bridge=run.bridge)
         except StoreConflict as conflict:
             _refuse(run, context, "a stored row disagrees with the chain")
             raise dg.Failure(str(conflict), allow_retries=False) from None
@@ -298,6 +406,22 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
         for name, status in result.chains.items():
             context.log.info(f"{name}: {status}")
         context.log.info(f"bridge: {result.bridge}")
+        try:
+            per_chain = _reconciliation_facts(
+                result, bridge_figures[-1] if bridge_figures else None
+            )
+        except Exception:
+            # Metadata is best effort: it must not turn a finished reconciliation into a retry.
+            per_chain = {
+                "chains": {
+                    name: {"status": status, "checked": None, "difference": None}
+                    for name, status in result.chains.items()
+                },
+                "bridge": {"status": result.bridge},
+            }
+        for name, facts in per_chain["chains"].items():
+            note(context.run.run_id, name, reconciliation=facts["status"], checked=facts["checked"])
+        note(context.run.run_id, "bridge", reconciliation=result.bridge)
         if result.status != "pass" or result.scope != FULL_SCOPE:
             # Not a retryable error: a second look at the same data must not turn a fail into a
             # pass, and a person reads this. A programmatic caller gets no exit code, so raise.
@@ -305,14 +429,26 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
             raise dg.Failure(
                 f"reconciliation is {result.status} at {result.scope} scope", allow_retries=False
             )
+        return dg.MaterializeResult(
+            metadata={
+                "status": result.status,
+                "scope": result.scope,
+                "chains": dg.MetadataValue.json(per_chain["chains"]),
+                "bridge": dg.MetadataValue.json(per_chain["bridge"]),
+                "duration_seconds": round(time.monotonic() - started, 3),
+            }
+        )
 
     @dg.asset(deps=[chain_reconciliations], required_resource_keys={RUN_LIMITS})
-    def dbt_marts(context: dg.AssetExecutionContext) -> None:
+    def dbt_marts(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
+        started = time.monotonic()
         status = run.dbt_build(run.dbt_timeout)
+        seconds = round(time.monotonic() - started, 3)
         if status != 0:
             reason = "dbt build timed out" if status == DBT_TIMED_OUT else "dbt build failed"
             _refuse(run, context, reason)
             raise dg.Failure(reason, allow_retries=False)
+        return dg.MaterializeResult(metadata=_dbt_metadata(run.sources.run_results, seconds))
 
     @dg.multi_asset_check(
         specs=[
@@ -350,7 +486,8 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
             )
 
     @dg.asset(deps=[dbt_marts], required_resource_keys={RUN_LIMITS})
-    def published_dataset(context: dg.AssetExecutionContext) -> None:
+    def published_dataset(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
+        started = time.monotonic()
         # Refuses by itself unless this run's seven recorded checks all passed.
         folder = publish(
             context.run.run_id,
@@ -361,12 +498,19 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
             sources=run.sources,
         )
         context.log.info(f"published {folder.name}")
+        metadata = _published_metadata(folder)
+        metadata["duration_seconds"] = round(time.monotonic() - started, 3)
+        return dg.MaterializeResult(metadata=metadata)
 
     @dg.resource
     def run_limits(init_context: dg.InitResourceContext) -> Iterator[None]:
         """Set up once for the whole run by the in-process executor, and torn down at its end,
         however it ends."""
         fired: Callable[[], bool] | None = None
+        # Lines logged during the run carry its id, and only this run's.
+        before = run_id_var.get()
+        run_id_var.set(init_context.run.run_id if init_context.run else None)
+        stop_json_logs = _json_module_logs()
         try:
             with (
                 _time_limit(run.max_runtime, init_context.log) as timed_out,
@@ -379,10 +523,17 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
             # outside a step leaves no step failure for the hook to see.
             if fired is not None and fired() and init_context.run:
                 _alert(init_context.run.run_id, "run", RunTimeout(run.max_runtime))
+            # After the alert, so one for a limit that fired outside a step carries the summary.
+            if init_context.run:
+                summaries.pop(init_context.run.run_id, None)
+            stop_json_logs()
+            run_id_var.set(before)
 
     def _alert(run_id: str, step: str, exc: BaseException | None) -> Path | None:
         try:
-            alert = new_alert(run_id, JOB_NAME, step, describe(exc), run.now())
+            alert = new_alert(
+                run_id, JOB_NAME, step, describe(exc), run.now(), chains=summaries.get(run_id)
+            )
             return raise_alert(run.alerts_dir, alert, run.outbound)
         except Exception as error:
             # Never in place of the run's own failure, which Dagster has recorded already.
@@ -403,14 +554,28 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
     def heartbeat_on_publish(context: dg.HookContext) -> None:
         # Publishing is the last step, and it runs only after every check passed.
         if context.step_key == published_dataset.key.to_python_identifier():
-            ping_heartbeat(run.outbound)
+            ping_heartbeat(run.outbound, chains=summaries.get(context.run_id))
 
+    loggers: dict[str, dg.LoggerDefinition] = {}
+    run_config: dict[str, Any] = {}
+    try:
+        wants_json = log_format() == "json"
+    except UnknownLogFormat as exc:
+        # The job and its failure alerts must still load. The CLI is the strict check.
+        log.warning("%s: using plain logs", exc)
+        wants_json = False
+    if wants_json:
+        # Dagster uses its own console logger unless the run config names one, so the job names
+        # ours. context.log lines are then JSON too.
+        loggers["console"] = json_console_logger
+        run_config = {"loggers": {"console": {}}}
     job = dg.define_asset_job(
         JOB_NAME,
         selection=dg.AssetSelection.all() | dg.AssetSelection.all_asset_checks(),
         # One DuckDB writer per file: parallel steps would collide.
         executor_def=dg.in_process_executor,
         hooks={alert_on_step_failure, heartbeat_on_publish},
+        config=run_config or None,
         # Only the daemon's run monitoring reads this, under `dagster dev`. `job execute` relies
         # on the run_limits resource.
         tags={dg.MAX_RUNTIME_SECONDS_TAG: str(math.ceil(run.max_runtime))},
@@ -428,6 +593,7 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
         context.log.error(f"run {failed.run_id} of {JOB_NAME} failed")
 
     return dg.Definitions(
+        loggers=loggers,
         assets=[raw_transfers, chain_reconciliations, dbt_marts, published_dataset],
         asset_checks=[blocking_checks],
         jobs=[job],
@@ -435,6 +601,91 @@ def build_definitions(pipeline: Pipeline | None = None) -> dg.Definitions:
         sensors=[alert_on_failure],
         resources={RUN_LIMITS: run_limits},
     )
+
+
+def _reconciliation_facts(result: RunResult, figures: BridgeFigures | None) -> dict[str, Any]:
+    """Per chain: its status and the block or slot its supply was checked at, with the figures'
+    difference in base units. And Bridge: its status and our sum's difference from its total."""
+    checked: dict[str, CheckOutcome] = {}
+    for outcome in result.outcomes:
+        if outcome.check_name == "chain_supply" and outcome.reconciliation is not None:
+            checked[outcome.subject] = outcome
+    chains: dict[str, dict[str, Any]] = {}
+    for name, status in result.chains.items():
+        reading = checked[name].reconciliation if name in checked else None
+        chains[name] = {
+            "status": status,
+            "checked": None if reading is None else reading.block_number,
+            "difference": None if reading is None else reading.difference,
+        }
+    bridge: dict[str, Any] = {"status": result.bridge}
+    if figures is not None:
+        comparison = figures.comparison
+        bridge.update(
+            difference=comparison.difference,
+            chains_missing=len(comparison.chains_missing),
+            attempt=figures.attempt,
+        )
+    return {"chains": chains, "bridge": bridge}
+
+
+def _dbt_metadata(run_results: Path, seconds: float) -> dict[str, Any]:
+    """Each model's status and seconds, and how many tests passed and failed, from the build's own
+    run_results.json. A file that is missing or unreadable is said so, and left to the checks,
+    which are what decide whether the build counts. This runs after the build, so whatever goes
+    wrong here is metadata lost, never a failed run."""
+    metadata: dict[str, Any] = {"duration_seconds": seconds}
+    try:
+        report = json.loads(run_results.read_text())
+        return {**metadata, **_dbt_counts(report, report["results"])}
+    except Exception:
+        metadata["run_results"] = "missing or unreadable"
+        return metadata
+
+
+def _dbt_counts(report: dict[str, Any], results: list[dict[str, Any]]) -> dict[str, Any]:
+    models: dict[str, dict[str, Any]] = {}
+    passed = failed = 0
+    for item in results:
+        kind, _, name = str(item.get("unique_id", "")).partition(".")
+        status = str(item.get("status", "unknown"))
+        if kind == "model":
+            models[name.rsplit(".", 1)[-1]] = {
+                "status": status,
+                "seconds": round(float(item.get("execution_time") or 0), 3),
+            }
+        elif kind in ("test", "unit_test"):
+            if status in ("pass", "success"):
+                passed += 1
+            elif status in ("fail", "error"):
+                failed += 1
+    return dict(
+        models=dg.MetadataValue.json(models),
+        tests_passed=passed,
+        tests_failed=failed,
+        dbt_seconds=round(float(report.get("elapsed_time") or 0), 3),
+        invocation_id=str(report.get("metadata", {}).get("invocation_id", "")),
+    )
+
+
+def _published_metadata(folder: Path) -> dict[str, Any]:
+    """The dataset's version, its rows per file and the hash of its manifest, read back from the
+    folder just written, so the record is what a reader will fetch."""
+    try:
+        manifest_bytes = (folder / "manifest.json").read_bytes()
+        manifest = json.loads(manifest_bytes)
+        return _manifest_metadata(manifest, manifest_bytes)
+    except Exception:
+        # The dataset is published already. Say the record could not be read, and fail nothing.
+        return {"manifest": "missing or unreadable"}
+
+
+def _manifest_metadata(manifest: dict[str, Any], manifest_bytes: bytes) -> dict[str, Any]:
+    return {
+        "dataset_version": str(manifest["dataset_version"]),
+        "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        "rows": dg.MetadataValue.json({n: f["rows"] for n, f in manifest["files"].items()}),
+    }
 
 
 def _scrubbed(context: dg.AssetExecutionContext, what: str, exc: Exception) -> RuntimeError:

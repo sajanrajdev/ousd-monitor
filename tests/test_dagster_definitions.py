@@ -2,8 +2,11 @@
 throwaway database. The module is loaded as a file, the way `dagster -f` loads it."""
 
 import csv
+import hashlib
 import importlib.util
+import io
 import json
+import logging
 import math
 import os
 import shutil
@@ -24,8 +27,16 @@ from ousd import checks as ousd_checks
 from ousd.chains import REQUIRED_CHAINS
 from ousd.checks import CHECK_NAMES, CheckResult
 from ousd.http import RATE_LIMIT_WAITS, SECRET_URL_VARIABLES, PoliteClient
-from ousd.ingest import sync_chain
-from ousd.reconcile import RunResult
+from ousd.ingest import SyncResult, sync_chain
+from ousd.logs import JsonFormatter, configure_logging
+from ousd.reconcile import (
+    BridgeComparison,
+    BridgeFigures,
+    ChainReconciliation,
+    CheckOutcome,
+    RunResult,
+)
+from ousd.sources import BridgeSnapshot
 from ousd.store import Status, Store
 from publish_world import NOW, World, build_world
 
@@ -113,7 +124,7 @@ def pipeline_for(module, world: World, calls: Calls, **overrides):
         if calls.fail_sync_times:
             calls.fail_sync_times -= 1
             raise RuntimeError(f"{LEAK} refused")
-        return f"{chain.name}: synced"
+        return SyncResult(chain.name, 120, 120, None, 0)
 
     def dbt_build(timeout):
         calls.dbt += 1
@@ -355,8 +366,7 @@ def test_a_second_run_with_no_new_data_changes_no_raw_rows(module, tmp_path, mon
     raw = tmp_path / "ousd.duckdb"
 
     def sync(chain, store):
-        sync_chain(chain, rpc, store)
-        return f"{chain.name}: synced"
+        return sync_chain(chain, rpc, store)
 
     pipeline = module.Pipeline(
         raw_path=raw,
@@ -534,15 +544,18 @@ def test_a_failed_run_writes_the_alert_in_process(module, world, calls):
     calls.dbt_exit = 1
     result = run_job(module, pipeline_for(module, world, calls))
     assert not result.success
-    assert alerts_in(world) == [
-        {
-            "run_id": result.run_id,
-            "job": "ousd_daily",
-            "step": "dbt_marts",
-            "reason": "Failure: dbt build failed",
-            "failed_at": "2026-11-04T06:00:00Z",
-        }
-    ]
+    [alert] = alerts_in(world)
+    chains = alert.pop("chains")
+    assert alert == {
+        "run_id": result.run_id,
+        "job": "ousd_daily",
+        "step": "dbt_marts",
+        "reason": "Failure: dbt build failed",
+        "failed_at": "2026-11-04T06:00:00Z",
+    }
+    # The sync and the reconciliation that came before the failure are in the summary.
+    assert chains["tempo"]["sync"] == "ok"
+    assert chains["bridge"] == {"reconciliation": "pass"}
 
 
 def test_a_failed_blocking_check_alerts_too(module, world, calls, monkeypatch):
@@ -573,6 +586,7 @@ def test_a_failure_posts_the_summary_and_never_pings_the_heartbeat(
     assert body["failed_at"] == "2026-11-04T06:00:00Z"
     assert body["reason"].startswith("RuntimeError: tempo: sync failed: RuntimeError: <url>")
     assert body["text"].startswith(f"ousd_daily run {result.run_id} failed at raw_transfers")
+    assert body["chains"] == {"tempo": {"sync": "failed"}}
     assert LEAK not in posted.content.decode()
     # Retried attempts are not failures: one alert, for the last.
     assert calls.sync == 3
@@ -608,7 +622,11 @@ def test_a_successful_run_pings_the_heartbeat_once_and_alerts_nothing(
     assert result.success
     [ping] = outbound.requests
     assert str(ping.url) == HEARTBEAT
-    assert ping.method == "GET"
+    # The ping carries the per-chain summary, so it is a POST.
+    assert ping.method == "POST"
+    chains = json.loads(ping.content)["chains"]
+    assert chains["tempo"]["sync"] == "ok"
+    assert set(chains["tempo"]) <= {"sync", "cursor", "tip", "lag", "reorg_depth", "rows_added"}
     assert alerts_in(world) == []
 
 
@@ -704,6 +722,8 @@ def test_a_time_limit_that_fires_between_steps_still_alerts(
     assert alert["run_id"] == result.run_id
     assert alert["step"] == "run"
     assert alert["reason"] == "RunTimeout: the run passed its 3600s time limit"
+    # The run's summary is still there when the teardown raises this alert.
+    assert alert["chains"]["tempo"]["sync"] == "failed"
     assert len(outbound.to(WEBHOOK)) == 1
     # The teardown stopped the timer before it alerted, so it couldn't cut the alert short.
     assert timers == [(0.0, 0.0)]
@@ -922,3 +942,292 @@ def test_a_failed_check_or_reconciliation_never_pings_the_heartbeat(
     assert not run_job(module, pipeline_for(module, world, calls, outbound=outbound)).success
     assert outbound.to(HEARTBEAT) == []
     assert len(outbound.to(WEBHOOK)) == 2
+
+
+def metadata_of(result, key: str) -> dict:
+    [event] = result.asset_materializations_for_node(key)
+    return {
+        name: value.value if hasattr(value, "value") else value
+        for name, value in event.metadata.items()
+    }
+
+
+def test_the_assets_record_what_the_run_did(module, world, calls):
+    result = run_job(module, pipeline_for(module, world, calls))
+    assert result.success
+
+    raw = metadata_of(result, "raw_transfers")
+    tempo = raw["chains"]["tempo"]
+    assert set(tempo) == {
+        "unit",
+        "rows_added",
+        "cursor",
+        "tip",
+        "lag",
+        "reorg_depth",
+        "duration_seconds",
+    }
+    assert tempo["unit"] == "block"
+    assert tempo["reorg_depth"] == 0
+    assert tempo["rows_added"] == 0
+    assert tempo["lag"] == max(0, tempo["tip"] - tempo["cursor"])
+    assert raw["duration_seconds"] >= 0
+
+    dbt = metadata_of(result, "dbt_marts")
+    assert dbt["tests_passed"] > 0
+    assert dbt["tests_failed"] == 0
+    assert dbt["models"]
+    assert {"status", "seconds"} == set(next(iter(dbt["models"].values())))
+    assert all(model["status"] == "success" for model in dbt["models"].values())
+    assert dbt["invocation_id"]
+
+    published = metadata_of(result, "published_dataset")
+    folder = (world.out / "latest").resolve()
+    manifest_bytes = (folder / "manifest.json").read_bytes()
+    manifest = json.loads(manifest_bytes)
+    assert published["dataset_version"] == manifest["dataset_version"] == folder.name
+    assert published["manifest_sha256"] == hashlib.sha256(manifest_bytes).hexdigest()
+    assert published["rows"] == {name: f["rows"] for name, f in manifest["files"].items()}
+
+
+def test_a_repaired_reorg_shows_its_depth_and_the_lag_behind_the_tip(module, world, calls):
+    store = Store(world.raw, read_only=True)
+    cursor = store.synced_through("tempo")
+    store.close()
+    assert cursor is not None
+
+    def sync(chain, store):
+        return SyncResult(chain.name, cursor + 40, cursor + 40, cursor - 3, 0)
+
+    result = run_job(module, pipeline_for(module, world, calls, sync=sync))
+    tempo = metadata_of(result, "raw_transfers")["chains"]["tempo"]
+    assert tempo["reorg_depth"] == 3
+    assert tempo["lag"] == 40
+
+
+def test_reconciliation_records_each_chain_and_the_bridge_comparison(
+    module, world, calls, monkeypatch
+):
+    reading = ChainReconciliation("tempo", 777, 10, 3, 7)
+    comparison = BridgeComparison(("tempo",), ("base",), 7, 9)
+
+    def reconcile(probes, store, report, **kwargs):
+        latest = store.latest_reconciliation()
+        assert latest
+        report(BridgeFigures(2, BridgeSnapshot(9, 0), 0.0, comparison))
+        outcome = CheckOutcome("chain_supply", "tempo", "pass", None, 1, reading)
+        return RunResult(latest.run_id, "full", "pass", 0, {"tempo": "pass"}, "pass", [outcome])
+
+    monkeypatch.setattr(module, "run_reconciliation", reconcile)
+    result = run_job(module, pipeline_for(module, world, calls))
+    recorded = metadata_of(result, "chain_reconciliations")
+    assert recorded["status"] == "pass"
+    assert recorded["chains"] == {"tempo": {"status": "pass", "checked": 777, "difference": 0}}
+    assert recorded["bridge"] == {
+        "status": "pass",
+        "difference": -2,
+        "chains_missing": 1,
+        "attempt": 2,
+    }
+
+
+def test_a_missing_run_results_file_is_recorded_not_fatal(module, tmp_path):
+    metadata = module._dbt_metadata(tmp_path / "absent.json", 1.5)
+    assert metadata == {"duration_seconds": 1.5, "run_results": "missing or unreadable"}
+
+
+def test_dbt_metadata_counts_models_and_tests_by_status(module, tmp_path):
+    path = tmp_path / "run_results.json"
+    path.write_text(
+        json.dumps(
+            {
+                "metadata": {"invocation_id": "abc"},
+                "elapsed_time": 2.5,
+                "results": [
+                    {"unique_id": "model.ousd.stg_a", "status": "success", "execution_time": 0.5},
+                    {"unique_id": "test.ousd.t1.1f", "status": "pass", "execution_time": 0.1},
+                    {"unique_id": "test.ousd.t2.2f", "status": "fail", "execution_time": 0.1},
+                    {"unique_id": "unit_test.ousd.m.u1", "status": "pass", "execution_time": 0},
+                ],
+            }
+        )
+    )
+    metadata = module._dbt_metadata(path, 3.0)
+    assert metadata["models"].value == {"stg_a": {"status": "success", "seconds": 0.5}}
+    assert (metadata["tests_passed"], metadata["tests_failed"]) == (2, 1)
+    assert metadata["invocation_id"] == "abc"
+
+
+def test_no_metadata_or_summary_holds_a_secret(module, world, calls, outbound, monkeypatch):
+    monkeypatch.setenv("BASE_RPC_URL", KEYED_URL)
+    result = run_job(module, pipeline_for(module, world, calls, outbound=outbound))
+    assert result.success
+    texts = [json.dumps(metadata_of(result, key), default=str) for key in KEYS]
+    texts += [request.content.decode() for request in outbound.requests]
+    for text in texts:
+        for secret in (KEY, "base-rpc.provider.invalid", "w3bh00kS3cr3tT0k3n", "hc-ping.example"):
+            assert secret not in text
+
+
+def test_a_failure_summary_has_no_secret_either(module, world, calls, outbound, monkeypatch):
+    monkeypatch.setenv("BASE_RPC_URL", KEYED_URL)
+
+    def sync(chain, store):
+        raise ConnectionError(f"cannot reach {KEYED_URL}")
+
+    result = run_job(module, pipeline_for(module, world, calls, sync=sync, outbound=outbound))
+    assert not result.success
+    for text in [request.content.decode() for request in outbound.requests] + [
+        json.dumps(alerts_in(world))
+    ]:
+        assert KEY not in text
+        assert "base-rpc.provider.invalid" not in text
+
+
+def test_json_logs_make_dagsters_console_logger_json(module, monkeypatch):
+    monkeypatch.setenv("OUSD_LOG_FORMAT", "json")
+    defs = module.build_definitions()
+    assert "console" in (defs.loggers or {})
+    monkeypatch.delenv("OUSD_LOG_FORMAT")
+    assert not module.build_definitions().loggers
+
+
+def test_a_json_run_logs_json_lines_without_the_key(module, world, calls, monkeypatch, capsys):
+    monkeypatch.setenv("OUSD_LOG_FORMAT", "json")
+    monkeypatch.setenv("BASE_RPC_URL", KEYED_URL)
+
+    def sync(chain, store):
+        raise ConnectionError(f"cannot reach {KEYED_URL}: key {KEY} refused")
+
+    job = module.build_definitions(pipeline_for(module, world, calls, sync=sync)).resolve_job_def(
+        module.JOB_NAME
+    )
+    assert not job.execute_in_process(raise_on_error=False).success
+    err = capsys.readouterr().err
+    lines = [line for line in err.splitlines() if line.strip()]
+    entries = [json.loads(line) for line in lines]
+    assert entries
+    assert all({"time", "level", "logger", "message"} <= set(entry) for entry in entries)
+    assert any(entry.get("run_id") for entry in entries)
+    assert KEY not in err
+    assert "base-rpc.provider.invalid" not in err
+
+
+def test_module_logs_are_json_during_a_json_run_and_the_handler_is_removed_after(
+    module, world, calls, monkeypatch
+):
+    monkeypatch.setenv("OUSD_LOG_FORMAT", "json")
+    package = logging.getLogger("ousd")
+    seen: list[str] = []
+
+    def sync(chain, store):
+        # Checked on the handler itself, not on what pytest captures. Without the run's handler
+        # these lines would reach Python's fallback handler as plain text.
+        [handler] = [
+            h
+            for h in package.handlers
+            if isinstance(h, logging.StreamHandler) and isinstance(h.formatter, JsonFormatter)
+        ]
+        handler.setStream(stream := io.StringIO())
+        logging.getLogger("ousd.ingest").warning("hello from %s", chain.name)
+        seen.append(stream.getvalue())
+        raise ConnectionError("stop here")
+
+    before = list(package.handlers)
+    run_job(module, pipeline_for(module, world, calls, sync=sync))
+    entry = json.loads(seen[0])
+    assert entry["message"] == "hello from tempo"
+    assert entry["logger"] == "ousd.ingest"
+    assert entry["run_id"]
+    assert package.handlers == before
+
+
+def test_module_logs_are_not_doubled_when_the_root_logger_already_writes_json(monkeypatch):
+    monkeypatch.setenv("OUSD_LOG_FORMAT", "json")
+    configure_logging(verbose=False)
+    package = logging.getLogger("ousd")
+    before = list(package.handlers)
+    module = load_definitions()
+    undo = module._json_module_logs()
+    assert package.handlers == before
+    undo()
+    monkeypatch.delenv("OUSD_LOG_FORMAT")
+    logging.getLogger().handlers.clear()
+    module._json_module_logs()()
+    assert package.handlers == before
+
+
+def test_the_json_console_logger_logs_from_debug_unless_told_otherwise(module):
+    def made(config):
+        context = dg.build_init_logger_context(logger_config=config)
+        return module.json_console_logger.logger_fn(context)
+
+    assert made({"log_level": "DEBUG"}).level == logging.DEBUG
+    assert made({"log_level": "warning"}).level == logging.WARNING
+    # The job's run config leaves the level out, which means the default.
+    assert (
+        module.json_console_logger.config_schema.config_type.fields["log_level"].default_value
+        == "DEBUG"
+    )
+
+
+def test_a_failing_cursor_read_is_a_scrubbed_sync_failure_not_a_crash(
+    module, world, calls, monkeypatch
+):
+    monkeypatch.setenv("BASE_RPC_URL", KEYED_URL)
+
+    def broken(self, name):
+        raise RuntimeError(f"cannot read {KEYED_URL}")
+
+    monkeypatch.setattr(Store, "synced_through", broken)
+    result = run_job(module, pipeline_for(module, world, calls))
+    assert not result.success
+    [alert] = alerts_in(world)
+    assert alert["step"] == "raw_transfers"
+    assert KEY not in json.dumps(alert)
+    assert alert["chains"]["tempo"]["sync"] == "failed"
+
+
+def test_reconciliation_metadata_that_cannot_be_built_never_fails_the_asset(
+    module, world, calls, monkeypatch
+):
+    def broken(result, figures):
+        raise KeyError("figures")
+
+    def reconcile(probes, store, report, **kwargs):
+        latest = store.latest_reconciliation()
+        assert latest
+        return RunResult(latest.run_id, "full", "pass", 0, {"tempo": "pass"}, "pass", [])
+
+    monkeypatch.setattr(module, "run_reconciliation", reconcile)
+    monkeypatch.setattr(module, "_reconciliation_facts", broken)
+    result = run_job(module, pipeline_for(module, world, calls))
+    assert result.success
+    recon = metadata_of(result, "chain_reconciliations")
+    assert recon["chains"]["tempo"] == {"status": "pass", "checked": None, "difference": None}
+    assert recon["bridge"] == {"status": "pass"}
+
+
+def test_malformed_run_results_and_manifest_never_fail_the_asset(module, tmp_path):
+    path = tmp_path / "run_results.json"
+    path.write_text(json.dumps({"results": ["not a dict", 3]}))
+    assert module._dbt_metadata(path, 1.0)["run_results"] == "missing or unreadable"
+    (tmp_path / "manifest.json").write_text("{not json")
+    assert module._published_metadata(tmp_path) == {"manifest": "missing or unreadable"}
+
+
+def test_metadata_read_after_the_work_never_raises_whatever_the_file_holds(module, tmp_path):
+    # Nesting deep enough to exhaust the parser raises RecursionError, which no narrower list of
+    # errors would have named.
+    deep = tmp_path / "deep.json"
+    deep.write_text("[" * 100_000)
+    assert module._dbt_metadata(deep, 1.0)["run_results"] == "missing or unreadable"
+    (tmp_path / "manifest.json").write_text("[" * 100_000)
+    assert module._published_metadata(tmp_path) == {"manifest": "missing or unreadable"}
+    (tmp_path / "manifest.json").write_text(json.dumps({"dataset_version": 1, "files": []}))
+    assert module._published_metadata(tmp_path) == {"manifest": "missing or unreadable"}
+
+
+def test_a_bad_log_format_still_loads_the_definitions(module, monkeypatch):
+    monkeypatch.setenv("OUSD_LOG_FORMAT", "yaml")
+    assert not module.build_definitions().loggers
