@@ -17,7 +17,7 @@ make demo
 
 This builds the bundled sample dataset and serves it at <http://127.0.0.1:8000/>. It needs [uv](https://docs.astral.sh/uv/) and Node 22.12+ or 24, and no keys, no `.env` and no chain access. Every page says it is a sample. Set `DEMO_PORT` to use another port.
 
-Live site: _link to follow once the site is public._
+Live site: <https://ousd-monitor.vercel.app/>
 
 ## How it works
 
