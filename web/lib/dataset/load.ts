@@ -14,10 +14,17 @@ import type {
   LatestRun,
   Manifest,
   ReconciliationRow,
+  StaleMark,
 } from "./rows.ts";
 import { deriveState, type DatasetOrigin, type DatasetState, type Placement } from "./state.ts";
 
 const MANIFEST = "manifest.json";
+const STALE_FILE = "stale.json";
+// Each manifest version a site reads, and the schema that describes it.
+const MANIFEST_SCHEMAS = new Map([
+  [2, "manifest.v2"],
+  [3, "manifest"],
+]);
 const JSON_FILES = {
   "summary.json": "summary",
   "journey.json": "journey",
@@ -327,6 +334,44 @@ function placementOf(location: DatasetLocation, webRoot: string): Placement {
   };
 }
 
+// Written beside a published folder once a newer run fails, so the folder's own files never change.
+// It isn't in manifest.files, as it comes later. A version 2 manifest may carry its own mark, and
+// stale.json wins over it.
+function readStale(
+  dir: string,
+  manifest: DatasetFiles["manifest"],
+  webRoot: string,
+): StaleMark | null {
+  // lstat, so a dangling link fails the load rather than reading as current.
+  if (lstatSync(join(dir, STALE_FILE), { throwIfNoEntry: false })) {
+    const mark = parseJson(STALE_FILE, readBytes(dir, STALE_FILE));
+    validate(STALE_FILE, "stale", mark, webRoot);
+    checkDates(STALE_FILE, mark);
+    if (manifest.preview) {
+      throw new DatasetError(
+        STALE_FILE,
+        "file",
+        "is beside a preview, which is never marked stale",
+      );
+    }
+    return mark as StaleMark;
+  }
+  if (manifest.schema_version === 2 && manifest.stale) {
+    const { stale_since, stale_reason } = manifest;
+    // The version 2 schema requires both once stale. Should one ever pass without them, the
+    // folder fails to load rather than reading as current.
+    if (stale_since === null || stale_reason === null) {
+      throw new DatasetError(
+        "manifest.json",
+        "stale",
+        "is true without stale_since and stale_reason",
+      );
+    }
+    return { stale_since, stale_reason };
+  }
+  return null;
+}
+
 export type LoadOptions = { webRoot?: string; now?: number };
 
 export function loadDatasetFiles(
@@ -335,12 +380,12 @@ export function loadDatasetFiles(
 ): { files: DatasetFiles; placement: Placement } {
   const { dir } = location;
   const manifest = parseJson(MANIFEST, readBytes(dir, MANIFEST)) as DatasetFiles["manifest"];
-  if ((manifest as { schema_version?: unknown }).schema_version !== 2) {
-    throw new DatasetError(MANIFEST, "/schema_version", "must be 2");
-  }
+  const schema = MANIFEST_SCHEMAS.get(manifest.schema_version);
+  if (schema === undefined) throw new DatasetError(MANIFEST, "/schema_version", "must be 2 or 3");
   checkListedFiles(manifest);
-  validate(MANIFEST, "manifest", manifest, webRoot);
+  validate(MANIFEST, schema, manifest, webRoot);
   checkDates(MANIFEST, manifest);
+  const stale = readStale(dir, manifest, webRoot);
 
   const payloads = new Map<string, unknown>();
   for (const name of LISTED_FILES) {
@@ -362,6 +407,7 @@ export function loadDatasetFiles(
 
   const files = {
     manifest,
+    stale,
     summary: payloads.get("summary.json"),
     journey: payloads.get("journey.json"),
     activity: payloads.get("activity.json"),
@@ -385,8 +431,9 @@ function withoutPipelineStrings(manifest: DatasetFiles["manifest"]): Manifest {
   const checks: CheckRow[] = manifest.checks.map(({ name, status, blocking, checked_at }) => {
     return { name, status, blocking, checked_at };
   });
-  const copy = { ...manifest, checks } as Manifest & { stale_reason?: string | null };
-  delete copy.stale_reason;
+  // A version 2 manifest's own stale fields stay behind too: stale state is read from files.stale.
+  const copy = { ...manifest, checks } as Manifest & Record<string, unknown>;
+  for (const legacy of ["stale", "stale_since", "stale_reason"]) delete copy[legacy];
   return copy;
 }
 

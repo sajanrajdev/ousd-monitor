@@ -68,7 +68,7 @@ publish step, only if every blocking check passes
 static site
 ```
 
-If a check fails, nothing publishes and the site keeps the last good data, marked as stale.
+If a check fails, nothing publishes and the site keeps the last good data, marked as stale. The mark is a `stale.json` beside the folder's files, with the time it went stale and why, so a published folder's own files never change.
 
 ## Chains
 
@@ -145,8 +145,10 @@ Marts map to PRD questions. Definitions are in PRD section 7, and these are the 
 ## Published dataset
 
 - JSON per view, plus CSV for download.
-- A manifest with data-as-of time, git commit and check results.
-- Numbers as strings where precision matters, with a schema the site validates at build. The schemas are in `pipeline/ousd/schemas/`, now at version 2.
+- A manifest with data-as-of time, check results and provenance: the full git commit, and `tree_state` (`clean`, `dirty`, or `unknown` in the image, which has no checkout to read), the SHA-256 of `uv.lock` and of the compiled `dbt/target/manifest.json`, the Python, dbt-core and dbt-duckdb versions, and the raw store's highest applied migration.
+- Published folders are immutable. A stale mark goes in `stale.json` beside them, never into the manifest.
+- `make web-release` refuses a dataset published from a dirty tree, as it refuses sample and preview data. Any other build shows it as a local preview. Only `dirty` is refused: `unknown` passes, as the image has no checkout to read, and so does a version 2 manifest, which recorded no tree.
+- Numbers as strings where precision matters, with a schema the site validates at build. The schemas are in `pipeline/ousd/schemas/`. The manifest is at version 3; the other files are at version 2. Version 2 of the manifest, which held its own stale fields and no provenance, is kept as `manifest.v2.schema.json`, so a site still loads a dataset published before version 3 and still shows its stale mark. When a `stale.json` sits beside a version 2 manifest, the `stale.json` wins.
 
 ## Site
 

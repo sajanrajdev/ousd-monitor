@@ -4,7 +4,7 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { FooterStatus, ReconciliationDetail, TrustStrip } from "@/components/trust-strip";
 import { loadDataset, type Dataset } from "@/lib/dataset/load";
-import { at, copySample, editJson, releaseGrade, type Json } from "./dataset-helpers";
+import { at, copySample, editJson, markStale, releaseGrade, type Json } from "./dataset-helpers";
 
 const HOUR = 60 * 60 * 1000;
 const GENERATED = Date.parse("2026-11-04T06:00:00Z");
@@ -33,6 +33,13 @@ function real(change?: (manifest: Json) => void, now = GENERATED + 2 * HOUR): Da
   return loadDataset(at(dir), { now });
 }
 
+// Real data beside the stale.json a failed newer run writes.
+function failedNewerRun(): Dataset {
+  return loadDataset(at(markStale(releaseGrade(), "internal detail")), {
+    now: GENERATED + 2 * HOUR,
+  });
+}
+
 describe("the trust row at the top of the main page", () => {
   it("is gone on a build that passed, as the footer says Reconciled", () => {
     expect(top(real()).querySelector('[data-section="trust-strip"]')).toBeNull();
@@ -51,13 +58,7 @@ describe("the trust row at the top of the main page", () => {
   });
 
   it("stays when a newer run failed its checks", () => {
-    const container = top(
-      real((manifest) => {
-        manifest.stale = true;
-        manifest.stale_since = "2026-11-04T07:00:00Z";
-        manifest.stale_reason = "internal detail";
-      }),
-    );
+    const container = top(failedNewerRun());
     expect(container.textContent).toContain("A newer run did not pass its checks.");
   });
 });
@@ -99,22 +100,14 @@ describe("the footer's status", () => {
 
   it.each([
     ["stale by the clock", () => real(undefined, GENERATED + 40 * HOUR)],
-    [
-      "a failed newer run",
-      () =>
-        real((manifest) => {
-          manifest.stale = true;
-          manifest.stale_since = "2026-11-04T07:00:00Z";
-          manifest.stale_reason = "internal detail";
-        }),
-    ],
+    ["a failed newer run", failedNewerRun],
     ["a sample", () => loadDataset(at(copySample("complete")), { now: GENERATED + HOUR })],
     [
       "a preview",
       () => {
         const dir = copySample("partial");
         editJson(dir, "manifest.json", (manifest) => {
-          manifest.git_commit = "abc1234";
+          manifest.git_commit = "abc1234".padEnd(40, "0");
         });
         rmSync(join(dir, "FIXTURE"));
         return loadDataset(at(dir), { now: GENERATED + HOUR });
@@ -185,14 +178,8 @@ describe("the reconciliation detail", () => {
     );
   });
 
-  it("manifest.stale: says a newer run did not pass its checks", () => {
-    const container = strip(
-      real((manifest) => {
-        manifest.stale = true;
-        manifest.stale_since = "2026-11-04T07:00:00Z";
-        manifest.stale_reason = "internal detail";
-      }),
-    );
+  it("stale.json: says a newer run did not pass its checks", () => {
+    const container = strip(failedNewerRun());
     expect(container.textContent).toContain("A newer run did not pass its checks.");
     expect(container.textContent).not.toContain(FRESH_SENTENCE);
     expect(container.textContent).not.toContain("internal detail");
@@ -201,7 +188,7 @@ describe("the reconciliation detail", () => {
   it("preview: says not reconciled, never the fresh sentence", () => {
     const dir = copySample("partial");
     editJson(dir, "manifest.json", (manifest) => {
-      manifest.git_commit = "abc1234";
+      manifest.git_commit = "abc1234".padEnd(40, "0");
     });
     rmSync(join(dir, "FIXTURE"));
     const dataset = loadDataset(at(dir), { now: GENERATED + HOUR });

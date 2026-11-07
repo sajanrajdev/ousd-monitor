@@ -1,9 +1,23 @@
 import { cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DatasetError, isInside, loadDataset, locateDataset } from "@/lib/dataset/load";
+import {
+  DatasetError,
+  isInside,
+  loadDataset,
+  loadDatasetFiles,
+  locateDataset,
+} from "@/lib/dataset/load";
 import { generateTypes } from "@/scripts/generate-types.mjs";
-import { at, copySample, editJson, tempDir, type Json } from "./dataset-helpers";
+import {
+  asVersion2,
+  at,
+  copySample,
+  editJson,
+  markStale,
+  tempDir,
+  type Json,
+} from "./dataset-helpers";
 
 const SAMPLES = ["complete", "partial"] as const;
 
@@ -49,16 +63,128 @@ describe("loading a sample", () => {
     expect(labels.source_legend.source_types.length).toBeGreaterThan(0);
   });
 
-  it("leaves `detail` and `stale_reason` behind, so nothing can render them", () => {
-    const dir = copySample("complete");
-    editJson(dir, "manifest.json", (manifest) => {
-      manifest.stale = true;
-      manifest.stale_since = "2026-11-04T07:00:00Z";
-      manifest.stale_reason = "chain_supply is failed";
+  it.each([
+    ["stale.json", (dir: string) => markStale(dir, "chain_supply is failed")],
+    [
+      "a version 2 manifest",
+      (dir: string) =>
+        editJson(dir, "manifest.json", (manifest) =>
+          asVersion2(manifest, "chain_supply is failed"),
+        ),
+    ],
+  ])(
+    "leaves `detail` and the stale reason from %s behind, so nothing can render them",
+    (_, mark) => {
+      const dir = copySample("complete");
+      mark(dir);
+      const { manifest } = loadDataset(at(dir));
+      expect(JSON.stringify(manifest)).not.toContain("chain_supply is failed");
+      expect(JSON.stringify(manifest)).not.toContain("Sample check detail");
+      expect(manifest).not.toHaveProperty("stale");
+    },
+  );
+});
+
+describe("stale state", () => {
+  it("is read from stale.json beside the manifest", () => {
+    const dir = markStale(copySample("complete"), "volume_waterfall is failed");
+    const { files } = loadDatasetFiles(at(dir));
+    expect(files.stale).toEqual({
+      stale_since: "2026-11-04T07:00:00Z",
+      stale_reason: "volume_waterfall is failed",
     });
-    const { manifest } = loadDataset(at(dir));
-    expect(JSON.stringify(manifest)).not.toContain("chain_supply is failed");
-    expect(JSON.stringify(manifest)).not.toContain("Sample check detail");
+    expect(files.manifest.schema_version).toBe(3);
+  });
+
+  it("is null without stale.json", () => {
+    expect(loadDatasetFiles(at(copySample("complete"))).files.stale).toBeNull();
+  });
+
+  it("a version 2 manifest still loads, and its own stale fields still count", () => {
+    const dir = copySample("complete");
+    editJson(dir, "manifest.json", (manifest) => asVersion2(manifest, "a check failed"));
+    const { files } = loadDatasetFiles(at(dir));
+    expect(files.manifest.schema_version).toBe(2);
+    expect(files.stale).toEqual({
+      stale_since: "2026-11-04T07:00:00Z",
+      stale_reason: "a check failed",
+    });
+  });
+
+  it("a version 2 manifest that isn't stale loads as current", () => {
+    const dir = copySample("complete");
+    editJson(dir, "manifest.json", (manifest) => asVersion2(manifest));
+    expect(loadDatasetFiles(at(dir)).files.stale).toBeNull();
+  });
+
+  it.each([
+    ["both", ["stale_since", "stale_reason"]],
+    ["stale_since", ["stale_since"]],
+    ["stale_reason", ["stale_reason"]],
+  ])("a stale version 2 manifest without %s fails rather than loading as current", (_, gone) => {
+    const message = editedFailure("manifest.json", (manifest) => {
+      asVersion2(manifest, "a check failed");
+      for (const field of gone) manifest[field] = null;
+    });
+    expect(message).toMatch(/^manifest\.json: /);
+    expect(message).not.toContain("a check failed");
+  });
+
+  it("stale.json beside a version 2 manifest wins over the manifest's own fields", () => {
+    const dir = copySample("complete");
+    editJson(dir, "manifest.json", (manifest) => asVersion2(manifest));
+    markStale(dir, "a newer run failed");
+    expect(loadDatasetFiles(at(dir)).files.stale?.stale_reason).toBe("a newer run failed");
+  });
+
+  it("a version 3 manifest carrying stale fields fails its schema", () => {
+    const message = editedFailure("manifest.json", (manifest) => {
+      manifest.stale = true;
+    });
+    expect(message).toContain('has an unknown field "stale"');
+  });
+
+  it("a version 3 manifest needs its provenance", () => {
+    const message = editedFailure("manifest.json", (manifest) => {
+      delete manifest.provenance;
+    });
+    expect(message).toContain('is missing "provenance"');
+  });
+
+  it("a version 2 manifest can't claim provenance", () => {
+    const message = editedFailure("manifest.json", (manifest) => {
+      const provenance = manifest.provenance;
+      asVersion2(manifest);
+      manifest.provenance = provenance;
+    });
+    expect(message).toContain('has an unknown field "provenance"');
+  });
+
+  it.each([
+    ["an unknown field", { stale_since: "2026-11-04T07:00:00Z", stale_reason: "x", extra: 1 }],
+    ["no time", { stale_reason: "x" }],
+    ["a time that isn't real", { stale_since: "2026-02-30T07:00:00Z", stale_reason: "x" }],
+  ])("a stale.json with %s fails the load, naming the file", (_name, mark) => {
+    const dir = copySample("complete");
+    writeFileSync(join(dir, "stale.json"), JSON.stringify(mark));
+    expect(failure(dir)).toMatch(/^stale\.json: /);
+  });
+
+  it("a stale.json that isn't JSON fails the load", () => {
+    const dir = copySample("complete");
+    writeFileSync(join(dir, "stale.json"), "not json");
+    expect(failure(dir)).toBe("stale.json: file: isn't valid JSON");
+  });
+
+  it("a stale.json that's a dangling link fails the load rather than reading as current", () => {
+    const dir = copySample("complete");
+    symlinkSync(join(dir, "nowhere.json"), join(dir, "stale.json"));
+    expect(failure(dir)).toBe("stale.json: file: is missing or can't be read");
+  });
+
+  it("a stale.json beside a preview fails the load", () => {
+    const dir = markStale(copySample("partial"));
+    expect(failure(dir)).toBe("stale.json: file: is beside a preview, which is never marked stale");
   });
 });
 
@@ -200,7 +326,7 @@ describe("a bad dataset fails the load, naming the file and field", () => {
     const message = editedFailure("manifest.json", (manifest) => {
       manifest.schema_version = 1;
     });
-    expect(message).toBe("manifest.json: /schema_version: must be 2");
+    expect(message).toBe("manifest.json: /schema_version: must be 2 or 3");
   });
 
   it("schema_version 1 on another file", () => {

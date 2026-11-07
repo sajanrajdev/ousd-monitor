@@ -60,7 +60,7 @@ Names only. Values go into the service's variables in Railway and nowhere else.
 | `OUSD_MAX_RUNTIME_SECONDS` | Optional | The whole pipeline run's limit. Default 10800 |
 | `OUSD_DBT_TIMEOUT_SECONDS` | Optional | The dbt build's limit. Default 1800 |
 | `OUSD_RATE_LIMIT_WAIT_SECONDS` | Optional | Total time a run may wait out servers' rate limits. Default 3600 |
-| `OUSD_GIT_COMMIT` | No, leave unset | The commit recorded in the dataset, for local runs. On Railway the entry point always sets it from `RAILWAY_GIT_COMMIT_SHA` |
+| `OUSD_GIT_COMMIT` | No, leave unset | The commit recorded in the dataset, for local runs. It must be the full 40-character commit in lowercase, as `git rev-parse HEAD` prints it; publish refuses a short one. On Railway the entry point always sets it from `RAILWAY_GIT_COMMIT_SHA` |
 
 Railway sets `RAILWAY_GIT_COMMIT_SHA` itself on deploys from GitHub. The image has no `.git` and no `git`, so `pipeline/ousd/publish.py` reads the commit from `OUSD_GIT_COMMIT`, which `scripts/daily.sh` fills from `RAILWAY_GIT_COMMIT_SHA`. A deploy that isn't from GitHub (for example `railway up`) has no commit, and publish refuses every run. That is intended: a dataset that can't be traced isn't published.
 

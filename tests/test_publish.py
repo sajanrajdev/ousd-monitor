@@ -5,18 +5,20 @@ import hashlib
 import io
 import json
 import os
+import platform
 import re
 import shutil
 import time
 from datetime import UTC, date, datetime, timedelta
 from functools import partial as bind
+from importlib import metadata
 from pathlib import Path
 
 import duckdb
 import jsonschema
 import pytest
 from dbt_helpers import invoke_dbt
-from ousd import checks, cli
+from ousd import checks, cli, migrations
 from ousd import publish as publisher
 from ousd.chains import REQUIRED_CHAINS
 from ousd.publish import PublishRefused
@@ -89,9 +91,15 @@ def snapshot(folder: Path) -> dict[str, bytes]:
     return {path.name: path.read_bytes() for path in folder.iterdir()}
 
 
+def stale_mark(folder: Path):
+    """The sidecar a stale mark writes, or None while the dataset is current."""
+    path = folder / publisher.STALE_FILE
+    return json.loads(path.read_text()) if path.exists() else None
+
+
 def assert_refuses_and_leaves_the_last_good_dataset(world, make_it_fail, match, **kwargs):
     """The second publish fails: the pointer doesn't move, no folder remains, every published
-    number stays, and the manifest says stale."""
+    file stays byte for byte, and a sidecar says stale."""
     world.run_checks()
     first = world.publish()
     before = snapshot(first)
@@ -101,16 +109,13 @@ def assert_refuses_and_leaves_the_last_good_dataset(world, make_it_fail, match, 
     assert os.readlink(world.out / "latest") == first.name
     assert sorted(path.name for path in world.out.iterdir()) == sorted(["latest", first.name])
     after = snapshot(first)
-    assert {name: data for name, data in after.items() if name != "manifest.json"} == {
-        name: data for name, data in before.items() if name != "manifest.json"
-    }
-    manifest = read_json(first, "manifest.json")
-    assert manifest["stale"] is True
-    assert manifest["stale_since"] == "2026-11-04T07:00:00Z"
-    assert match in manifest["stale_reason"] or re.search(match, manifest["stale_reason"])
-    schema = json.loads((publisher.SCHEMA_DIR / "manifest.schema.json").read_text())
-    jsonschema.validate(manifest, schema)
-    return manifest
+    assert {name: data for name, data in after.items() if name != publisher.STALE_FILE} == before
+    mark = stale_mark(first)
+    assert mark["stale_since"] == "2026-11-04T07:00:00Z"
+    assert match in mark["stale_reason"] or re.search(match, mark["stale_reason"])
+    schema = json.loads((publisher.SCHEMA_DIR / "stale.schema.json").read_text())
+    jsonschema.validate(mark, schema)
+    return mark
 
 
 # The happy path
@@ -172,10 +177,11 @@ def test_the_manifest_has_data_as_of_commit_and_check_results(published):
     assert manifest["dataset_version"] == "20261104T060000Z"
     assert manifest["generated_at"] == "2026-11-04T06:00:00Z"
     assert manifest["time_zone"] == "UTC"
-    assert re.fullmatch(r"[0-9a-f]{12}", manifest["git_commit"])
+    assert manifest["schema_version"] == 3
+    assert re.fullmatch(r"[0-9a-f]{40}", manifest["git_commit"])
     assert manifest["preview"] is False
     assert manifest["notice"] is None
-    assert manifest["stale"] is False
+    assert "stale" not in manifest
     assert manifest["check_run_id"] == RUN
     assert manifest["coverage"]["data_as_of"] == dict.fromkeys(REQUIRED_CHAINS, "2026-11-03")
     assert manifest["coverage"]["last_transfer_at"]["tempo"] == "2026-11-04T01:00:00Z"
@@ -186,6 +192,103 @@ def test_the_manifest_has_data_as_of_commit_and_check_results(published):
     assert manifest["definitions"]["journey_first_day"] == "2026-10-14"
     assert len(manifest["labels_sha256"]) == 64
     assert manifest["warnings"] == []
+
+
+def test_the_manifest_records_what_built_it(published):
+    world, folder = published
+    provenance = read_json(folder, "manifest.json")["provenance"]
+    assert provenance == {
+        "tree_state": provenance["tree_state"],
+        "uv_lock_sha256": hashlib.sha256((ROOT / "uv.lock").read_bytes()).hexdigest(),
+        "python_version": platform.python_version(),
+        "dbt_core_version": metadata.version("dbt-core"),
+        "dbt_duckdb_version": metadata.version("dbt-duckdb"),
+        "raw_schema_version": migrations.LATEST,
+        "dbt_manifest_sha256": hashlib.sha256(
+            (world.path / "target" / "manifest.json").read_bytes()
+        ).hexdigest(),
+    }
+    assert provenance["tree_state"] in ("clean", "dirty", "unknown")
+
+
+def test_a_dirty_tree_still_publishes_and_says_so(world, monkeypatch):
+    """Publishing a dirty tree is allowed. Releasing one is refused by the site's release step."""
+    monkeypatch.setattr(publisher, "_git_commit", lambda: ("a" * 40, "dirty"))
+    world.run_checks()
+    manifest = read_json(world.publish(), "manifest.json")
+    assert manifest["git_commit"] == "a" * 40
+    assert manifest["provenance"]["tree_state"] == "dirty"
+
+
+def test_without_the_compiled_dbt_manifest_publish_refuses(world):
+    world.run_checks()
+    (world.path / "target" / "manifest.json").unlink()
+    with pytest.raises(PublishRefused, match="compiled dbt manifest"):
+        world.publish()
+    assert not world.out.exists()
+
+
+def _set_invocation(path, invocation):
+    built = json.loads(path.read_text())
+    if invocation is None:
+        del built["metadata"]["invocation_id"]
+    else:
+        built["metadata"]["invocation_id"] = invocation
+    path.write_text(json.dumps(built))
+
+
+def test_a_dbt_manifest_from_another_invocation_is_refused(world):
+    world.run_checks()
+    _set_invocation(world.path / "target" / "manifest.json", "another-invocation")
+    with pytest.raises(PublishRefused, match="from another dbt invocation") as refused:
+        world.publish()
+    assert str(world.path) not in str(refused.value)
+    assert not world.out.exists()
+
+
+def test_a_dbt_manifest_without_its_invocation_is_refused(world):
+    world.run_checks()
+    _set_invocation(world.path / "target" / "manifest.json", None)
+    with pytest.raises(PublishRefused, match="names no dbt invocation") as refused:
+        world.publish()
+    assert str(world.path) not in str(refused.value)
+    assert not world.out.exists()
+
+
+@pytest.mark.parametrize("name", ["manifest.json", "run_results.json"])
+def test_provenance_needs_both_dbt_invocations(world, name):
+    """The checks already refuse run_results without its invocation, so this asks provenance."""
+    _set_invocation(world.path / "target" / name, None)
+    with world.store() as store, pytest.raises(PublishRefused, match="names no dbt invocation"):
+        publisher._provenance("clean", store, world.sources)
+
+
+def test_without_dbt_installed_publish_refuses(world, monkeypatch):
+    def missing(package):
+        raise publisher.metadata.PackageNotFoundError(package)
+
+    world.run_checks()
+    monkeypatch.setattr(publisher.metadata, "version", missing)
+    with pytest.raises(PublishRefused, match="dbt-core isn't installed"):
+        world.publish()
+    assert not world.out.exists()
+
+
+def test_only_the_commit_may_have_an_address_shape(published):
+    """The commit's exemption from the wallet-shape gate covers that one place only."""
+    _, folder = published
+    manifest = read_json(folder, "manifest.json")
+    publisher._refuse_unsafe_dataset({"manifest.json": manifest}, {})
+    manifest["check_run_id"] = manifest["git_commit"]
+    with pytest.raises(PublishRefused, match=r"manifest\.json/check_run_id holds a wallet-shaped"):
+        publisher._refuse_unsafe_dataset({"manifest.json": manifest}, {})
+
+
+def test_without_uv_lock_publish_refuses(world, monkeypatch):
+    world.run_checks()
+    monkeypatch.setattr(publisher, "UV_LOCK", world.path / "no-such-uv.lock")
+    with pytest.raises(PublishRefused, match=r"cannot read uv\.lock"):
+        world.publish()
 
 
 def test_coverage_with_four_chains(published):
@@ -549,7 +652,7 @@ def test_publish_refuses_pending_migrations_without_applying_them(published):
     with pytest.raises(publisher.PublishUnavailable, match="ousd migrate"):
         world.publish(now=LATER)
     # A schema to bring up to date says nothing about the data.
-    assert read_json(folder, "manifest.json")["stale"] is False
+    assert stale_mark(folder) is None
     with duckdb.connect(str(world.raw), read_only=True) as raw:
         versions = raw.execute("SELECT version FROM schema_migrations").fetchall()
     assert (1,) not in versions
@@ -576,14 +679,14 @@ def test_a_database_in_use_refuses_without_calling_anything_stale(published, mon
     monkeypatch.setattr(publisher, "Store", held)
     with pytest.raises(publisher.PublishUnavailable, match="in use"):
         world.publish(now=LATER)
-    assert read_json(folder, "manifest.json")["stale"] is False
+    assert stale_mark(folder) is None
 
 
 def test_a_second_publish_in_the_same_second_calls_nothing_stale(published):
     world, folder = published
     with pytest.raises(publisher.PublishUnavailable, match="try again"):
         world.publish()
-    assert read_json(folder, "manifest.json")["stale"] is False
+    assert stale_mark(folder) is None
     assert os.readlink(world.out / "latest") == folder.name
 
 
@@ -611,7 +714,7 @@ def test_a_good_publish_clears_stale(world):
     )
     world.run_checks()
     folder = world.publish(now=LATER)
-    assert read_json(world.out / "latest", "manifest.json")["stale"] is False
+    assert stale_mark(world.out / "latest") is None
     assert (world.out / "latest").resolve() == folder.resolve()
 
 
@@ -619,32 +722,79 @@ def test_stale_keeps_the_first_time_it_went_stale(published):
     world, folder = published
     assert publisher.mark_stale(world.out, NOW + timedelta(hours=1), "first")
     assert publisher.mark_stale(world.out, NOW + timedelta(hours=2), "second")
+    assert stale_mark(folder) == {"stale_since": "2026-11-04T07:00:00Z", "stale_reason": "second"}
     manifest = read_json(folder, "manifest.json")
-    assert manifest["stale_since"] == "2026-11-04T07:00:00Z"
-    assert manifest["stale_reason"] == "second"
     for name, entry in manifest["files"].items():
         assert entry["sha256"] == hashlib.sha256((folder / name).read_bytes()).hexdigest()
+
+
+def test_mark_stale_changes_no_published_file(published):
+    """A published version is immutable: every file hashes the same after the mark."""
+    world, folder = published
+
+    def hashes() -> dict[str, str]:
+        return {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(folder.iterdir())
+        }
+
+    before = hashes()
+    assert publisher.STALE_FILE not in before
+    assert publisher.mark_stale(world.out, LATER, "reason")
+    after = hashes()
+    assert {name: digest for name, digest in after.items() if name != publisher.STALE_FILE} == (
+        before
+    )
+    assert sorted(set(after) - set(before)) == [publisher.STALE_FILE]
 
 
 def test_mark_stale_with_nothing_published_does_nothing(tmp_path):
     assert publisher.mark_stale(tmp_path / "nothing", NOW, "reason") is False
 
 
-def test_a_damaged_manifest_does_not_replace_the_refusal_and_is_reported(published):
+@pytest.mark.parametrize(
+    "damaged", ["not json", "", "[]", '{"stale_reason": "x"}', '{"stale_since": "bad"}']
+)
+def test_a_damaged_mark_is_replaced_and_the_refusal_still_stands(published, damaged):
+    """A damaged stale.json would otherwise fail every later mark, and every build of the site."""
     world, folder = published
-    (folder / "manifest.json").write_text("not json")
+    (folder / publisher.STALE_FILE).write_text(damaged)
     with pytest.raises(PublishRefused, match="no check results") as refused:
         world.publish(run_id="other", now=LATER)
-    assert "could not be marked stale: JSONDecodeError" in str(refused.value)
+    assert "could not be marked stale" not in str(refused.value)
+    assert stale_mark(folder)["stale_since"] == "2026-11-05T06:00:00Z"
 
 
-def test_a_manifest_from_an_older_schema_can_still_be_marked_stale(published):
+def test_a_damaged_manifest_can_still_be_marked_stale(published):
+    world, folder = published
+    (folder / "manifest.json").write_text("not json")
+    assert publisher.mark_stale(world.out, LATER, "reason")
+    assert stale_mark(folder) == {"stale_since": "2026-11-05T06:00:00Z", "stale_reason": "reason"}
+    assert (folder / "manifest.json").read_text() == "not json"
+
+
+@pytest.mark.parametrize(
+    ("stale_since", "first"),
+    [(None, "2026-11-05T06:00:00Z"), ("2026-11-04T07:00:00Z", "2026-11-04T07:00:00Z")],
+    ids=["current", "already-stale"],
+)
+def test_a_manifest_from_an_older_schema_is_marked_beside_it(published, stale_since, first):
+    """A version 2 manifest held its own stale fields. It is never rewritten, and the first time it
+    went stale carries over into the sidecar."""
     world, folder = published
     manifest = read_json(folder, "manifest.json")
-    del manifest["time_zone"]
+    del manifest["provenance"]
+    manifest.update(
+        schema_version=2,
+        stale=stale_since is not None,
+        stale_since=stale_since,
+        stale_reason=stale_since and "older",
+    )
     (folder / "manifest.json").write_text(json.dumps(manifest))
+    before = (folder / "manifest.json").read_bytes()
     assert publisher.mark_stale(world.out, LATER, "reason")
-    assert read_json(folder, "manifest.json")["stale"] is True
+    assert (folder / "manifest.json").read_bytes() == before
+    assert stale_mark(folder) == {"stale_since": first, "stale_reason": "reason"}
     assert sorted(p.name for p in folder.iterdir() if p.name.endswith(".tmp")) == []
 
 
@@ -661,7 +811,7 @@ def test_a_pointer_that_cannot_be_swapped_leaves_no_new_folder(world, monkeypatc
     monkeypatch.undo()
     assert os.readlink(world.out / "latest") == first.name
     assert sorted(path.name for path in world.out.iterdir()) == sorted(["latest", first.name])
-    assert read_json(first, "manifest.json")["stale"] is True
+    assert stale_mark(first) is not None
 
 
 def test_an_interrupt_after_the_swap_keeps_the_folder_the_pointer_names(world, monkeypatch):
@@ -813,12 +963,20 @@ def missing_a_file(manifest):
     del manifest["files"]["labels.json"]
 
 
-def stale_without_a_time(manifest):
-    manifest["stale"] = True
+def stale_inside_the_manifest(manifest):
+    manifest.update(stale=True, stale_since="2026-11-04T07:00:00Z", stale_reason="why")
 
 
-def fresh_with_a_reason(manifest):
-    manifest["stale_reason"] = "why"
+def without_provenance(manifest):
+    del manifest["provenance"]
+
+
+def a_short_commit(manifest):
+    manifest["git_commit"] = manifest["git_commit"][:12]
+
+
+def a_guessed_tree_state(manifest):
+    manifest["provenance"]["tree_state"] = "probably clean"
 
 
 def local_time(manifest):
@@ -840,8 +998,10 @@ def rpc_url_field(manifest):
         missing_a_cursor,
         repeated_chain,
         missing_a_file,
-        stale_without_a_time,
-        fresh_with_a_reason,
+        stale_inside_the_manifest,
+        without_provenance,
+        a_short_commit,
+        a_guessed_tree_state,
         local_time,
         rpc_url_field,
     ],
@@ -1875,7 +2035,7 @@ def test_freshness_is_measured_in_utc_in_another_time_zone(world, far_from_utc):
 def test_mark_stale_writes_utc_in_another_time_zone(published, far_from_utc):
     world, folder = published
     publisher.mark_stale(world.out, datetime(2026, 11, 4, 16, 0, tzinfo=UTC), "reason")
-    assert read_json(folder, "manifest.json")["stale_since"] == "2026-11-04T16:00:00Z"
+    assert stale_mark(folder)["stale_since"] == "2026-11-04T16:00:00Z"
 
 
 # The commands
@@ -2217,11 +2377,10 @@ def _git_missing(*_args, **_kwargs):
 
 @pytest.mark.parametrize("no_git", [_git_fails, _git_missing])
 def test_without_git_the_commit_comes_from_ousd_git_commit(monkeypatch, no_git):
+    """Whole, and with the tree unknown, as an image has no tree to read."""
     monkeypatch.setattr(publisher.subprocess, "run", no_git)
     monkeypatch.setenv("OUSD_GIT_COMMIT", "0123456789abcdef0123456789abcdef01234567")
-    assert publisher._git_commit() == "0123456789ab"
-    monkeypatch.setenv("OUSD_GIT_COMMIT", "fedcba987654")
-    assert publisher._git_commit() == "fedcba987654"
+    assert publisher._git_commit() == ("0123456789abcdef0123456789abcdef01234567", "unknown")
 
 
 @pytest.mark.parametrize("no_git", [_git_fails, _git_missing])
@@ -2239,6 +2398,7 @@ def test_without_git_or_the_variable_publish_refuses(monkeypatch, no_git):
     "bad",
     [
         "abc123",  # too short to trace
+        "fedcba987654",  # abbreviated
         "0123456789ABCDEF",  # uppercase
         "0123456789abcdef0123456789abcdef012345678",  # 41 characters
         " 0123456789abcdef",  # padded
@@ -2252,39 +2412,76 @@ def test_a_malformed_ousd_git_commit_refuses_without_echoing_it(monkeypatch, bad
     monkeypatch.setenv("OUSD_GIT_COMMIT", bad)
     with pytest.raises(PublishRefused) as refused:
         publisher._git_commit()
-    assert "OUSD_GIT_COMMIT isn't a lowercase commit hash" in str(refused.value)
+    assert "OUSD_GIT_COMMIT isn't a full lowercase commit hash" in str(refused.value)
     assert bad.strip() not in str(refused.value)
 
 
-def _git_prints(stdout):
-    def run(*_args, **_kwargs):
-        return publisher.subprocess.CompletedProcess(["git"], 0, stdout, "")
+COMMIT = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _git_prints(stdout, status=""):
+    """git rev-parse prints stdout, and git status prints status, or fails when it is None."""
+
+    def run(command, *_args, **_kwargs):
+        if "status" in command:
+            # Named, so a user's git config can't hide untracked files.
+            assert "--untracked-files=normal" in command
+            if status is None:
+                return publisher.subprocess.CompletedProcess(command, 128, "", "fatal")
+            return publisher.subprocess.CompletedProcess(command, 0, status, "")
+        return publisher.subprocess.CompletedProcess(command, 0, stdout, "")
 
     return run
 
 
 def test_a_working_git_wins_over_the_variable(monkeypatch):
-    monkeypatch.setattr(publisher.subprocess, "run", _git_prints("0123456789ab\n"))
+    monkeypatch.setattr(publisher.subprocess, "run", _git_prints(f"{COMMIT}\n"))
     # Malformed, so a read of it would refuse: git working means it's never read.
     monkeypatch.setenv("OUSD_GIT_COMMIT", "main")
-    assert publisher._git_commit() == "0123456789ab"
+    assert publisher._git_commit() == (COMMIT, "clean")
+
+
+@pytest.mark.parametrize(
+    ("status", "state"),
+    [
+        ("", "clean"),
+        (" M pipeline/ousd/publish.py\n", "dirty"),
+        ("?? dbt/models/marts/new_model.sql\n", "dirty"),
+        (None, "unknown"),
+    ],
+    ids=["clean", "changed", "untracked", "unreadable"],
+)
+def test_the_tree_state_is_read_never_guessed(monkeypatch, status, state):
+    monkeypatch.setattr(publisher.subprocess, "run", _git_prints(f"{COMMIT}\n", status))
+    assert publisher._git_commit() == (COMMIT, state)
+
+
+def test_a_git_status_that_hangs_leaves_the_tree_unknown(monkeypatch):
+    def run(command, *args, **kwargs):
+        if "status" in command:
+            raise publisher.subprocess.TimeoutExpired(command, 10)
+        return publisher.subprocess.CompletedProcess(command, 0, f"{COMMIT}\n", "")
+
+    monkeypatch.setattr(publisher.subprocess, "run", run)
+    assert publisher._git_commit() == (COMMIT, "unknown")
 
 
 @pytest.mark.skipif(
     shutil.which("git") is None or not (Path(__file__).parent.parent / ".git").exists(),
     reason="needs a git checkout",
 )
-def test_the_real_checkout_gives_a_short_hash(monkeypatch):
-    monkeypatch.setenv("OUSD_GIT_COMMIT", "fedcba987654")
-    commit = publisher._git_commit()
-    assert re.fullmatch(r"[0-9a-f]{12}", commit)
-    assert commit != "fedcba987654"
+def test_the_real_checkout_gives_a_full_hash_and_its_tree_state(monkeypatch):
+    monkeypatch.setenv("OUSD_GIT_COMMIT", "f" * 40)
+    commit, state = publisher._git_commit()
+    assert re.fullmatch(r"[0-9a-f]{40}", commit)
+    assert commit != "f" * 40
+    assert state in ("clean", "dirty")
 
 
-@pytest.mark.parametrize("odd", ["", "warning: something\n0123456789ab", "HEAD\n"])
+@pytest.mark.parametrize("odd", ["", f"warning: something\n{COMMIT}", "HEAD\n", "0123456789ab\n"])
 def test_odd_git_output_refuses(monkeypatch, odd):
     monkeypatch.setattr(publisher.subprocess, "run", _git_prints(odd))
-    monkeypatch.setenv("OUSD_GIT_COMMIT", "fedcba987654")
+    monkeypatch.setenv("OUSD_GIT_COMMIT", COMMIT)
     with pytest.raises(PublishRefused, match="other than a commit hash"):
         publisher._git_commit()
 
@@ -2295,8 +2492,8 @@ def test_a_hung_git_falls_back_to_the_variable(monkeypatch):
         raise publisher.subprocess.TimeoutExpired(["git"], 10)
 
     monkeypatch.setattr(publisher.subprocess, "run", hang)
-    monkeypatch.setenv("OUSD_GIT_COMMIT", "fedcba987654")
-    assert publisher._git_commit() == "fedcba987654"
+    monkeypatch.setenv("OUSD_GIT_COMMIT", COMMIT)
+    assert publisher._git_commit() == (COMMIT, "unknown")
 
 
 def test_a_published_manifest_carries_the_supplied_commit(world, monkeypatch):
@@ -2304,4 +2501,6 @@ def test_a_published_manifest_carries_the_supplied_commit(world, monkeypatch):
     monkeypatch.setenv("OUSD_GIT_COMMIT", "fedcba9876543210fedcba9876543210fedcba98")
     world.run_checks()
     folder = world.publish()
-    assert read_json(folder, "manifest.json")["git_commit"] == "fedcba987654"
+    manifest = read_json(folder, "manifest.json")
+    assert manifest["git_commit"] == "fedcba9876543210fedcba9876543210fedcba98"
+    assert manifest["provenance"]["tree_state"] == "unknown"

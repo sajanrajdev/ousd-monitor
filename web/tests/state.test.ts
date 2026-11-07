@@ -4,9 +4,11 @@ import { describe, expect, it } from "vitest";
 import { DatasetError, loadDataset, loadDatasetFiles } from "@/lib/dataset/load";
 import { deriveState, freshnessClock, isFreshAt, releaseProblems } from "@/lib/dataset/state";
 import {
+  asVersion2,
   at,
   copySample,
   editJson,
+  markStale,
   readJson,
   releaseGrade,
   tempDir,
@@ -32,7 +34,7 @@ describe("dataset states", () => {
   it("sample: a FIXTURE file beside the manifest", () => {
     const dir = copySample("complete");
     editJson(dir, "manifest.json", (manifest) => {
-      manifest.git_commit = "abc1234";
+      manifest.git_commit = "abc1234".padEnd(40, "0");
     });
     expect(stateOf(dir).kind).toBe("sample");
   });
@@ -97,7 +99,7 @@ describe("dataset states", () => {
     edited(
       "manifest.json",
       (manifest) => {
-        manifest.git_commit = "abc1234";
+        manifest.git_commit = "abc1234".padEnd(40, "0");
       },
       dir,
     );
@@ -127,13 +129,14 @@ describe("dataset states", () => {
     expect(stateOf(dir).banner?.details).toEqual(["It doesn't meet the rules for a release."]);
   });
 
-  it("real, manifest.stale true: same data, and the strip changes", () => {
-    const dir = edited("manifest.json", (manifest) => {
-      manifest.stale = true;
-      manifest.stale_since = "2026-11-04T07:00:00Z";
-      manifest.stale_reason = "a check failed";
-    });
-    const state = stateOf(dir);
+  it.each([
+    ["stale.json beside it", () => markStale(releaseGrade())],
+    [
+      "a version 2 manifest marked stale",
+      () => edited("manifest.json", (manifest) => asVersion2(manifest, "a check failed")),
+    ],
+  ])("real, %s: same data, and the strip changes", (_name, make) => {
+    const state = stateOf(make());
     expect(state.kind).toBe("real");
     expect(state.banner).toBeNull();
     expect(state.freshness).toBe("stale");
@@ -215,6 +218,14 @@ describe("release grade, rejected by the schema when `preview` is false, so a lo
 
 describe("release grade, accepted by the schema, so preview and a refusal naming why", () => {
   const cases: [string, string, (payload: Json) => void, string][] = [
+    [
+      "a tree with uncommitted changes",
+      "manifest.json",
+      (manifest) => {
+        manifest.provenance.tree_state = "dirty";
+      },
+      "it was published from a tree with uncommitted changes",
+    ],
     [
       "an empty reconciliation.json",
       "reconciliation.json",
@@ -315,6 +326,32 @@ describe("release grade, accepted by the schema, so preview and a refusal naming
 });
 
 // The schema stops these in a real load. The state step still checks, in case a schema loosens.
+describe("the tree a dataset was published from", () => {
+  it.each(["clean", "unknown"])(
+    "a %s tree can be real, as an image has no tree to read",
+    (tree) => {
+      const dir = edited("manifest.json", (manifest) => {
+        manifest.provenance.tree_state = tree;
+      });
+      expect(stateOf(dir).kind).toBe("real");
+    },
+  );
+
+  it("a version 2 manifest recorded no tree, and can still be real", () => {
+    const dir = edited("manifest.json", (manifest) => asVersion2(manifest));
+    expect(stateOf(dir).kind).toBe("real");
+  });
+
+  it("a dirty tree still builds as a local preview", () => {
+    const dir = edited("manifest.json", (manifest) => {
+      manifest.provenance.tree_state = "dirty";
+    });
+    const state = stateOf(dir);
+    expect(state.kind).toBe("preview");
+    expect(state.banner?.headline).toBe("Local preview. Not the published site.");
+  });
+});
+
 describe("release grade, on files already in memory", () => {
   const files = () => loadDatasetFiles(at(releaseGrade())).files;
 
@@ -438,13 +475,8 @@ describe("freshness, with a fake clock", () => {
     expect(stateOf(dir, GENERATED).freshness).toBe("stale");
   });
 
-  it("manifest.stale true is stale whatever the clock says", () => {
-    const dir = edited("manifest.json", (data) => {
-      data.stale = true;
-      data.stale_since = "2026-11-04T07:00:00Z";
-      data.stale_reason = "a check failed";
-    });
-    expect(stateOf(dir, GENERATED).freshness).toBe("stale");
+  it("stale.json is stale whatever the clock says", () => {
+    expect(stateOf(markStale(releaseGrade()), GENERATED).freshness).toBe("stale");
   });
 
   it("a future generated_at is stale", () => {

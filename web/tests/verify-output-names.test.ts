@@ -3,7 +3,7 @@ import { extname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { locateDataset } from "@/lib/dataset/load";
 import { expectedFromDataset, verifyOutput } from "@/scripts/verify-output.mjs";
-import { at, copySample, editJson, releaseGrade } from "./dataset-helpers";
+import { asVersion2, at, copySample, editJson, markStale, releaseGrade } from "./dataset-helpers";
 import {
   type PlantedBand,
   plantedBands,
@@ -22,18 +22,26 @@ describe("what to expect comes from the dataset", () => {
     expect(expectedFromDataset(at(dir))).toMatchObject({ kind: "sample", frameWord: "Sample" });
   });
 
-  it("a release-grade dataset expects no frame, and collects its pipeline strings", () => {
-    const dir = releaseGrade();
-    editJson(dir, "manifest.json", (manifest) => {
-      manifest.stale = true;
-      manifest.stale_since = "2026-11-04T07:00:00Z";
-      manifest.stale_reason = "chain_supply is failed, so nothing moved";
-    });
-    const expected = expectedFromDataset(at(dir));
-    expect(expected).toMatchObject({ kind: "real", frameWord: null });
-    expect(expected.pipelineStrings).toContain("chain_supply is failed, so nothing moved");
-    expect(expected.pipelineStrings).toHaveLength(8);
-  });
+  it.each([
+    ["stale.json", (dir: string) => markStale(dir, "chain_supply is failed, so nothing moved")],
+    [
+      "a version 2 manifest",
+      (dir: string) =>
+        editJson(dir, "manifest.json", (manifest) =>
+          asVersion2(manifest, "chain_supply is failed, so nothing moved"),
+        ),
+    ],
+  ])(
+    "a release-grade dataset expects no frame, and collects the stale reason from %s",
+    (_, mark) => {
+      const dir = releaseGrade();
+      mark(dir);
+      const expected = expectedFromDataset(at(dir));
+      expect(expected).toMatchObject({ kind: "real", frameWord: null });
+      expect(expected.pipelineStrings).toContain("chain_supply is failed, so nothing moved");
+      expect(expected.pipelineStrings).toHaveLength(8);
+    },
+  );
 
   it("the partial sample expects its sample frame, not preview", () => {
     expect(expectedFromDataset(at(copySample("partial"))).frameWord).toBe("Sample");

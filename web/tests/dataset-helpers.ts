@@ -61,9 +61,25 @@ export function releaseGrade(): string {
   const dir = copySample("complete");
   rmSync(join(dir, "FIXTURE"));
   editJson(dir, "manifest.json", (manifest) => {
-    manifest.git_commit = "abc1234";
+    manifest.git_commit = "abc1234".padEnd(40, "0");
   });
   return dir;
+}
+
+// What publish writes beside a folder once a newer run fails. The folder's own files don't change.
+export function markStale(dir: string, reason = "a check failed"): string {
+  const mark = { stale_since: "2026-11-04T07:00:00Z", stale_reason: reason };
+  writeFileSync(join(dir, "stale.json"), JSON.stringify(mark));
+  return dir;
+}
+
+// A manifest as schema version 2 wrote it: no provenance, and its own stale fields.
+export function asVersion2(manifest: Json, staleReason: string | null = null): void {
+  delete manifest.provenance;
+  manifest.schema_version = 2;
+  manifest.stale = staleReason !== null;
+  manifest.stale_since = staleReason === null ? null : "2026-11-04T07:00:00Z";
+  manifest.stale_reason = staleReason;
 }
 
 export function plantFile(root: string, path: string, content: string): void {

@@ -9,11 +9,9 @@
     "generated_at",
     "time_zone",
     "git_commit",
+    "provenance",
     "preview",
     "notice",
-    "stale",
-    "stale_since",
-    "stale_reason",
     "check_run_id",
     "reconciliation",
     "coverage",
@@ -25,7 +23,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 2
+      "const": 3
     },
     "dataset_version": {
       "type": "string",
@@ -40,28 +38,58 @@
     },
     "git_commit": {
       "type": "string",
-      "pattern": "^[0-9a-f]{7,40}$"
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tree_state",
+        "uv_lock_sha256",
+        "python_version",
+        "dbt_core_version",
+        "dbt_duckdb_version",
+        "raw_schema_version",
+        "dbt_manifest_sha256"
+      ],
+      "properties": {
+        "tree_state": {
+          "enum": [
+            "clean",
+            "dirty",
+            "unknown"
+          ]
+        },
+        "uv_lock_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "python_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+[0-9A-Za-z.+-]*$"
+        },
+        "dbt_core_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+[0-9A-Za-z.+-]*$"
+        },
+        "dbt_duckdb_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+[0-9A-Za-z.+-]*$"
+        },
+        "raw_schema_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dbt_manifest_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
     },
     "preview": {
       "type": "boolean"
     },
     "notice": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "stale": {
-      "type": "boolean"
-    },
-    "stale_since": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
-    },
-    "stale_reason": {
       "type": [
         "string",
         "null"
@@ -758,39 +786,6 @@
           },
           "notice": {
             "const": "Local preview only, never for public release. It was published with --allow-partial, so chains may be missing and the full reconciliation may not have been checked."
-          },
-          "stale": {
-            "const": false
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "stale": {
-            "const": false
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "stale_since": {
-            "const": null
-          },
-          "stale_reason": {
-            "const": null
-          }
-        }
-      },
-      "else": {
-        "properties": {
-          "stale_since": {
-            "type": "string",
-            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
-          },
-          "stale_reason": {
-            "type": "string"
           }
         }
       }

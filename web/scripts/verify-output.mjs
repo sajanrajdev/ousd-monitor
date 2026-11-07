@@ -2016,7 +2016,7 @@ export function expectedFromFiles(files, placement, webRoot = process.cwd(), now
     version: manifest.dataset_version,
     pipelineStrings: [
       ...manifest.checks.map((check) => check.detail),
-      ...(manifest.stale_reason ? [manifest.stale_reason] : []),
+      ...(files.stale ? [files.stale.stale_reason] : []),
     ],
     blockedNames: JSON.parse(readFileSync(join(webRoot, "scripts/blocked-names.json"), "utf8")),
     tokenContracts: TOKEN_CONTRACTS,

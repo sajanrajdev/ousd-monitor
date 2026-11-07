@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { expectedFromDataset, verifyOutput } from "@/scripts/verify-output.mjs";
-import { at, editJson, releaseGrade } from "./dataset-helpers";
+import { at, markStale, releaseGrade } from "./dataset-helpers";
 import {
   PLANTED_TRUST_CAVEAT,
   PLANTED_TRUST_LINK,
@@ -479,13 +479,7 @@ describe("freshness in the output", () => {
   });
 
   it("takes the words and the state from the dataset", () => {
-    const dir = releaseGrade();
-    editJson(dir, "manifest.json", (manifest) => {
-      manifest.stale = true;
-      manifest.stale_since = "2026-11-04T07:00:00Z";
-      manifest.stale_reason = "a check failed";
-    });
-    const expected = expectedFromDataset(at(dir));
+    const expected = expectedFromDataset(at(markStale(releaseGrade())));
     expect(expected.freshness).toBe("stale");
     expect(expected.asOfLine.stale).toContain("A newer run did not pass its checks.");
     expect(expected.trustLine.fresh).toBeNull();
