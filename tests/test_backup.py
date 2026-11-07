@@ -1,3 +1,4 @@
+import errno
 import hashlib
 import subprocess
 import sys
@@ -5,12 +6,13 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import duckdb
 import pytest
+from botocore.awsrequest import AWSResponse, HeadersDict
 from conftest import ALICE
 from ousd import backup, cli
 from ousd.backup import BackupError, Remote, RestoreRefused
 from ousd.decode import Transfer
 from ousd.migrations import LATEST, SchemaOutOfDate
-from ousd.store import Store
+from ousd.store import Store, checkpointed
 from test_migrations import PRE_MIGRATIONS_SCHEMA
 
 TRANSFER = Transfer(5, "0xhash5", 1, "0x2", 0, ALICE, ALICE, 7)
@@ -109,6 +111,44 @@ def hold(path):
     return holder
 
 
+def opens_elsewhere(path) -> bool:
+    """Whether another process can open the file as a writer right now."""
+    script = "import duckdb, sys; duckdb.connect(sys.argv[1]).close()"
+    probe = subprocess.run(
+        [sys.executable, "-I", "-c", script, str(path)],
+        capture_output=True,
+        timeout=60,
+    )
+    return probe.returncode == 0
+
+
+class CannedBody:
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+
+    def stream(self, **kwargs):
+        yield self.body
+
+
+def refuse_every_request(client, message: str = "Access Denied") -> list:
+    """Answer each request the client sends with a 403 AccessDenied, after botocore has built and
+    signed it but before anything reaches the network. Returns the requests, as sent."""
+    sent = []
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f"<Error><Code>AccessDenied</Code><Message>{message}</Message>"
+        "<RequestId>tx0</RequestId></Error>"
+    ).encode()
+
+    def refuse(request, **kwargs):
+        sent.append(request)
+        headers = HeadersDict({"Content-Type": "application/xml"})
+        return AWSResponse(request.url, 403, headers, CannedBody(body))
+
+    client.meta.events.register("before-send.s3", refuse)
+    return sent
+
+
 def names(*times: datetime, complete: bool = True) -> set[str]:
     made = {backup.backup_name(at) for at in times}
     return made | ({name + ".sha256" for name in made} if complete else set())
@@ -185,6 +225,34 @@ def test_a_failed_check_of_the_copy_leaves_nothing_behind(raw, tmp_path, monkeyp
         backup.take(raw, folder, AT)
 
     assert list(folder.iterdir()) == []
+
+
+def test_the_lock_holds_from_before_the_copy_until_the_database_is_closed(
+    raw, tmp_path, monkeypatch
+):
+    copy = backup._copy
+    held_after_copying = []
+
+    def copy_then_probe(reader, target):
+        digest = copy(reader, target)
+        held_after_copying.append(not opens_elsewhere(raw))
+        return digest
+
+    monkeypatch.setattr(backup, "_copy", copy_then_probe)
+
+    backup.take(raw, tmp_path / "backups", AT)
+
+    assert held_after_copying == [True]
+    assert opens_elsewhere(raw)
+
+
+def test_checkpointed_refuses_a_missing_database_rather_than_create_one(tmp_path):
+    missing = tmp_path / "missing.duckdb"
+
+    with pytest.raises(FileNotFoundError), checkpointed(missing):
+        pass
+
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_a_held_database_is_not_copied(raw, tmp_path):
@@ -366,7 +434,6 @@ def test_settings_take_overrides_from_the_environment():
     assert (settings.keep_daily, settings.keep_weekly) == (3, 0)
     assert settings.remote is not None
     assert (settings.remote.bucket, settings.remote.prefix) == ("ousd-backups", "raw/daily/")
-    assert settings.remote.url("x") == "s3://ousd-backups/raw/daily/x"
 
 
 def test_a_bucket_without_a_prefix_writes_at_its_root():
@@ -428,6 +495,37 @@ def test_an_endpoint_that_is_not_an_http_url_is_refused(endpoint):
         backup.settings_from_env(env)
 
 
+@pytest.mark.parametrize(
+    "endpoint", ["http://s3.fr-par.scw.cloud", "http://localhost.example.com", "http://10.0.0.1"]
+)
+def test_a_plain_http_endpoint_is_refused_unless_it_is_this_machine(endpoint):
+    env = {
+        "OUSD_BACKUP_URL": "s3://ousd-backups",
+        "OUSD_BACKUP_ENDPOINT_URL": endpoint,
+        "OUSD_BACKUP_ACCESS_KEY_ID": "id",
+        "OUSD_BACKUP_SECRET_ACCESS_KEY": "secret",
+    }
+    with pytest.raises(BackupError, match="must use https"):
+        backup.settings_from_env(env)
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    ["https://s3.fr-par.scw.cloud", "http://localhost:9000", "http://127.0.0.1:9000"],
+)
+def test_https_endpoints_and_plain_http_on_this_machine_are_accepted(endpoint):
+    env = {
+        "OUSD_BACKUP_URL": "s3://ousd-backups",
+        "OUSD_BACKUP_ENDPOINT_URL": endpoint,
+        "OUSD_BACKUP_ACCESS_KEY_ID": "id",
+        "OUSD_BACKUP_SECRET_ACCESS_KEY": "secret",
+    }
+    remote = backup.settings_from_env(env).remote
+
+    assert remote is not None
+    assert remote.endpoint_url == endpoint
+
+
 def test_a_url_without_either_credential_names_both():
     with pytest.raises(BackupError) as raised:
         backup.settings_from_env({"OUSD_BACKUP_URL": "s3://ousd-backups"})
@@ -451,9 +549,9 @@ def test_an_upload_puts_the_copy_then_its_checksum(raw, tmp_path):
     made = backup.take(raw, tmp_path / "backups", AT)
     s3 = FakeS3()
 
-    url = backup.upload(made, REMOTE, s3)
+    name = backup.upload(made, REMOTE, s3)
 
-    assert url == "s3://ousd-backups/raw/ousd-20261106T063005Z.duckdb"
+    assert name == "ousd-20261106T063005Z.duckdb"
     assert s3.objects["raw/ousd-20261106T063005Z.duckdb"] == made.path.read_bytes()
     assert s3.objects["raw/ousd-20261106T063005Z.duckdb.sha256"] == (
         backup.checksum_path(made.path).read_bytes()
@@ -484,6 +582,24 @@ def test_a_failed_upload_names_the_step_and_the_error_code(raw, tmp_path):
 
     assert "provider text" not in str(raised.value)
     assert raised.value.__context__ is None
+
+
+@pytest.mark.parametrize("operation", ["upload", "listing"])
+def test_a_real_client_refused_with_403_reports_the_provider_error_code(operation, raw, tmp_path):
+    made = backup.take(raw, tmp_path / "backups", AT)
+    client = backup.make_client(REMOTE)
+    sent = refuse_every_request(client)
+
+    with pytest.raises(BackupError) as raised:
+        if operation == "upload":
+            backup.upload(made, REMOTE, client)
+        else:
+            backup.prune_remote(REMOTE, client, keep_daily=1, keep_weekly=0)
+
+    # upload_file wraps the ClientError in an S3UploadFailedError, which has no response.
+    assert str(raised.value) == f"object storage {operation} failed: AccessDenied"
+    assert sent
+    assert "Authorization" in sent[0].headers
 
 
 def test_remote_pruning_applies_the_rule_across_pages_and_only_under_the_prefix():
@@ -695,6 +811,47 @@ def test_a_forced_restore_never_overwrites_an_earlier_replaced_file(raw, tmp_pat
     assert target.read_bytes() == before
 
 
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("code", [errno.EXDEV, errno.EPERM, errno.ENOTSUP])
+def test_a_filesystem_without_hard_links_is_named_as_such(code, force, raw, tmp_path, monkeypatch):
+    made = backup.take(raw, tmp_path / "backups", AT)
+    target = tmp_path / "live.duckdb"
+    if force:
+        Store(target).close()
+
+    def unlinkable(source, name):
+        raise OSError(code, "refused")
+
+    monkeypatch.setattr(backup.os, "link", unlinkable)
+
+    with pytest.raises(BackupError, match="doesn't support hard links"):
+        backup.restore(made.path, target, force=force, at=AT)
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_any_other_link_failure_is_reported_by_its_error_name(force, raw, tmp_path, monkeypatch):
+    made = backup.take(raw, tmp_path / "backups", AT)
+    target = tmp_path / "live.duckdb"
+    if force:
+        Store(target).close()
+    before = target.read_bytes() if force else None
+
+    def full(source, name):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(backup.os, "link", full)
+
+    with pytest.raises(BackupError) as raised:
+        backup.restore(made.path, target, force=force, at=AT)
+
+    assert str(raised.value).endswith("failed: ENOSPC")
+    assert "hard links" not in str(raised.value)
+    if force:
+        assert target.read_bytes() == before
+    else:
+        assert not target.exists()
+
+
 def test_a_restore_refuses_a_missing_copy_and_a_folder_as_the_target(raw, tmp_path):
     made = backup.take(raw, tmp_path / "backups", AT)
 
@@ -773,8 +930,11 @@ def test_backup_with_a_url_uploads_and_prunes_both_places(env, monkeypatch, caps
     assert cli.main(["backup"]) == 0
 
     out = capsys.readouterr().out
-    assert "uploaded: s3://ousd-backups/raw/ousd-" in out
+    assert "uploaded: ousd-" in out
     assert out.count("removed: ") == 4
+    assert out.count(" from object storage") == 2
+    assert "s3://" not in out
+    assert "ousd-backups" not in out
     assert len([key for key in s3.objects if key.endswith(".duckdb")]) == 1
     assert len(list((env / "backups").glob("ousd-*.duckdb"))) == 1
 

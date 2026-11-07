@@ -6,6 +6,7 @@ OUSD_BACKUP_URL is set, the copy also goes to S3-compatible object storage.
 """
 
 import contextlib
+import errno
 import functools
 import hashlib
 import logging
@@ -15,7 +16,7 @@ from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, BinaryIO, Protocol
 from urllib.parse import urlsplit
 
 import duckdb
@@ -40,6 +41,10 @@ PARTIAL_SUFFIX = ".partial"
 CHUNK = 1024 * 1024
 # A bucket name as S3 and Scaleway accept it.
 BUCKET = re.compile(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]")
+# Plain http sends requests unencrypted, so it is only for an endpoint on this machine.
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1"})
+# What os.link raises where a filesystem, or the pair of folders, can't hold a hard link.
+NO_HARD_LINKS = frozenset({errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EXDEV})
 
 
 class BackupError(RuntimeError):
@@ -60,9 +65,6 @@ class Remote:
     region: str | None
     access_key_id: str = field(repr=False)
     secret_access_key: str = field(repr=False)
-
-    def url(self, name: str) -> str:
-        return f"s3://{self.bucket}/{self.prefix}{name}"
 
 
 @dataclass(frozen=True)
@@ -130,6 +132,10 @@ def _remote(env: Mapping[str, str]) -> Remote | None:
             raise BackupError(
                 "OUSD_BACKUP_ENDPOINT_URL must be a plain URL such as https://s3.fr-par.scw.cloud"
             )
+        if site.scheme == "http" and site.hostname not in LOCAL_HOSTS:
+            raise BackupError(
+                "OUSD_BACKUP_ENDPOINT_URL must use https; http is accepted only for localhost"
+            )
     names = ("OUSD_BACKUP_ACCESS_KEY_ID", "OUSD_BACKUP_SECRET_ACCESS_KEY")
     if missing := [name for name in names if not env.get(name, "").strip()]:
         raise BackupError(f"OUSD_BACKUP_URL is set, so set {' and '.join(missing)} too")
@@ -176,11 +182,11 @@ def wal_path(path: Path) -> Path:
     return path.with_name(path.name + ".wal")
 
 
-def _copy(source: Path, target: Path) -> str:
+def _copy(reader: BinaryIO, target: Path) -> str:
     """Copy to a file that must not exist yet, flush it to disk, and return the sha256 of the
     bytes copied."""
     digest = hashlib.sha256()
-    with source.open("rb") as reader, target.open("xb") as writer:
+    with target.open("xb") as writer:
         while chunk := reader.read(CHUNK):
             digest.update(chunk)
             writer.write(chunk)
@@ -239,14 +245,13 @@ def take(source: Path, folder: Path, at: datetime) -> Backup:
     partial = folder / f".{final.name}{PARTIAL_SUFFIX}"
     pending = folder / f".{final.name}{CHECKSUM_SUFFIX}{PARTIAL_SUFFIX}"
     try:
-        with checkpointed(source):
+        # The reader is checkpointed's own, opened before the lock is taken and closed after it
+        # is released, so no descriptor on the source closes while the lock is held.
+        with checkpointed(source) as reader:
             # A WAL left after CHECKPOINT holds changes the file lacks, so the copy would too.
             if wal_path(source).exists():
                 raise BackupError("the database still has a write-ahead log after CHECKPOINT")
-            # DuckDB's lock is a POSIX record lock, which this process loses as soon as it closes
-            # any descriptor on the file. The copy's own reader closes last in this block, so
-            # nothing may open the source after it.
-            _copy(source, partial)
+            _copy(reader, partial)
         # From the file as written rather than the bytes read, and with the lock released.
         digest = file_sha256(partial)
         version = schema_version(partial)
@@ -284,7 +289,8 @@ def restore(backup: Path, target: Path, *, force: bool, at: datetime) -> Restore
     partial = target.with_name(f".{target.name}.restoring")
     partial.unlink(missing_ok=True)
     try:
-        digest = _copy(backup, partial)
+        with backup.open("rb") as reader:
+            digest = _copy(reader, partial)
         if digest != expected:
             raise BackupError(
                 f"{backup.name} doesn't match its checksum: it is damaged, or not the file the "
@@ -299,11 +305,9 @@ def restore(backup: Path, target: Path, *, force: bool, at: datetime) -> Restore
         if not target.exists():
             # A link, unlike a rename, fails rather than replace a database created meanwhile.
             try:
-                os.link(partial, target)
+                _link(partial, target)
             except FileExistsError:
                 raise BackupError(f"a database appeared at {target} during the restore") from None
-            except OSError:
-                raise BackupError(f"{target.parent} doesn't support hard links") from None
             _sync_folder(target.parent)
             return Restored(digest, version, None)
         replaced = target.with_name(f"{target.name}.replaced-{at.astimezone(UTC).strftime(STAMP)}")
@@ -312,10 +316,7 @@ def restore(backup: Path, target: Path, *, force: bool, at: datetime) -> Restore
         with _replacing(target):
             # A second name for the old file, then one atomic swap, so the target never goes
             # missing for a writer to create an empty database there.
-            try:
-                os.link(target, replaced)
-            except OSError:
-                raise BackupError(f"{target.parent} doesn't support hard links") from None
+            _link(target, replaced)
             os.replace(partial, target)
         _sync_folder(target.parent)
         return Restored(digest, version, replaced)
@@ -323,10 +324,32 @@ def restore(backup: Path, target: Path, *, force: bool, at: datetime) -> Restore
         partial.unlink(missing_ok=True)
 
 
+def _link(source: Path, name: Path) -> None:
+    """A hard link, which fails with FileExistsError rather than replace an existing name."""
+    try:
+        os.link(source, name)
+        return
+    except FileExistsError:
+        raise
+    except OSError as exc:
+        if exc.errno in NO_HARD_LINKS:
+            failure = BackupError(f"{name.parent} doesn't support hard links")
+        else:
+            code = errno.errorcode.get(exc.errno, "an unknown error") if exc.errno else "no code"
+            failure = BackupError(f"linking {source.name} as {name.name} failed: {code}")
+    raise failure
+
+
 @contextlib.contextmanager
 def _replacing(target: Path) -> Iterator[None]:
     """The writer lock on a database about to be replaced. A file DuckDB can't open, such as a
-    damaged one, can't be locked, so it is refused with what to do instead."""
+    damaged one, can't be locked, so it is refused with what to do instead.
+
+    The lock belongs to the file, not its name. While it is held, no other process has the old
+    database open to write, so the link that keeps it and the swap that replaces it see it
+    complete and unchanging. Once the swap is done, the name points at the restored file, which
+    the lock doesn't cover: a writer may open it straight away, and that is safe, because it is
+    complete by then. The lock ends on the old file, now under its kept name."""
     unopenable = BackupError(
         f"DuckDB can't open the database at {target}, so it can't be locked; if it is damaged, "
         "move it aside, then restore without --force"
@@ -418,28 +441,35 @@ def make_client(remote: Remote) -> S3Client:
         ignore_configured_endpoint_urls=True,
         retries={"max_attempts": 5, "mode": "standard"},
     )
-    client: S3Client = _call(
-        remote,
-        "client setup",
-        functools.partial(
-            boto3.client,
+
+    # A closure, not functools.partial, whose repr would show the secret key among its arguments.
+    def build() -> S3Client:
+        client: S3Client = boto3.client(
             "s3",
             endpoint_url=remote.endpoint_url,
             region_name=remote.region,
             aws_access_key_id=remote.access_key_id,
             aws_secret_access_key=remote.secret_access_key,
             config=config,
-        ),
-    )
-    return client
+        )
+        return client
+
+    return _call(remote, "client setup", build)
+
+
+def _error_code(exc: BaseException | None) -> str | None:
+    response = getattr(exc, "response", None)
+    code = response.get("Error", {}).get("Code") if isinstance(response, dict) else None
+    return str(code) if code else None
 
 
 def _failure(exc: BaseException, remote: Remote) -> str:
     """Only the error code or the exception's type: a provider's message or a botocore error can
-    quote the request, and a request carries the access key."""
-    response = getattr(exc, "response", None)
-    code = response.get("Error", {}).get("Code") if isinstance(response, dict) else None
-    text = str(code) if code else type(exc).__name__
+    quote the request, and a request carries the access key. boto3's upload_file raises an
+    S3UploadFailedError with no response of its own, so the code comes from the ClientError it
+    was raised from, one level down."""
+    codes = (_error_code(link) for link in (exc, exc.__cause__, exc.__context__))
+    text = next((code for code in codes if code), type(exc).__name__)
     for secret in (remote.access_key_id, remote.secret_access_key):
         text = text.replace(secret, "[credential]")
     return text[:100]
@@ -455,7 +485,8 @@ def _call[T](remote: Remote, operation: str, call: Callable[[], T]) -> T:
 
 
 def upload(made: Backup, remote: Remote, client: S3Client) -> str:
-    """Upload the copy, check its size, then upload its checksum, which marks it complete."""
+    """Upload the copy, check its size, then upload its checksum, which marks it complete.
+    Returns the object's name, without the bucket or prefix."""
     key = remote.prefix + made.path.name
     _call(
         remote,
@@ -480,7 +511,7 @@ def upload(made: Backup, remote: Remote, client: S3Client) -> str:
             ContentType="text/plain",
         ),
     )
-    return remote.url(made.path.name)
+    return made.path.name
 
 
 def prune_remote(

@@ -423,11 +423,12 @@ def _backup() -> int:
     remote = settings.remote
     try:
         client = backup.make_client(remote)
-        print(f"uploaded: {backup.upload(made, remote, client)}")
+        # Object names only: the bucket and prefix come from OUSD_BACKUP_URL, never echoed.
+        print(f"uploaded: {backup.upload(made, remote, client)} to object storage")
         for name in backup.prune_remote(
             remote, client, settings.keep_daily, settings.keep_weekly, made.path.name
         ):
-            print(f"removed: {remote.url(name)}")
+            print(f"removed: {name} from object storage")
     except (backup.BackupError, OSError) as failure:
         print(f"error: {failure}; the local copy is kept", file=sys.stderr)
         return 1

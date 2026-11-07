@@ -18,6 +18,7 @@ from ousd.decode import TRANSFER_TOPIC
 from ousd.http import HttpError, PoliteClient
 from ousd.solana import SolanaChain, SolanaDataError, SolanaRpc, SolanaRpcError
 from ousd.sources import BlockscoutClient, RpcClient, RpcError
+from test_backup import refuse_every_request
 
 KEY = "k3y9aZ7QwErTyUiOpAsDfGhJkLzXcVbNm1234567890abcdefghijklmnopqr"
 # Where sources.py cuts a provider's reply in an error.
@@ -922,6 +923,53 @@ def test_a_real_botocore_client_error_quoting_the_credentials_is_clean(caplog):
 
     assert str(raised.value) == "object storage listing failed: AccessDenied"
     assert_clean(raised.value, caplog, KEY, ACCESS_KEY_ID)
+
+
+@pytest.mark.parametrize("operation", ["upload", "listing"])
+def test_a_signed_request_refused_with_a_403_quoting_the_credentials_is_clean(
+    operation, tmp_path, caplog, capfd
+):
+    copy = tmp_path / "ousd-20261106T063005Z.duckdb"
+    copy.write_bytes(b"data")
+    backup.checksum_path(copy).write_text("0" * 64 + "  " + copy.name + "\n")
+    made = backup.Backup(copy, "0" * 64, 4, 1)
+    remote = backup_remote()
+    client = backup.make_client(remote)
+    sent = refuse_every_request(client, f"denied for {ACCESS_KEY_ID} with {KEY}")
+
+    with pytest.raises(BackupError) as raised:
+        if operation == "upload":
+            backup.upload(made, remote, client)
+        else:
+            backup.prune_remote(remote, client, keep_daily=1, keep_weekly=0)
+
+    # botocore signed a real request, which names the access key, and got the reply back.
+    assert ACCESS_KEY_ID in str(sent[0].headers["Authorization"])
+    assert str(raised.value) == f"object storage {operation} failed: AccessDenied"
+    assert_clean(raised.value, caplog, KEY, ACCESS_KEY_ID)
+    captured = capfd.readouterr()
+    records = [record.getMessage() for record in caplog.records]
+    for secret in (KEY, ACCESS_KEY_ID):
+        assert secret not in captured.out + captured.err
+        assert not any(secret in record for record in records)
+
+
+def test_the_client_is_built_by_a_call_whose_repr_holds_no_credential(monkeypatch):
+    passed = []
+    call = backup._call
+
+    def spy(remote, operation, build):
+        passed.append(build)
+        return call(remote, operation, build)
+
+    monkeypatch.setattr(backup, "_call", spy)
+
+    backup.make_client(backup_remote())
+
+    assert len(passed) == 1
+    for text in (repr(passed[0]), str(passed[0])):
+        assert KEY not in text
+        assert ACCESS_KEY_ID not in text
 
 
 def test_building_the_client_logs_no_credential(caplog):
