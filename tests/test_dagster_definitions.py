@@ -453,10 +453,11 @@ def test_the_failure_sensor_stays_for_dagster_dev_and_alerts_only_once(
 def test_the_real_dbt_command_builds_the_project_with_the_repo_profile(module, monkeypatch):
     seen = {}
 
-    def fake_run(command, check, timeout):
+    def fake_run(command, check, timeout, env):
         seen["command"] = command
         seen["check"] = check
         seen["timeout"] = timeout
+        seen["env"] = env
 
         class Done:
             returncode = 3
@@ -474,6 +475,91 @@ def test_the_real_dbt_command_builds_the_project_with_the_repo_profile(module, m
     ]
     assert seen["check"] is False
     assert seen["timeout"] == 1800
+    assert seen["env"] == module.dbt_environment()
+
+
+# Every variable that can hold a provider URL, a key or a token, with ones dbt may see.
+DBT_SECRETS = {
+    **{name: f"https://{name.lower()}.invalid/{KEY}" for name in SECRET_URL_VARIABLES},
+    "OUSD_BACKUP_URL": f"s3://backups/{KEY}",
+    "OUSD_BACKUP_ACCESS_KEY_ID": "AKIA0000000000000000",
+    "OUSD_BACKUP_SECRET_ACCESS_KEY": KEY,
+    "VERCEL_TOKEN": KEY,
+    "VERCEL_ORG_ID": "team_org",
+    "VERCEL_PROJECT_ID": "prj_project",
+    "DBT_ENV_SECRET_TOKEN": KEY,
+    "UNLISTED": "x",
+}
+DBT_ALLOWED = {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "/home/ousd",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "TZ": "UTC",
+    "OUSD_DB_PATH": "data/ousd.duckdb",
+    "OUSD_MARTS_DB_PATH": "data/marts.duckdb",
+    "DBT_SEND_ANONYMOUS_USAGE_STATS": "false",
+}
+
+
+def forbidden_for_dbt(name: str) -> bool:
+    return (
+        name.endswith("_RPC_URL")
+        or name in ("OUSD_ALERT_WEBHOOK_URL", "OUSD_HEARTBEAT_URL")
+        or name.startswith(("OUSD_BACKUP_", "VERCEL_"))
+    )
+
+
+def test_the_dbt_environment_is_the_allowlist_and_nothing_else(module):
+    assert module.dbt_environment({**DBT_SECRETS, **DBT_ALLOWED}) == DBT_ALLOWED
+
+
+def test_make_models_keeps_the_same_allowlist(module):
+    makefile = (DEFINITIONS.parents[2] / "Makefile").read_text().splitlines()
+    [line] = [line for line in makefile if line.startswith("DBT_ENV_NAMES :=")]
+    assert set(line.split(":=", 1)[1].split()) == module.DBT_ENV_NAMES
+    assert "$(filter DBT_% LC_%,$(.VARIABLES))" in "\n".join(makefile)
+    assert module.DBT_ENV_PREFIXES == ("DBT_", "LC_")
+
+
+def test_no_secret_variable_reaches_the_dbt_process(module, monkeypatch, tmp_path):
+    seen = tmp_path / "names.json"
+    fake = tmp_path / "dbt"
+    fake.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        f"json.dump(sorted(os.environ), open({str(seen)!r}, 'w'))\n"
+        "sys.exit(5)\n"
+    )
+    fake.chmod(0o755)
+    monkeypatch.setattr(module, "_dbt_executable", lambda: str(fake))
+    for name, value in {**DBT_SECRETS, **DBT_ALLOWED, "PATH": os.environ["PATH"]}.items():
+        monkeypatch.setenv(name, value)
+
+    assert module.run_dbt_build() == 5
+    names = set(json.loads(seen.read_text()))
+    assert not [name for name in names if forbidden_for_dbt(name)]
+    assert not names & set(DBT_SECRETS)
+    assert set(DBT_ALLOWED) <= names
+
+
+def test_the_real_dbt_build_passes_with_only_the_allowlist(module, world, monkeypatch, tmp_path):
+    """dbt-duckdb needs nothing beyond the allowlist: the whole project builds and tests."""
+    monkeypatch.chdir(DEFINITIONS.parent.parent.parent)
+    for name, value in DBT_SECRETS.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("OUSD_DB_PATH", str(world.raw))
+    monkeypatch.setenv("OUSD_MARTS_DB_PATH", str(tmp_path / "marts.duckdb"))
+    # dbt's own variables pass, so the build writes outside the repo.
+    monkeypatch.setenv("DBT_TARGET_PATH", str(tmp_path / "target"))
+    monkeypatch.setenv("DBT_LOG_PATH", str(tmp_path / "logs"))
+    monkeypatch.setenv("DBT_SEND_ANONYMOUS_USAGE_STATS", "false")
+
+    assert module.run_dbt_build() == 0
+    report = json.loads((tmp_path / "target" / "run_results.json").read_text())
+    assert report["results"]
+    # Exposures report no-op: they build nothing.
+    assert {result["status"] for result in report["results"]} <= {"success", "pass", "no-op"}
 
 
 def test_missing_keys_stop_the_run_before_any_sync_and_name_only_variables(module, monkeypatch):
@@ -862,7 +948,7 @@ def test_a_dbt_build_past_its_timeout_is_reported_as_timed_out(module, world, ca
     monkeypatch.setenv("OUSD_DBT_TIMEOUT_SECONDS", "90")
     assert module.Pipeline().dbt_timeout == 90
 
-    def too_slow(command, check, timeout):
+    def too_slow(command, check, timeout, env):
         assert timeout == 90
         raise subprocess.TimeoutExpired(command, timeout)
 

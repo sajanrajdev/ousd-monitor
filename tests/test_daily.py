@@ -27,6 +27,7 @@ SECRETS = [*RPC.values(), VERCEL["VERCEL_TOKEN"]]
 FAKE_MAKE = """#!/bin/sh
 FAKES="$(pwd)/fakes"
 env | cut -d= -f1 | sort > "$FAKES/make-$1.env"
+umask > "$FAKES/umask-$1"
 printf '%s\\n' "$*" >> "$FAKES/calls"
 [ -n "${OUSD_HEARTBEAT_URL+x}" ] && [ -z "$OUSD_HEARTBEAT_URL" ] && touch "$FAKES/no-heartbeat-$1"
 case "$1" in
@@ -318,6 +319,16 @@ def test_the_commit_comes_from_the_deploy(root):
     # Off Railway, as in a local run, the value set by hand is used.
     assert daily(root, OUSD_GIT_COMMIT="fedcba987654").returncode == 0
     assert (root / "fakes" / "commit-run").read_text().strip() == "fedcba987654"
+
+
+def test_every_step_creates_files_only_the_run_user_can_read(root):
+    assert daily(root, OUSD_DEPLOY="0").returncode == 0
+    for step in ("run", "web-release"):
+        assert (root / "fakes" / f"umask-{step}").read_text().strip() == "0077"
+    # The dataset folder the stand-in pipeline published, and a file in the release it built.
+    published = root / "data" / "published" / "v0"
+    assert stat.S_IMODE(published.stat().st_mode) == 0o700
+    assert stat.S_IMODE((root / "web" / ".release" / "v1" / "index.html").stat().st_mode) == 0o600
 
 
 def test_the_script_is_executable():

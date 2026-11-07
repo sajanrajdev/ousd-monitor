@@ -8,7 +8,7 @@ How the hosted run is set up: one Railway cron service that runs the pipeline on
 
 `scripts/daily.sh` (also `make daily`), from the image built by the `Dockerfile` at the repo root:
 
-1. `make run`, the whole pipeline. Its environment has the Vercel variables removed.
+1. `make run`, the whole pipeline. Its environment has the Vercel variables removed, and its dbt build gets an allowlist: no RPC, alert, heartbeat, backup or Vercel variable reaches dbt.
 2. On success, `make web-release`, with an allowlisted environment: no RPC variable reaches the site build. It refuses anything that isn't release grade, and any warning that isn't acknowledged.
 3. On success, the verified `web/.release/latest` is copied into `.vercel/output/static`, and `web/scripts/vercel-config.ts` writes its `config.json` with the security headers for that folder (below). Then `vercel deploy --prebuilt --non-interactive` uploads it as a preview. The CLI gets the same allowlist plus the three Vercel variables. It never gets `--prod`, and the token is never on a command line. The CLI prints a JSON result; `scripts/deploy-result.mjs` reads it, logs the preview URL, logs Vercel's reason on a failure, and **fails the run if the deployment landed in production** (which a new project's first deploy does).
 
@@ -47,11 +47,17 @@ With `OUSD_DEPLOY=0` the run builds and verifies the release but doesn't deploy,
 | Public networking | None. Nothing listens |
 | Notifications | Email for deployment status, in account settings |
 
-The image runs as root, so the volume, which mounts as root, is writable without `RAILWAY_RUN_UID`. The Dockerfile has no `VOLUME` line, as Railway refuses it.
+The Dockerfile has no `VOLUME` line, as Railway refuses it.
+
+### Why the image runs as root
+
+Railway mounts the volume as root. Its volume docs say an image that runs as a non-root user will have permission problems in the volume, and that the fix is to set `RAILWAY_RUN_UID=0`. That variable sets the user that runs the container's main process, and `0` is root again. Railway documents no way to mount the volume for another user, so the image keeps root and needs no `RAILWAY_RUN_UID`.
+
+What narrows the run instead: `scripts/daily.sh` sets `umask 077`, each step gets only the variables it needs, dbt included, nothing listens, and the image holds no secret. The full list, and what changes on a VM, is in [hosting hardening](operations.md#hosting-hardening). Sources: [Railway volumes](https://docs.railway.com/volumes/reference) and [Railway variables](https://docs.railway.com/variables/reference).
 
 ## Railway variables
 
-Names only. Values go into the service's variables in Railway and nowhere else.
+Names only. Values go into the service's variables in Railway and nowhere else. Seal every secret (each URL that holds a key, the webhook and heartbeat URLs and `VERCEL_TOKEN`): a sealed value reaches the run but can't be read back.
 
 | Variable | Needed | What it is |
 |---|---|---|
@@ -62,7 +68,7 @@ Names only. Values go into the service's variables in Railway and nowhere else.
 | `ETHEREUM_BLOCKSCOUT_URL` | Optional | Overrides the public Blockscout default |
 | `BRIDGE_API_URL` | Optional | Overrides the public bridge API default |
 | `OUSD_ACK_WARNING_KEYS` | Yes | `ethereum:circulating_supply`. Comma-separated `chain:metric` warnings the release lets through. Review by 2026-12-05 |
-| `VERCEL_TOKEN` | Yes, to deploy | A Vercel token, scoped as narrowly as Vercel allows |
+| `VERCEL_TOKEN` | Yes, to deploy | A Vercel token, scoped to the one team that owns the project, with an expiry. Rotation is in [hosting hardening](operations.md#hosting-hardening) |
 | `VERCEL_ORG_ID` | Yes, to deploy | The Vercel team or account ID |
 | `VERCEL_PROJECT_ID` | Yes, to deploy | The Vercel project ID |
 | `OUSD_DEPLOY` | Optional | `0` builds the release without deploying. Only `0` or `1` |

@@ -4,6 +4,7 @@ may the object storage credentials backups use."""
 import json
 import logging
 import re
+import shutil
 import subprocess
 import sys
 import traceback
@@ -1168,3 +1169,62 @@ def test_backup_credentials_are_hidden_in_plain_and_json_lines(name, monkeypatch
     assert secret not in line
     assert json.dumps(secret)[1:-1] not in line
     assert f"<{name}>" in line
+
+
+def test_make_models_gives_dbt_only_the_allowlist(tmp_path):
+    """`make models`, with stand-ins for uv and dbt: dbt sees no secret variable, and no value
+    is on a command line."""
+    repo = Path(__file__).resolve().parent.parent
+    seen = tmp_path / "dbt-env.json"
+    uv_args = tmp_path / "uv-args"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    # uv run --locked <command>: record the arguments, then run the command.
+    (bin_dir / "uv").write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {uv_args}\nshift 2\nexec "$@"\n')
+    (bin_dir / "dbt").write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "record = {'args': sys.argv[1:], 'names': sorted(os.environ)}\n"
+        f"json.dump(record, open({str(seen)!r}, 'w'))\n"
+    )
+    for fake in bin_dir.iterdir():
+        fake.chmod(0o755)
+    secrets = {
+        **{name: f"https://{name.lower()}.invalid/{KEY}" for name in SECRET_URL_VARIABLES},
+        "OUSD_BACKUP_URL": f"s3://backups/{KEY}",
+        "OUSD_BACKUP_SECRET_ACCESS_KEY": KEY,
+        "VERCEL_TOKEN": KEY,
+        "VERCEL_PROJECT_ID": "prj_project",
+        "DBT_ENV_SECRET_TOKEN": KEY,
+        "UNLISTED": "x",
+    }
+    allowed = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "LC_ALL": "C",
+        "OUSD_DB_PATH": str(tmp_path / "ousd.duckdb"),
+        "OUSD_MARTS_DB_PATH": str(tmp_path / "marts.duckdb"),
+        "DBT_SEND_ANONYMOUS_USAGE_STATS": "false",
+    }
+    make = shutil.which("make") or "make"
+    result = subprocess.run(
+        [make, "--no-print-directory", "models"],
+        cwd=repo,
+        env={**secrets, **allowed},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    record = json.loads(seen.read_text())
+    assert record["args"] == ["build", "--project-dir", "dbt", "--profiles-dir", "dbt"]
+    names = set(record["names"])
+    assert set(allowed) <= names
+    assert not names & set(secrets)
+    assert not [
+        name
+        for name in names
+        if re.search(r"_RPC_URL$|^OUSD_(ALERT_WEBHOOK|HEARTBEAT)_URL$|^OUSD_BACKUP_|^VERCEL_", name)
+    ]
+    assert KEY not in uv_args.read_text() + result.stdout + result.stderr

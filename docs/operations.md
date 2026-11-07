@@ -137,3 +137,26 @@ make web-shots     # local screenshots of the samples
 ## The hosted daily run
 
 One Railway cron service runs the pipeline at 06:00 UTC and deploys a Vercel preview of the verified site. Production is promoted by hand. The service settings, variables, first seeding and a local test are in [deploying the daily run](deploy.md).
+
+## Hosting hardening
+
+What keeps the hosted run's privileges small. Some items hold on any host, and the rest depend on the host: the current one is Railway, and a VM is the likely next one.
+
+These hold on any host, and the code enforces them:
+
+- **Each step sees only the variables it needs.** `make run` gets no Vercel variable, `make web-release` and `vercel deploy` get an allowlist (see [deploying the daily run](deploy.md#what-runs)), and the dbt build gets its own: `PATH`, `HOME`, `LANG`, `LANGUAGE`, the `LC_*` variables, `TZ`, `TMPDIR`, `TERM`, `NO_COLOR`, `OUSD_DB_PATH`, `OUSD_MARTS_DB_PATH` and dbt's own `DBT_*` settings, except `DBT_ENV_SECRET_*`. So no RPC URL, webhook, heartbeat URL, backup credential or Vercel token reaches dbt. The daily run applies it in `run_dbt_build` (`pipeline/dagster/definitions.py`), and `make models` applies the same list. The labels path is the dbt var `labels_path`, not a variable.
+- **New files are the run user's alone.** `scripts/daily.sh` sets `umask 077` before anything else, so everything it creates under `data/`, `web/.build`, `web/.release` and `dbt/target` is `600` (folders `700`). The release is read back only by the same user, to verify and upload it.
+
+The rest depends on the host:
+
+| Item | Railway (current) | VM |
+|---|---|---|
+| No inbound ports | Public networking stays off, and the run listens on nothing. It is a cron job that starts, runs and exits | Firewall denies all inbound traffic except SSH. Nothing else listens on a public address |
+| Dagster UI | Not run. The hosted run is `scripts/daily.sh`, which has no UI | Only over an SSH tunnel to `127.0.0.1`, never public: `make dagster-dev` on the host (the UI binds `127.0.0.1:3000`, Dagster's default; never pass `--host 0.0.0.0`), then `ssh -N -L 3000:127.0.0.1:3000 <user>@<host>` locally and open `http://127.0.0.1:3000` |
+| SSH | No SSH server in the image. `railway ssh` goes through the Railway CLI and the account's login, so the account needs two-factor authentication | Keys only: `PasswordAuthentication no`, `KbdInteractiveAuthentication no` and `PermitRootLogin no` in `sshd_config` |
+| OS security updates | The host OS is Railway's. The image's Debian packages update when it is rebuilt, so redeploy after a Debian security release, and raise the pinned `node` base image with Node's patch releases | Unattended security updates on: `unattended-upgrades` on Debian or Ubuntu, with a reboot window for kernel fixes |
+| Run user | Root, as Railway's volume mounts as root. See [why the image runs as root](deploy.md#why-the-image-runs-as-root) | A dedicated service user with no login shell and no sudo, owning only `data/` and the folders the run writes: `web/.build`, `web/.release`, `web/node_modules`, `dbt/target`, `dbt/logs`, and `.venv` when uv has to sync it. The checkout is otherwise owned by another user and read-only to it |
+| Secrets | Service variables, sealed: a sealed value reaches the run but can't be read back in the UI, the API, `railway variables` or `railway run`. There is no `.env` | `.env` at mode `600`, owned by the service user (`chmod 600 .env` and `chown <service-user> .env`), and never committed |
+| Deploy token | `VERCEL_TOKEN`, scoped to the one Vercel team that owns the project, with an expiry | The same |
+
+**Rotating the Vercel token.** Rotate it before it expires, at least every 90 days, and at once if it may have leaked: create a new token with the same scope, replace `VERCEL_TOKEN` in the host's secrets, run once with the deploy on and check the preview, then delete the old token in Vercel. The RPC keys, webhook and heartbeat URLs and backup credentials rotate the same way: new value in, one good run, old value revoked.
