@@ -270,3 +270,20 @@ def test_velocity_needs_seven_calendar_days_of_history_not_seven_rows(gap_marts)
     assert kpi(gap_marts, "ethereum", 2)["velocity"] is None
     assert kpi(gap_marts, "ethereum", 6)["velocity"] is not None
     assert kpi(gap_marts, "ethereum", 6)["clean_7d"] == 4 * 5 * OUSD
+
+
+def test_quiet_days_are_rows_with_zero_activity_and_a_rolling_window(gap_marts):
+    # Days 3 to 5 have no transfers: still one row each, with the window carried across them.
+    for index in (3, 4, 5):
+        day = kpi(gap_marts, "ethereum", index)
+        # Active wallets are a rolling count, so the senders from days 0 to 2 still count.
+        assert day["active"] == kpi(gap_marts, "ethereum", 2)["active"]
+        assert day["clean_7d"] == 3 * 5 * OUSD
+    assert kpi(gap_marts, "ethereum", 3)["velocity"] is None  # under a full week of history
+    days = [
+        r[0]
+        for r in gap_marts.execute(
+            "select day_utc from mart_activity_kpis where chain = 'ethereum' order by day_utc"
+        ).fetchall()
+    ]
+    assert days == [FIRST_DAY + timedelta(days=i) for i in range(10)]

@@ -1,10 +1,11 @@
 with journey as (
     select
-        chain,
-        day_utc,
-        total_supply,
-        total_supply - issuer_inventory - placed_supply as circulating_supply
-    from {{ ref('mart_supply_journey') }}
+        d.chain,
+        d.day_utc,
+        coalesce(j.total_supply, 0) as total_supply,
+        coalesce(j.total_supply - j.issuer_inventory - j.placed_supply, 0) as circulating_supply
+    from {{ ref('int_chain_days') }} as d
+    left join {{ ref('mart_supply_journey') }} as j on j.chain = d.chain and j.day_utc = d.day_utc
 ),
 
 rolled as (
