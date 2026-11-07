@@ -16,17 +16,18 @@ Prefer a small system that's clearly correct over a big one that looks impressiv
 | Layer | Choice | Why |
 |---|---|---|
 | Language | Python 3.12, managed with uv | Standard for data work. Fast, reproducible installs |
-| Sources | JSON-RPC, Blockscout, Bridge transparency API, DefiLlama | Raw data, free where possible |
+| Sources | JSON-RPC, Blockscout, Bridge transparency API | Raw data, free where possible |
 | Warehouse | DuckDB file | Free, serverless, real SQL. Can move to Postgres or MotherDuck later |
 | Modeling | dbt with dbt-duckdb | Standard for analytics. Tests and lineage come with it |
 | Orchestration | Dagster assets, with asset checks | Asset model suits data work. Checks can block publishing |
-| Site | Static Next.js with TypeScript, Tailwind and Recharts, on Vercel's free tier | No database calls from visitors |
+| Site | Static Next.js with TypeScript, Tailwind and Recharts, on Vercel | No database calls from visitors |
+| Hosting | One Railway cron service runs the daily job and deploys a prebuilt Vercel preview; production is promoted by hand | One writer, one volume, nothing listening. See `docs/deploy.md` |
 | Site packages | pnpm, always through `npx` at the version in `web/package.json`'s `packageManager` | Needs only Node and npm, which CI already has. A bare or Corepack `pnpm` can crash |
 | Quality | ruff, mypy, pytest, sqlfluff, ESLint, Prettier, Vitest | Enforced by `make check` |
 
-**Cost:** designed to run on free tiers.
+**Cost:** a few dollars a month: one daily Railway run of about 35 minutes and a small volume. The site is static, on Vercel's free tier.
 
-**Known gap:** no cloud hosting in the first version. Hosted schedules can follow.
+**Hosted schedule:** Railway's cron runs `scripts/daily.sh` instead of the Dagster schedule, which stays off. The DuckDB files live on the service's volume, which has no backups: a lost volume is rebuilt from the chains, which takes hours because of Blockscout's rate limits.
 
 **No Dagster partitions (decision):** ingest is cursor-based and idempotent, and dbt rebuilds in seconds, so partitions would add a second backfill path that could disagree with the cursor. dbt runs as one asset for the same reason. A missed day is caught up by the next run, which reads from the cursor. Revisit only if a rebuild stops taking seconds.
 

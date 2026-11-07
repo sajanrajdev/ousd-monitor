@@ -121,7 +121,7 @@ Tested against real data on 2026-11-03 for Tempo and part of Ethereum: see `docs
 - **R2. Idempotent backfill:** re-running any range changes nothing.
 - **R3. Reorg handling:** store block hashes, re-check a lookback at the tip, and replace orphaned data. Use each chain's finality signal. Reorgs may be rare here, so test the logic with simulated reorgs and say so.
 - **R4. Modeling:** dbt from raw to staging to marts, with tests and documentation.
-- **R5. Orchestration:** one daily Dagster job, `make run`, with retries on source errors and an alert file on failure. The schedule ships stopped and is switched on by hand, because there is no hosted scheduler yet. Ingest is cursor-based and idempotent, so it doesn't use partitions (see `docs/architecture.md`).
+- **R5. Orchestration:** one daily Dagster job, `make run`, with retries on source errors and an alert file on failure. The Dagster schedule ships stopped; the hosted daily run is a Railway cron job that runs the same job (see `docs/deploy.md`). Ingest is cursor-based and idempotent, so it doesn't use partitions (see `docs/architecture.md`).
 - **R6. Reconciliation checks, which block publishing:** per chain, mints minus burns must equal `totalSupply()` at the same block, to the base unit, and balances must match `balanceOf` for sampled wallets. The chain total should match Bridge's figure within a stated timing tolerance.
 - **R7. Labels:** a versioned file with address, entity, source type, source and confidence for every label.
 - **R8. Freshness:** at least daily, with "data as of" visible. Show the last good data if a check fails.
@@ -152,13 +152,13 @@ Tested against real data on 2026-11-03 for Tempo and part of Ethereum: see `docs
 Binding detail is in `docs/architecture.md`.
 
 ```
-RPC (EVM, Solana) + Bridge API + DefiLlama
+RPC (EVM, Solana) + Blockscout + Bridge API
         | Python ingestion (idempotent, reorg-aware)
         v
 DuckDB: raw tables
         | dbt-duckdb: staging, then marts
         v
-Dagster: schedules, partitions, checks
+Dagster: one daily job, blocking checks
         | publish step, only if checks pass
         v
 JSON/CSV dataset, then static Next.js site on Vercel

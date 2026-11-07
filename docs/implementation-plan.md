@@ -9,8 +9,8 @@ Requirements (R1 to R16) are in `docs/PRD.md`. Structure is in `docs/architectur
 |---|---|
 | 1. Trustworthy core | Done |
 | 2. Insight models | Done |
-| 3. First public version | Done. Not deployed |
-| 4. Review and release | In progress: the dashboard refurbish, below |
+| 3. First public version | Done |
+| 4. Review and release | Done: released with a daily hosted run |
 | 5. After the first release | Not started |
 
 ## Phase 1: trustworthy core (done)
@@ -74,7 +74,7 @@ The data supports this for Tempo, and not yet for all chains: Base and Solana we
 
 **Result:** it builds and renders from a real dataset on a local build, and passes the browser acceptance checks at phone and desktop widths. The figures and the problems found are in `docs/build-log.md`. Nothing is deployed.
 
-## Phase 4: review and release (next)
+## Phase 4: review and release (done)
 
 **Before the review: dashboard refurbish.** On review, the maintainer found the site too wordy and not intuitive. This step turns the main page into a dashboard with legends, keeping every finding visible and changing no number. It comes first because the review should read the page people will see. The plan, with the acceptance checks for each unit, is `docs/plans/2026-11-04-002-dashboard-refurbish-plan.md`.
 
@@ -100,4 +100,4 @@ Then:
 
 ## Phase 5: after the first release
 
-Views C (partners), D (peers) and F (economics), the weekly note, CSV downloads and hosted schedules. Partners are named from public evidence only.
+Views C (partners), D (peers) and F (economics), the weekly note, and CSV downloads. Partners are named from public evidence only.

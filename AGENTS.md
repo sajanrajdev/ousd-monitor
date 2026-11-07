@@ -2,7 +2,7 @@
 
 An independent public dashboard that asks whether Open USD (OUSD) supply is turning into money that moves.
 
-Status: building. See `docs/implementation-plan.md`.
+Status: first public version. See `docs/implementation-plan.md`.
 
 ## Read first
 1. `docs/PRD.md`: why this exists, requirements and integrity rules.
