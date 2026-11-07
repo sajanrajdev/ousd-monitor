@@ -146,8 +146,25 @@ function assetsUnder(start: string): string[] {
 }
 
 describe("assets", () => {
-  it("has no image, font or SVG file under web/ other than the Fontsource packages", () => {
-    expect(assetsUnder(root)).toEqual([]);
+  // The favicon is the one image the site ships: our own mark, drawn from the same geometry.
+  const FAVICON_FILES = [join("/app", "favicon.ico"), join("/app", "icon.svg")];
+
+  it("has no image, font or SVG file under web/ other than the Fontsource packages and the favicon", () => {
+    expect(assetsUnder(root).sort()).toEqual(FAVICON_FILES);
+  });
+
+  it("draws the favicon from the header mark's geometry, in the palette's maroon and off-white", () => {
+    const mark = readFileSync(join(root, "components/mark.tsx"), "utf8");
+    const icon = readFileSync(join(root, "app/icon.svg"), "utf8");
+    for (const shape of [/<rect [^>]*\/>/, /<path [^>]*\/>/]) {
+      expect(icon.match(shape)?.[0].replace(/\s+/g, " ")).toBe(
+        mark.match(shape)?.[0].replace(/\s+/g, " "),
+      );
+    }
+    expect(icon).toContain('viewBox="0 0 24 24"');
+    expect(icon).toContain('stroke="#390922"');
+    expect(icon).toMatch(/prefers-color-scheme: dark[^}]*stroke: #f3e9e3/);
+    expect(icon).not.toMatch(/data:|<image|<text/);
   });
 
   it("isn't caught out by a leftover web/out, and still finds a real asset", () => {

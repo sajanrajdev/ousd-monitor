@@ -135,6 +135,10 @@ export function plantedReconciliationMain(
 }
 
 // The page's serialized copy, as Next writes it into the page, with an id no other chunk has.
+// The icon links as Next writes them into every page's head.
+export const ICON_LINKS =
+  '<link rel="icon" href="/favicon.ico?favicon.0dz8tk5r9bcx7.ico" sizes="32x32" type="image/x-icon"/><link rel="icon" href="/icon.svg?icon.1e3it3mngc49k.svg" sizes="any" type="image/svg+xml"/>';
+
 let nextFlightId = 0x1000;
 // The header as components/site-header.tsx writes it: the name, linking home, and Methodology.
 export const PLANTED_HEADER =
