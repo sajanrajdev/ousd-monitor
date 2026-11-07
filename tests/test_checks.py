@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import duckdb
 import pytest
-from dbt_helpers import DBT_DIR, build_marts
+from dbt_helpers import DBT_DIR, build_marts, failed_tests, run_dbt
 from ousd import checks, sources
 from ousd.chains import REQUIRED_CHAINS
 from ousd.decode import ZERO_ADDRESS, Transfer
@@ -660,17 +660,18 @@ HOLDER = "0x" + "a" * 40
 PAYEE = "0x" + "b" * 40
 OVERRIDES: dict[str, object] = {
     "placed_days": 2,
-    "placed_min_base_units": 30,
-    "large_transfer_base_units": 50,
+    "placed_min_base_units": 50,
+    "large_transfer_base_units": 55,
     "clean_tx_min_base_units": 7,
     "active_dust_base_units": 3,
-    "active_secondary_base_units": 70,
+    "active_secondary_base_units": 60,
 }
 
 
 def test_an_overridden_var_changes_the_models_and_what_the_checks_read_alike(tmp_path):
-    """The checks read the thresholds a build applied, not the project's, so an override shows in
-    both: here a two-day placed window and a $50-base-unit large transfer."""
+    """The checks read the thresholds a build applied, not the project's, so an override of each
+    shows both in what the checks read and in what the models did. At the project's values every
+    figure below would be empty or zero: these wallets are far below $1M and $1."""
 
     def transfer(block, day, sender, receiver, value):
         return Transfer(
@@ -688,21 +689,48 @@ def test_an_overridden_var_changes_the_models_and_what_the_checks_read_alike(tmp
         results = json.loads((tmp_path / "target" / "run_results.json").read_text())
         assert checks.built_thresholds(results) == OVERRIDES
         assert checks._threshold_problems(results, DBT_DIR / "dbt_project.yml", marts) == []
-        # The models applied the same values: still_value starts on the holder's third day, and
-        # the 60 moved on day 2 is large, not everyday.
+
+        def one(query):
+            return marts.execute(query).fetchone()
+
+        # placed_days: still_value starts on the holder's third day.
         still = marts.execute(
             "SELECT day_utc - DATE '2023-11-15', still_value FROM int_wallet_placed "
             "WHERE address = ? ORDER BY day_utc",
             [HOLDER],
         ).fetchall()
         assert still == [(0, None), (1, None), (2, 40), (3, 40), (4, 40)]
-        clean = marts.execute(
+        # placed_min_base_units: on day 4 the payee's 60 is placed and the holder's 40 is not.
+        assert one(
+            "SELECT placed_supply, placed_wallets FROM mart_supply_journey "
+            "WHERE day_utc = DATE '2023-11-19'"
+        ) == (60, 1)
+        # large_transfer_base_units and clean_tx_min_base_units: the 60 moved on day 2 is large,
+        # and it counts as a clean transfer.
+        assert one(
             "SELECT clean_large, clean_everyday, clean_tx_count FROM mart_activity_waterfall "
             "WHERE day_utc = DATE '2023-11-17'"
-        ).fetchone()
-        assert clean == (60, 0, 1)
+        ) == (60, 0, 1)
+        # active_dust_base_units and active_secondary_base_units: the holder sent 60 in the week.
+        assert one(
+            "SELECT active_wallets_7d, active_wallets_over_100_7d FROM mart_activity_kpis "
+            "WHERE day_utc = DATE '2023-11-19'"
+        ) == (1, 1)
     finally:
         marts.close()
+
+
+def test_a_fractional_threshold_fails_the_build(tmp_path):
+    """mart_build_params records whole base units, so a var the models would apply as a fraction
+    can't be recorded as another value."""
+    result = run_dbt(tmp_path, [], [], {}, dbt_vars={"placed_min_base_units": 1_000_000_000_000.5})
+    assert "assert_build_params_are_whole" in failed_tests(result)
+
+
+def test_an_empty_threshold_in_the_marts_is_not_read_as_any_value(world):
+    world.mart_sql("UPDATE mart_build_params SET active_dust_base_units = NULL")
+    detail = world.run_checks()["dbt_tests"].detail
+    assert "the marts' mart_build_params does not hold one row of every threshold" in detail
 
 
 def test_dbt_tests_fails_with_no_record_of_a_build(world):

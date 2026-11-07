@@ -46,7 +46,7 @@ _NARROWING_ARGS = ("select", "exclude", "selector", "resource_types", "exclude_r
 _PASSING_NODE = ("success", "pass")
 # The model that records a build's thresholds as one row, and the thresholds it records. Its
 # compiled SQL in dbt's record is what a build used: dbt_project.yml can change afterwards, with
-# nothing rebuilt.
+# nothing rebuilt. The model selects one column for each name here, from the var of that name.
 _BUILD_PARAMS_MODEL = "mart_build_params"
 _THRESHOLDS = (
     "placed_days",
@@ -56,6 +56,15 @@ _THRESHOLDS = (
     "active_dust_base_units",
     "active_secondary_base_units",
 )
+# Where that compiled SQL runs: no files, no extensions, and limits the SQL itself can't raise.
+_SANDBOX: dict[str, str | bool | int | float | list[str]] = {
+    "enable_external_access": False,
+    "autoinstall_known_extensions": False,
+    "autoload_known_extensions": False,
+    "threads": 1,
+    "memory_limit": "64MB",
+    "lock_configuration": True,
+}
 # Day-over-day change, in percent, above which a person should look. They never block.
 _SUPPLY_WARNING_PERCENT = 25
 _EVERYDAY_WARNING_PERCENT = 100
@@ -309,22 +318,26 @@ def sampled_balances(
     )
 
 
-def _threshold_row(connection: duckdb.DuckDBPyConnection, query: str) -> dict[str, int]:
-    """The one row of thresholds a query returns. It raises rather than guess at any other shape.
-    Names are matched whatever their case, as a formatter may change that."""
+def _threshold_row(connection: duckdb.DuckDBPyConnection, query: str, where: str) -> dict[str, int]:
+    """The one row of thresholds a query returns. It raises rather than guess at any other shape,
+    or at an empty value. Names are matched whatever their case, as a formatter may change that."""
     cursor = connection.execute(query)
     rows = cursor.fetchall()
     columns = [column[0].lower() for column in cursor.description or ()]
+    problem = f"{where} does not hold one row of every threshold"
     if len(rows) != 1 or not set(_THRESHOLDS) <= set(columns):
-        raise ValueError(f"{_BUILD_PARAMS_MODEL} does not hold one row of every threshold")
+        raise ValueError(problem)
     row = dict(zip(columns, rows[0], strict=True))
-    return {name: int(row[name]) for name in _THRESHOLDS}
+    try:
+        return {name: int(row[name]) for name in _THRESHOLDS}
+    except (TypeError, ValueError) as exc:
+        raise ValueError(problem) from exc
 
 
 def built_thresholds(results: Mapping[str, Any]) -> dict[str, int]:
     """The thresholds a build really used: its mart_build_params SQL as dbt compiled it, run on its
     own. That SQL selects only the project's vars, so it needs no data, and how it is laid out
-    can't change what it returns. It runs where it can't read or write a file."""
+    can't change what it returns. It runs where it can't read or write a file, or load anything."""
     compiled = [
         node.get("compiled_code") or ""
         for node in results.get("results", [])
@@ -333,11 +346,12 @@ def built_thresholds(results: Mapping[str, Any]) -> dict[str, int]:
     ]
     if len(compiled) != 1:
         raise ValueError(f"the dbt build record does not show one {_BUILD_PARAMS_MODEL}")
-    sandbox = duckdb.connect(":memory:", config={"enable_external_access": False})
+    record = f"the dbt build record of {_BUILD_PARAMS_MODEL}"
+    sandbox = duckdb.connect(":memory:", config=_SANDBOX)
     try:
-        return _threshold_row(sandbox, compiled[0])
+        return _threshold_row(sandbox, compiled[0], record)
     except duckdb.Error as exc:
-        raise ValueError(f"the dbt build record of {_BUILD_PARAMS_MODEL} does not run") from exc
+        raise ValueError(f"{record} does not run") from exc
     finally:
         sandbox.close()
 
@@ -352,7 +366,9 @@ def _threshold_problems(
     except ValueError as exc:
         return [str(exc)]
     try:
-        stored = _threshold_row(marts, f"SELECT * FROM {_BUILD_PARAMS_MODEL}")
+        stored = _threshold_row(
+            marts, f"SELECT * FROM {_BUILD_PARAMS_MODEL}", f"the marts' {_BUILD_PARAMS_MODEL}"
+        )
     except duckdb.CatalogException:
         return [f"marts have no {_BUILD_PARAMS_MODEL}"]
     except ValueError as exc:

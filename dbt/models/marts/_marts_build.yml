@@ -5,9 +5,10 @@ models:
       contract: {enforced: true}
     description: >
       The thresholds the marts were built with, from the project's vars and any `--vars` on the
-      build. The blocking checks compare it with `dbt_project.yml` and publish describes the
-      dataset from it, so neither has to read a threshold out of another model's SQL. Not
-      published as a table. Grain: exactly one row.
+      build. The blocking checks and publish run this model's compiled SQL from dbt's record of
+      the build, so neither has to read a threshold out of another model's SQL, and the checks
+      also need this table to hold the same row. Not published as a table. Grain: exactly one
+      row.
     columns:
       - name: placed_days
         data_type: integer
