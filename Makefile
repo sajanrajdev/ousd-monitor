@@ -44,8 +44,10 @@ reconcile:
 	uv run --locked $(ENV_FILE) ousd reconcile
 
 # Publish runs after a failed check too: it refuses by itself, and marks the last good dataset
-# stale. Only a database in use (exit 2) stops here, as that says nothing about the data. .env is
-# for the database path, as neither step uses a key.
+# stale. Only exit 2 stops here, as it says nothing about the data: another process holds the
+# database (readers share it only with readers), or its schema doesn't match the code, as when
+# migrations are pending: run `ousd migrate`.
+# .env is for the database path, as neither step uses a key.
 publish:
 	run_id=$${RUN_ID:-$$(date -u +%Y%m%dT%H%M%SZ)}; \
 	uv run --locked $(ENV_FILE) ousd check --run-id "$$run_id"; \

@@ -252,6 +252,54 @@ def test_a_schema_newer_than_the_code_is_refused_by_writer_and_reader(current):
             Store(current, read_only=read_only)
 
 
+@pytest.mark.parametrize("version", [0, 1])
+def test_a_migration_recorded_under_another_name_is_refused_by_writer_and_reader(current, version):
+    db = duckdb.connect(str(current))
+    db.execute("UPDATE schema_migrations SET name = 'elsewhere' WHERE version = ?", [version])
+    db.close()
+
+    for read_only in (False, True):
+        with pytest.raises(SchemaOutOfDate, match=rf"{version} as 'elsewhere', not"):
+            Store(current, read_only=read_only)
+    db = duckdb.connect(str(current), read_only=True)
+    assert len(_versions(db)) == len(MIGRATIONS)
+    db.close()
+
+
+def test_a_pending_migration_under_another_name_is_refused_before_anything_is_applied(
+    current, monkeypatch
+):
+    # The database recorded 1 under another name and lacks 2: nothing of 2 may be applied.
+    later = Migration(LATEST + 1, "later", ("CREATE TABLE later (x INTEGER)",))
+    db = duckdb.connect(str(current))
+    db.execute("UPDATE schema_migrations SET name = 'elsewhere' WHERE version = 1")
+    db.close()
+    monkeypatch.setattr(migrations, "MIGRATIONS", (*MIGRATIONS, later))
+    monkeypatch.setattr(migrations, "LATEST", later.version)
+
+    with pytest.raises(SchemaOutOfDate, match="elsewhere"):
+        Store(current)
+    db = duckdb.connect(str(current), read_only=True)
+    assert not _has_table(db, "later")
+    db.close()
+
+
+def test_what_is_pending_is_read_inside_the_transaction_that_applies_it(
+    pre_migrations, monkeypatch
+):
+    real, seen = migrations.pending, []
+
+    def spy(db):
+        # Outside a transaction, each statement is its own, with its own id.
+        ids = [db.execute("SELECT txid_current()").fetchone() for _ in range(2)]
+        seen.append(ids[0] == ids[1])
+        return real(db)
+
+    monkeypatch.setattr(migrations, "pending", spy)
+    Store(pre_migrations).close()
+    assert seen == [True]
+
+
 # Read-only
 
 
@@ -306,7 +354,7 @@ def _open_elsewhere(path, read_only):
     return subprocess.run(command, capture_output=True, check=False).returncode
 
 
-def test_a_reader_takes_no_writer_lock(current):
+def test_a_reader_shares_the_file_with_readers_never_with_a_writer(current):
     reader = Store(current, read_only=True)
     try:
         assert _open_elsewhere(current, read_only=True) == 0
@@ -347,8 +395,18 @@ def test_migrate_refuses_a_schema_newer_than_the_code(current, monkeypatch, caps
     db.execute("INSERT INTO schema_migrations (version, name) VALUES (?, 'later')", [LATEST + 1])
     db.close()
     monkeypatch.setenv("OUSD_DB_PATH", str(current))
-    assert cli.main(["migrate"]) == 1
+    # Not a verdict on the data, so exit 2, as from check and publish.
+    assert cli.main(["migrate"]) == 2
     assert "newer than this code" in capsys.readouterr().err
+
+
+def test_migrate_refuses_a_migration_recorded_under_another_name(current, monkeypatch, capsys):
+    db = duckdb.connect(str(current))
+    db.execute("UPDATE schema_migrations SET name = 'elsewhere' WHERE version = 1")
+    db.close()
+    monkeypatch.setenv("OUSD_DB_PATH", str(current))
+    assert cli.main(["migrate"]) == 2
+    assert "1 as 'elsewhere', not 'reconciliations_run_id'" in capsys.readouterr().err
 
 
 def test_migrate_in_use_exits_two(current, monkeypatch, capsys):

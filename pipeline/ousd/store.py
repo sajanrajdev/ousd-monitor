@@ -112,8 +112,9 @@ def _text(value: int | None) -> str | None:
 
 class Store:
     def __init__(self, path: str | Path = ":memory:", *, read_only: bool = False) -> None:
-        """A writer applies any pending migrations. A reader runs no DDL and takes no writer lock,
-        so it refuses a database with migrations pending, and a missing file."""
+        """A writer applies any pending migrations. A reader runs no DDL and never writes, so it
+        refuses a database with migrations pending, and a missing file. Readers can share the file
+        with other readers, never with a writer: DuckDB locks it either way."""
         if read_only and path == ":memory:":
             raise ValueError("an in-memory database can't be opened read-only")
         if path != ":memory:" and not read_only:
@@ -520,6 +521,11 @@ class Store:
             raise KeyError(f"no unfinished run {run_id}")
         if self._run_id == run_id:
             self._run_id = None
+
+    def leave_run(self) -> None:
+        """Stop filing reconciliations under the open run, finished or not. A run that raised
+        stays unfinished, and nothing recorded later on this connection is filed under it."""
+        self._run_id = None
 
     def record_check(
         self,

@@ -432,10 +432,17 @@ def test_every_published_reconciliation_row_must_be_the_gate_run(world, tamper, 
         world.publish()
 
 
+def _without_run_id(world, migrated_at: datetime) -> None:
+    """Every reconciliation as if written with no run_id, and migration 1 applied at that time.
+    The world's reconciliations were checked at RECONCILED_AT."""
+    world.raw_sql("UPDATE reconciliations SET run_id = NULL")
+    world.raw_sql("UPDATE schema_migrations SET applied_at = ? WHERE version = 1", [migrated_at])
+
+
 @pytest.mark.parametrize("filed", [True, False], ids=["run_id", "before_run_id"])
 def test_a_run_that_crashed_with_the_same_figures_does_not_take_over_the_numbers(world, filed):
     if not filed:
-        world.raw_sql("UPDATE reconciliations SET run_id = NULL")
+        _without_run_id(world, RECONCILED_AT + timedelta(days=1))
     with world.store() as store:
         crashed = store.start_run("full")
         for row in store.db.execute(
@@ -470,14 +477,38 @@ def test_a_chain_row_is_attributed_by_its_run_id_before_any_figure_match(world):
         world.publish()
 
 
+def test_a_chain_row_filed_under_a_run_that_never_proved_its_figures_has_no_run(world):
+    # Filed under the gate run, with figures that run's supply check never passed.
+    world.raw_sql(
+        "UPDATE reconciliations SET minted = minted + 1, onchain_supply = onchain_supply + 1 "
+        "WHERE chain = 'tempo'"
+    )
+    world.mart_sql(
+        "UPDATE mart_reconciliation SET event_value = event_value + 1, "
+        "reference_value = reference_value + 1 WHERE kind = 'chain' AND subject = 'tempo'"
+    )
+    world.run_checks()
+    with pytest.raises(PublishRefused, match=r"not from run .* for: tempo$"):
+        world.publish()
+
+
 def test_chain_rows_from_before_run_id_fall_back_to_their_supply_check(world):
     with world.store() as store:
         run_id = store.latest_reconciliation().run_id
-    world.raw_sql("UPDATE reconciliations SET run_id = NULL")
+    _without_run_id(world, RECONCILED_AT + timedelta(seconds=1))
     world.run_checks()
     rows = read_json(world.publish(), "reconciliation.json")["data"]
     assert {row["run_id"] for row in rows} == {run_id}
     assert all(row["in_latest_run"] is True for row in rows)
+
+
+@pytest.mark.parametrize("migrated", [timedelta(0), -timedelta(seconds=1)], ids=["at", "before"])
+def test_chain_rows_without_run_id_checked_after_migration_one_have_no_run(world, migrated):
+    # Written once run_id existed, yet outside any run: no run proved them.
+    _without_run_id(world, RECONCILED_AT + migrated)
+    world.run_checks()
+    with pytest.raises(PublishRefused, match="not from run"):
+        world.publish()
 
 
 @pytest.mark.parametrize("other", ["elsewhere", None], ids=["two_runs", "run_and_none"])

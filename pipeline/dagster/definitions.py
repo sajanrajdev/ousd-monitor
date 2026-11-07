@@ -31,6 +31,7 @@ from ousd.checks import (
 )
 from ousd.http import PoliteClient
 from ousd.ingest import sync_chain
+from ousd.migrations import SchemaOutOfDate
 from ousd.probes import build_probes, history_for, rpc_for, solana_rpc_for
 from ousd.publish import DEFAULT_PUBLISHED_DIR, mark_stale, publish
 from ousd.reconcile import FULL_SCOPE, ChainProbe, RunResult, run_reconciliation
@@ -120,6 +121,9 @@ def _open_store(pipeline: Pipeline) -> Store:
         raise dg.Failure(
             "the raw database is in use or cannot be opened", allow_retries=False
         ) from None
+    except SchemaOutOfDate as exc:
+        # A retry meets the same schema. The message names versions only, never the path.
+        raise dg.Failure(str(exc), allow_retries=False) from None
 
 
 def _refuse(pipeline: Pipeline, context: dg.AssetExecutionContext, reason: str) -> None:

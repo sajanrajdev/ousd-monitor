@@ -360,8 +360,9 @@ def _migrate() -> int:
     try:
         applied = migrate(db)
     except SchemaOutOfDate as newer:
+        # Not a verdict on the data, so not exit 1, as with check and publish.
         print(f"error: {newer}", file=sys.stderr)
-        return 1
+        return 2
     finally:
         db.close()
     for migration in applied:

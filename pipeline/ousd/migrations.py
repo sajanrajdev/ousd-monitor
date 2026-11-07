@@ -175,38 +175,46 @@ MIGRATIONS: tuple[Migration, ...] = (
 LATEST = MIGRATIONS[-1].version
 
 
-def applied_versions(db: duckdb.DuckDBPyConnection) -> set[int]:
-    """Versions recorded as applied. A database without the table has applied none."""
+def applied(db: duckdb.DuckDBPyConnection) -> dict[int, str]:
+    """Each version recorded as applied, with its recorded name. A database without the table has
+    applied none."""
     exists = db.execute(
         "SELECT count(*) FROM duckdb_tables() "
         "WHERE database_name = current_database() AND schema_name = 'main' "
         "AND table_name = 'schema_migrations'"
     ).fetchone()
     if not exists or exists[0] == 0:
-        return set()
-    return {v for (v,) in db.execute("SELECT version FROM schema_migrations").fetchall()}
+        return {}
+    return dict(db.execute("SELECT version, name FROM schema_migrations").fetchall())
 
 
 def pending(db: duckdb.DuckDBPyConnection) -> list[Migration]:
-    """Migrations this database still needs, in order. Refuses a schema newer than this code."""
-    applied = applied_versions(db)
-    if applied and max(applied) > LATEST:
+    """Migrations this database still needs, in order. Refuses a schema newer than this code, and
+    a recorded version whose name isn't this code's, as that database took a different path."""
+    recorded = applied(db)
+    if recorded and max(recorded) > LATEST:
         raise SchemaOutOfDate(
-            f"the raw database is at schema version {max(applied)}, newer than this code's "
+            f"the raw database is at schema version {max(recorded)}, newer than this code's "
             f"{LATEST}; update the code before opening it"
         )
-    return [migration for migration in MIGRATIONS if migration.version not in applied]
+    names = {migration.version: migration.name for migration in MIGRATIONS}
+    if differ := sorted(v for v, name in recorded.items() if names.get(v) != name):
+        versions = ", ".join(f"{v} as {recorded[v]!r}, not {names.get(v)!r}" for v in differ)
+        raise SchemaOutOfDate(
+            f"the raw database recorded schema migrations {versions}; its schema isn't the one "
+            "this code's migrations make, so it isn't opened"
+        )
+    return [migration for migration in MIGRATIONS if migration.version not in recorded]
 
 
 def migrate(db: duckdb.DuckDBPyConnection) -> list[Migration]:
-    """Apply every pending migration in one transaction, and return them. None pending is a no-op
-    that writes nothing."""
-    todo = pending(db)
-    if not todo:
-        return []
+    """Apply every pending migration in one transaction, and return them. None pending writes
+    nothing. What's pending is read inside the transaction, so it is what gets applied."""
     db.begin()
     try:
-        db.execute(VERSION_TABLE)
+        todo = pending(db)
+        if todo:
+            db.execute(VERSION_TABLE)
         for migration in todo:
             for statement in migration.statements:
                 db.execute(statement)

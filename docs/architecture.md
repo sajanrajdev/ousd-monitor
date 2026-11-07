@@ -91,10 +91,10 @@ Provider differences stay inside `sources`. Everything after that works on norma
 
 - **Every change to the raw store's schema is a new migration** at the end of `MIGRATIONS` in `pipeline/ousd/migrations.py`, numbered one above the last. A migration that has shipped is never edited, because a database that applied it would never see the edit.
 - `schema_migrations` records each applied version, its name and when. Version 0 is the baseline, the schema as it stood before versioning: a database without the table is brought to it in place, adding only what it lacks.
-- A writer applies whatever is pending in one transaction when it opens the store. With nothing pending it writes nothing. A schema newer than the code is refused.
-- Readers (`Store(path, read_only=True)`) run no DDL and take no writer lock. With migrations pending they refuse, and say to run `ousd migrate` or any writer first.
+- A writer reads what is pending and applies it in one transaction when it opens the store. With nothing pending it writes nothing. Every open refuses a schema newer than the code, and a database whose recorded migration names differ from the code's.
+- Readers (`Store(path, read_only=True)`) run no DDL and never write. They can share the file with other readers, never with a writer: DuckDB locks the file for readers too. With migrations pending they refuse, and say to run `ousd migrate` or any writer first.
 - Keep migrations additive where tables are large. `ALTER TABLE ... ADD COLUMN` is cheap in DuckDB; never rewrite `transfers`, which holds millions of rows.
-- Rows from before a column existed keep NULL, and the code that reads the column says how it treats them. `reconciliations.run_id` (migration 1) is NULL on older rows, so publish matches their figures to a finished run's supply check, as it did before the column existed.
+- Rows from before a column existed keep NULL, and the code that reads the column says how it treats them. `reconciliations.run_id` (migration 1) is NULL on older rows. publish matches their figures to a finished run's supply check, as it did before the column existed, but only for a row checked before migration 1 was applied. A NULL row checked later belongs to no run, and publish refuses it. A row with a `run_id` counts for that run only when the run's own passing supply check has the same pin and figures.
 
 ## Blocking checks
 
@@ -181,6 +181,6 @@ The pipeline commands:
 | `make run` | `ousd_daily` in one process: ingest, reconcile, dbt, checks, publish |
 | `make dagster-dev` | The Dagster UI, where the schedule and failure sensor can be switched on |
 
-Run one writer at a time: each of these writes to `data/ousd.duckdb`, and the second to start exits 2 with "database in use". `ousd publish` only reads it. `ousd check` reads it, then holds the writer lock only for the one write that records its results. `ousd migrate` applies pending schema migrations without a key.
+Run one writer at a time: each of these writes to `data/ousd.duckdb`, and the second to start exits 2 with "database in use". `ousd publish` only reads it. `ousd check` reads it, then opens it as a writer only for the one write that records its results. Readers can share the file with each other but never with a writer, so a reader started while a writer runs exits 2 too, and so does a writer started while a reader runs. Exit 2 from `ousd check`, `ousd publish` or `ousd migrate` can also mean the schema doesn't match the code: migrations are pending (run `ousd migrate`, which needs no key) or the database is newer than the code.
 
 If Node or npm is missing or out of range, the site's steps fail with a message saying what to install. They never skip, and they never load `.env`.

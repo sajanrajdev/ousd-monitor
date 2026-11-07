@@ -255,9 +255,21 @@ def _chain_role_rows(tables: Mapping[str, Sequence[Mapping[str, Any]]]) -> list[
     return _by_chain_and_day(rows)
 
 
+# A chain_supply check of a finished run that passed at the row's pin with the row's figures.
+_PROVEN_BY = """
+    SELECT c.run_id
+    FROM reconciliation_checks AS c
+    INNER JOIN reconciliation_runs AS r ON r.run_id = c.run_id
+    WHERE c.check_name = 'chain_supply' AND c.subject = ? AND c.status = 'pass'
+      AND c.pin_height = ? AND r.finished_at IS NOT NULL
+      AND c.reference_value = CAST(? AS HUGEINT) AND c.observed_value = CAST(? AS HUGEINT)
+"""
+
+
 def _run_of_chain_row(store: Store, row: Mapping[str, Any]) -> str | None:
-    """The run its `reconciliations` row was filed under. Only one that predates run_id falls back
-    to the finished run that recorded its figures in a supply check. None when unclear."""
+    """The run its `reconciliations` row was filed under, when that run proved its figures in a
+    supply check. Only a row written before run_id existed falls back to the finished run that
+    proved its figures. None when unclear."""
     recorded: set[str | None] = {
         run_id
         for (run_id,) in store.db.execute(
@@ -279,19 +291,26 @@ def _run_of_chain_row(store: Store, row: Mapping[str, Any]) -> str | None:
         # No such row, or rows filed under different runs: no run can be named.
         return None
     (run_id,) = recorded
+    figures = [
+        row["subject"],
+        row["block_number"],
+        str(row["reference_value"]),
+        str(row["event_value"]),
+    ]
     if run_id is not None:
-        return run_id
+        found = store.db.execute(
+            _PROVEN_BY + " AND c.run_id = ? LIMIT 1", [*figures, run_id]
+        ).fetchone()
+        return run_id if found else None
+    # Without a run_id, only a row checked before migration 1 added the column may fall back. A
+    # later one was written outside any run, so it is no run's.
     found = store.db.execute(
-        """
-        SELECT c.run_id
-        FROM reconciliation_checks AS c
-        INNER JOIN reconciliation_runs AS r ON r.run_id = c.run_id
-        WHERE c.check_name = 'chain_supply' AND c.subject = ? AND c.status = 'pass'
-          AND c.pin_height = ? AND r.finished_at IS NOT NULL
-          AND c.reference_value = CAST(? AS HUGEINT) AND c.observed_value = CAST(? AS HUGEINT)
+        _PROVEN_BY
+        + """
+          AND ? < (SELECT applied_at FROM schema_migrations WHERE version = 1)
         ORDER BY c.recorded_at DESC, c.attempt DESC LIMIT 1
         """,
-        [row["subject"], row["block_number"], str(row["reference_value"]), str(row["event_value"])],
+        [*figures, row["checked_at"]],
     ).fetchone()
     return found[0] if found else None
 
