@@ -117,6 +117,19 @@ describe("stale state", () => {
     expect(loadDatasetFiles(at(dir)).files.stale).toBeNull();
   });
 
+  it.each([
+    ["both", ["stale_since", "stale_reason"]],
+    ["stale_since", ["stale_since"]],
+    ["stale_reason", ["stale_reason"]],
+  ])("a stale version 2 manifest without %s fails rather than loading as current", (_, gone) => {
+    const message = editedFailure("manifest.json", (manifest) => {
+      asVersion2(manifest, "a check failed");
+      for (const field of gone) manifest[field] = null;
+    });
+    expect(message).toMatch(/^manifest\.json: /);
+    expect(message).not.toContain("a check failed");
+  });
+
   it("stale.json beside a version 2 manifest wins over the manifest's own fields", () => {
     const dir = copySample("complete");
     editJson(dir, "manifest.json", (manifest) => asVersion2(manifest));

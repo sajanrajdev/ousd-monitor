@@ -358,8 +358,16 @@ function readStale(
   }
   if (manifest.schema_version === 2 && manifest.stale) {
     const { stale_since, stale_reason } = manifest;
-    // The version 2 schema requires both once stale.
-    if (stale_since !== null && stale_reason !== null) return { stale_since, stale_reason };
+    // The version 2 schema requires both once stale. Should one ever pass without them, the
+    // folder fails to load rather than reading as current.
+    if (stale_since === null || stale_reason === null) {
+      throw new DatasetError(
+        "manifest.json",
+        "stale",
+        "is true without stale_since and stale_reason",
+      );
+    }
+    return { stale_since, stale_reason };
   }
   return null;
 }

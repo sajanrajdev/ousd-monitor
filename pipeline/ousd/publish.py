@@ -866,13 +866,6 @@ def _git_commit() -> tuple[str, str]:
     return supplied, "unknown"
 
 
-def _sha256_of(path: Path, what: str) -> str:
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError as exc:
-        raise PublishRefused(f"cannot read {what}, so this dataset couldn't be traced") from exc
-
-
 def _installed(package: str) -> str:
     try:
         return metadata.version(package)
@@ -882,19 +875,48 @@ def _installed(package: str) -> str:
         ) from exc
 
 
+def _read_traced(path: Path, what: str) -> bytes:
+    try:
+        return path.read_bytes()
+    except OSError as exc:
+        raise PublishRefused(f"cannot read {what}, so this dataset couldn't be traced") from exc
+
+
+def _invocation_id(raw: bytes, what: str) -> str:
+    try:
+        found = json.loads(raw)["metadata"]["invocation_id"]
+    except (ValueError, TypeError, KeyError):
+        found = None
+    if not isinstance(found, str) or not found:
+        raise PublishRefused(f"{what} names no dbt invocation, so this dataset couldn't be traced")
+    return found
+
+
+def _dbt_manifest_sha256(sources: Sources) -> str:
+    """The compiled dbt manifest's hash, once its invocation is shown to be the one in run_results,
+    so a manifest left by another dbt command can't be recorded as this build's."""
+    what = "the compiled dbt manifest"
+    raw = _read_traced(sources.run_results.with_name("manifest.json"), what)
+    built = _invocation_id(raw, what)
+    checked = _invocation_id(
+        _read_traced(sources.run_results, "dbt's run results"), "dbt's run results"
+    )
+    if built != checked:
+        raise PublishRefused(f"{what} is from another dbt invocation than the run results")
+    return hashlib.sha256(raw).hexdigest()
+
+
 def _provenance(tree_state: str, store: Store, sources: Sources) -> dict[str, Any]:
     """What else built this dataset, beside the commit. The dbt manifest is the one beside
-    run_results, which the checks read."""
+    run_results, which the checks read, and from the same dbt invocation."""
     return {
         "tree_state": tree_state,
-        "uv_lock_sha256": _sha256_of(UV_LOCK, "uv.lock"),
+        "uv_lock_sha256": hashlib.sha256(_read_traced(UV_LOCK, "uv.lock")).hexdigest(),
         "python_version": platform.python_version(),
         "dbt_core_version": _installed("dbt-core"),
         "dbt_duckdb_version": _installed("dbt-duckdb"),
         "raw_schema_version": max(applied(store.db), default=0),
-        "dbt_manifest_sha256": _sha256_of(
-            sources.run_results.with_name("manifest.json"), "the compiled dbt manifest"
-        ),
+        "dbt_manifest_sha256": _dbt_manifest_sha256(sources),
     }
 
 

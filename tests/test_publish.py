@@ -228,6 +228,41 @@ def test_without_the_compiled_dbt_manifest_publish_refuses(world):
     assert not world.out.exists()
 
 
+def _set_invocation(path, invocation):
+    built = json.loads(path.read_text())
+    if invocation is None:
+        del built["metadata"]["invocation_id"]
+    else:
+        built["metadata"]["invocation_id"] = invocation
+    path.write_text(json.dumps(built))
+
+
+def test_a_dbt_manifest_from_another_invocation_is_refused(world):
+    world.run_checks()
+    _set_invocation(world.path / "target" / "manifest.json", "another-invocation")
+    with pytest.raises(PublishRefused, match="from another dbt invocation") as refused:
+        world.publish()
+    assert str(world.path) not in str(refused.value)
+    assert not world.out.exists()
+
+
+def test_a_dbt_manifest_without_its_invocation_is_refused(world):
+    world.run_checks()
+    _set_invocation(world.path / "target" / "manifest.json", None)
+    with pytest.raises(PublishRefused, match="names no dbt invocation") as refused:
+        world.publish()
+    assert str(world.path) not in str(refused.value)
+    assert not world.out.exists()
+
+
+@pytest.mark.parametrize("name", ["manifest.json", "run_results.json"])
+def test_provenance_needs_both_dbt_invocations(world, name):
+    """The checks already refuse run_results without its invocation, so this asks provenance."""
+    _set_invocation(world.path / "target" / name, None)
+    with world.store() as store, pytest.raises(PublishRefused, match="names no dbt invocation"):
+        publisher._provenance("clean", store, world.sources)
+
+
 def test_without_dbt_installed_publish_refuses(world, monkeypatch):
     def missing(package):
         raise publisher.metadata.PackageNotFoundError(package)
