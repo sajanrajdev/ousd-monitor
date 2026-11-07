@@ -104,6 +104,16 @@ _NET = (
     " - (CASE WHEN to_address = $zero THEN value ELSE 0 END)"
 )
 
+# A chain_supply check of a finished run that passed at the row's pin with the row's figures.
+_PROVEN_BY = """
+    SELECT c.run_id
+    FROM reconciliation_checks AS c
+    INNER JOIN reconciliation_runs AS r ON r.run_id = c.run_id
+    WHERE c.check_name = 'chain_supply' AND c.subject = ? AND c.status = 'pass'
+      AND c.pin_height = ? AND r.finished_at IS NOT NULL
+      AND c.reference_value = CAST(? AS HUGEINT) AND c.observed_value = CAST(? AS HUGEINT)
+"""
+
 
 @contextlib.contextmanager
 def checkpointed(path: str | Path) -> Iterator[BinaryIO]:
@@ -792,6 +802,160 @@ class Store:
                 [run_id],
             ).fetchall()
         ]
+
+    # Reads for the blocking checks and publish. Each returns its query's rows as DuckDB gives them,
+    # so the caller decides what an empty answer means.
+
+    def newest_supply_check(self, chain: str) -> tuple[Any, ...] | None:
+        """(status, pin_height, reference_value, observed_value) of the newest chain_supply row."""
+        return self.db.execute(
+            """
+            SELECT status, pin_height, reference_value, observed_value
+            FROM reconciliation_checks
+            WHERE check_name = 'chain_supply' AND subject = ?
+            ORDER BY recorded_at DESC, attempt DESC LIMIT 1
+            """,
+            [chain],
+        ).fetchone()
+
+    def final_bridge_check(self, run_id: str) -> tuple[Any, ...] | None:
+        """(status, reference_value, observed_value) of the run's last Bridge attempt."""
+        return self.db.execute(
+            """
+            SELECT status, reference_value, observed_value FROM reconciliation_checks
+            WHERE run_id = ? AND check_name = 'bridge'
+            ORDER BY attempt DESC LIMIT 1
+            """,
+            [run_id],
+        ).fetchone()
+
+    def newest_bridge_comparison(self, run_id: str) -> tuple[Any, ...] | None:
+        """(passed, tolerance, chains_total, bridge_total, chains_missing) of the run's newest."""
+        return self.db.execute(
+            """
+            SELECT passed, tolerance, chains_total, bridge_total, chains_missing
+            FROM bridge_comparisons WHERE run_id = ?
+            ORDER BY checked_at DESC LIMIT 1
+            """,
+            [run_id],
+        ).fetchone()
+
+    def newest_run_with_samples(self, chain: str) -> tuple[Any, ...] | None:
+        """(run_id,) of the newest finished run that recorded balance samples for the chain."""
+        return self.db.execute(
+            """
+            SELECT r.run_id FROM reconciliation_runs AS r
+            WHERE r.finished_at IS NOT NULL AND EXISTS (
+                SELECT 1 FROM balance_samples AS s WHERE s.run_id = r.run_id AND s.chain = ?
+            )
+            ORDER BY r.finished_at DESC, r.started_at DESC, r.run_id DESC LIMIT 1
+            """,
+            [chain],
+        ).fetchone()
+
+    def final_sampled_balances(self, run_id: str, chain: str) -> tuple[Any, ...] | None:
+        """(status,) of the run's last sampled_balances attempt on the chain."""
+        return self.db.execute(
+            """
+            SELECT status FROM reconciliation_checks
+            WHERE run_id = ? AND check_name = 'sampled_balances' AND subject = ?
+            ORDER BY attempt DESC LIMIT 1
+            """,
+            [run_id, chain],
+        ).fetchone()
+
+    def newest_samples(self, run_id: str, chain: str) -> list[tuple[Any, ...]]:
+        """(address, height, observed_balance) of each wallet's newest reading in the run."""
+        return self.db.execute(
+            """
+            SELECT address, height, observed_balance
+            FROM balance_samples
+            WHERE run_id = ? AND chain = ?
+            QUALIFY row_number() OVER (PARTITION BY address ORDER BY attempt DESC) = 1
+            """,
+            [run_id, chain],
+        ).fetchall()
+
+    def transfer_extent(self, chain: str) -> tuple[Any, ...] | None:
+        """(highest block, row count) of the chain's stored transfers."""
+        return self.db.execute(
+            "SELECT max(block_number), count(*) FROM transfers WHERE chain = ?", [chain]
+        ).fetchone()
+
+    def newest_transfer_timestamp(self, chain: str) -> tuple[Any, ...] | None:
+        """(unix seconds,) of the chain's newest stored transfer, NULL with none."""
+        return self.db.execute(
+            "SELECT max(block_timestamp) FROM transfers WHERE chain = ?", [chain]
+        ).fetchone()
+
+    def newest_transfer_timestamps(self) -> list[tuple[Any, ...]]:
+        """(chain, unix seconds) of each chain's newest stored transfer."""
+        return self.db.execute(
+            "SELECT chain, max(block_timestamp) FROM transfers GROUP BY chain"
+        ).fetchall()
+
+    def newest_finished_supply_check(self, chain: str) -> tuple[Any, ...] | None:
+        """(naive UTC time,) of the chain's newest chain_supply row in a finished run."""
+        return self.db.execute(
+            """
+            SELECT max(c.recorded_at) AT TIME ZONE 'UTC'
+            FROM reconciliation_checks AS c
+            INNER JOIN reconciliation_runs AS r ON r.run_id = c.run_id
+            WHERE c.check_name = 'chain_supply' AND c.subject = ? AND r.finished_at IS NOT NULL
+            """,
+            [chain],
+        ).fetchone()
+
+    def reconciliation_run_ids(
+        self,
+        chain: str,
+        block_number: int,
+        checked_at: datetime,
+        onchain_supply: str,
+        event_supply: str,
+    ) -> list[tuple[Any, ...]]:
+        """(run_id,) of each `reconciliations` row with these figures, checked at that time."""
+        return self.db.execute(
+            """
+            SELECT run_id FROM reconciliations
+            WHERE chain = ? AND block_number = ? AND checked_at = ?
+              AND onchain_supply = CAST(? AS HUGEINT) AND minted - burned = CAST(? AS HUGEINT)
+            """,
+            [chain, block_number, checked_at, onchain_supply, event_supply],
+        ).fetchall()
+
+    def supply_proof_in_run(
+        self, chain: str, pin_height: int, reference: str, observed: str, run_id: str
+    ) -> tuple[Any, ...] | None:
+        """(run_id,) when that finished run passed a supply check with these figures at the pin."""
+        return self.db.execute(
+            _PROVEN_BY + " AND c.run_id = ? LIMIT 1",
+            [chain, pin_height, reference, observed, run_id],
+        ).fetchone()
+
+    def supply_proof_before_run_ids(
+        self, chain: str, pin_height: int, reference: str, observed: str, checked_at: datetime
+    ) -> tuple[Any, ...] | None:
+        """(run_id,) of the newest finished run that passed a supply check with these figures at
+        the pin, only for a time before migration 1 added `reconciliations.run_id`."""
+        return self.db.execute(
+            _PROVEN_BY
+            + """
+              AND ? < (SELECT applied_at FROM schema_migrations WHERE version = 1)
+            ORDER BY c.recorded_at DESC, c.attempt DESC LIMIT 1
+            """,
+            [chain, pin_height, reference, observed, checked_at],
+        ).fetchone()
+
+    def transfer_positions(
+        self, chain: str, first_block: int, last_block: int
+    ) -> list[tuple[Any, ...]]:
+        """(tx_hash, log_index) of every stored transfer in the block range."""
+        return self.db.execute(
+            "SELECT tx_hash, log_index FROM transfers "
+            "WHERE chain = ? AND block_number BETWEEN ? AND ?",
+            [chain, first_block, last_block],
+        ).fetchall()
 
     def _pin_is_current(
         self, chain: str, height: int | None, pin_hash: str | None, count: int | None

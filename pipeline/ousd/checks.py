@@ -134,15 +134,7 @@ def chain_supply(store: Store, chains: Sequence[str]) -> CheckResult:
     """The newest supply result per chain passed, at the cursor, and the events still explain it."""
     problems = []
     for chain in chains:
-        row = store.db.execute(
-            """
-            SELECT status, pin_height, reference_value, observed_value
-            FROM reconciliation_checks
-            WHERE check_name = 'chain_supply' AND subject = ?
-            ORDER BY recorded_at DESC, attempt DESC LIMIT 1
-            """,
-            [chain],
-        ).fetchone()
+        row = store.newest_supply_check(chain)
         if row is None:
             problems.append(f"{chain}: no supply check recorded")
             continue
@@ -172,14 +164,7 @@ def cross_chain_supply(
     latest = store.latest_reconciliation()
     if latest is None:
         return _result(name, ["no finished reconciliation run"], "")
-    final = store.db.execute(
-        """
-        SELECT status, reference_value, observed_value FROM reconciliation_checks
-        WHERE run_id = ? AND check_name = 'bridge'
-        ORDER BY attempt DESC LIMIT 1
-        """,
-        [latest.run_id],
-    ).fetchone()
+    final = store.final_bridge_check(latest.run_id)
     if final is None:
         return _result(name, [f"run {latest.run_id} recorded no Bridge result"], "")
     status, bridge_total, chains_total = final
@@ -187,14 +172,7 @@ def cross_chain_supply(
         return _result(name, [f"run {latest.run_id}: Bridge result is {status}"], "")
     if bridge_total is None or chains_total != bridge_total:
         return _result(name, [f"chains {chains_total} against Bridge {bridge_total}"], "")
-    comparison = store.db.execute(
-        """
-        SELECT passed, tolerance, chains_total, bridge_total, chains_missing
-        FROM bridge_comparisons WHERE run_id = ?
-        ORDER BY checked_at DESC LIMIT 1
-        """,
-        [latest.run_id],
-    ).fetchone()
+    comparison = store.newest_bridge_comparison(latest.run_id)
     if comparison is None:
         return _result(name, [f"run {latest.run_id} recorded no Bridge comparison"], "")
     passed, tolerance, compared_chains, compared_bridge, chains_missing = comparison
@@ -240,16 +218,7 @@ def _sample_run(
     """The gate's own run. Only a partial preview may look further back for this chain's samples."""
     if not partial:
         return latest.run_id if latest else None
-    row = store.db.execute(
-        """
-        SELECT r.run_id FROM reconciliation_runs AS r
-        WHERE r.finished_at IS NOT NULL AND EXISTS (
-            SELECT 1 FROM balance_samples AS s WHERE s.run_id = r.run_id AND s.chain = ?
-        )
-        ORDER BY r.finished_at DESC, r.started_at DESC, r.run_id DESC LIMIT 1
-        """,
-        [chain],
-    ).fetchone()
+    row = store.newest_run_with_samples(chain)
     return row[0] if row else None
 
 
@@ -272,14 +241,7 @@ def sampled_balances(
         if run_id is None:
             problems.append(f"{chain}: no finished run with samples")
             continue
-        final = store.db.execute(
-            """
-            SELECT status FROM reconciliation_checks
-            WHERE run_id = ? AND check_name = 'sampled_balances' AND subject = ?
-            ORDER BY attempt DESC LIMIT 1
-            """,
-            [run_id, chain],
-        ).fetchone()
+        final = store.final_sampled_balances(run_id, chain)
         if final is None or final[0] != "pass":
             state = final[0] if final else "missing"
             problems.append(f"{chain}: sampled balances check is {state}")
@@ -287,15 +249,7 @@ def sampled_balances(
         # Each wallet's newest reading, from any attempt. A recheck rereads only the wallets that
         # differed, so the others keep their reading from the attempt that failed. And a fork can
         # leave an older reading describing rows since replaced.
-        samples = store.db.execute(
-            """
-            SELECT address, height, observed_balance
-            FROM balance_samples
-            WHERE run_id = ? AND chain = ?
-            QUALIFY row_number() OVER (PARTITION BY address ORDER BY attempt DESC) = 1
-            """,
-            [run_id, chain],
-        ).fetchall()
+        samples = store.newest_samples(run_id, chain)
         if not samples:
             problems.append(f"{chain}: run {run_id} recorded no samples")
             continue
@@ -406,9 +360,7 @@ def _marts_behind_raw(
             """,
             [chain],
         ).fetchone()
-        raw = store.db.execute(
-            "SELECT max(block_number), count(*) FROM transfers WHERE chain = ?", [chain]
-        ).fetchone()
+        raw = store.transfer_extent(chain)
         if built != raw:
             problems.append(f"{chain}: marts were not built from the stored transfers")
     return problems
@@ -489,19 +441,9 @@ def freshness(store: Store, chains: Sequence[str], now: datetime) -> CheckResult
     limit = f"{FRESHNESS_LIMIT.total_seconds() / 3600:.0f} hours"
     problems = []
     for chain in chains:
-        newest_transfer = store.db.execute(
-            "SELECT max(block_timestamp) FROM transfers WHERE chain = ?", [chain]
-        ).fetchone()
+        newest_transfer = store.newest_transfer_timestamp(chain)
         # From a finished run only: a run that crashed proved nothing, however recently it began.
-        newest_check = store.db.execute(
-            """
-            SELECT max(c.recorded_at) AT TIME ZONE 'UTC'
-            FROM reconciliation_checks AS c
-            INNER JOIN reconciliation_runs AS r ON r.run_id = c.run_id
-            WHERE c.check_name = 'chain_supply' AND c.subject = ? AND r.finished_at IS NOT NULL
-            """,
-            [chain],
-        ).fetchone()
+        newest_check = store.newest_finished_supply_check(chain)
         if newest_transfer is None or newest_transfer[0] is None:
             problems.append(f"{chain}: no transfers")
         elif now - datetime.fromtimestamp(newest_transfer[0], UTC) > FRESHNESS_LIMIT:

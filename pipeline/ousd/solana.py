@@ -632,10 +632,9 @@ def _refuse_rekey(
     for transfer in batch:
         new[transfer.tx_hash].add(transfer.log_index)
     stored: dict[str, set[int]] = {}
-    for tx_hash, log_index in store.db.execute(
-        "SELECT tx_hash, log_index FROM transfers WHERE chain = ? AND block_number BETWEEN ? AND ?",
-        [chain.name, min(slots.values()), max(slots.values())],
-    ).fetchall():
+    for tx_hash, log_index in store.transfer_positions(
+        chain.name, min(slots.values()), max(slots.values())
+    ):
         if tx_hash in new:
             stored.setdefault(tx_hash, set()).add(log_index)
     for tx_hash, positions in stored.items():

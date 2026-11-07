@@ -1594,7 +1594,12 @@ def test_solana_reads_target_the_configured_mint(store, monkeypatch):
 
 def imports_of(module: Any) -> set[str]:
     names: set[str] = set()
-    for node in ast.walk(ast.parse(Path(module.__file__).read_text())):
+    # Every module of the package.
+    for node in (
+        node
+        for path in Path(module.__file__).parent.glob("*.py")
+        for node in ast.walk(ast.parse(path.read_text()))
+    ):
         if isinstance(node, ast.Import):
             names |= {alias.name for alias in node.names}
         if isinstance(node, ast.ImportFrom):

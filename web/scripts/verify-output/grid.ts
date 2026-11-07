@@ -5,7 +5,7 @@ import { formatBps, formatCompact } from "../../lib/format.ts";
 import { inView, viewText } from "./dom.ts";
 
 // What the chain grid must print, worked out here from the chain roles rows: a bar scales to the
-// amount a lead is measured on (publish.py's _LEADING_MEASURES), and the lead marker is the dataset's.
+// amount a lead is measured on (publish/build.py's _LEADING_MEASURES), and the lead marker is the dataset's.
 type GridField = {
   measure: ChainRoleRow["leading_for"][number];
   amount:
