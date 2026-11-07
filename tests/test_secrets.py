@@ -671,7 +671,7 @@ def test_a_failing_sync_through_the_cli_never_shows_the_key(monkeypatch, tmp_pat
     def polite(**kwargs):
         return PoliteClient(transport=transport, sleep=lambda _: None, **kwargs)
 
-    # Sync clients are built in probes; cli.PoliteClient is only the Bridge client.
+    # Sync clients are built in probes; steps.PoliteClient is only the Bridge client.
     monkeypatch.setattr(probes, "PoliteClient", polite)
 
     with pytest.raises(HttpError) as raised:

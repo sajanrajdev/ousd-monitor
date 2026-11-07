@@ -40,7 +40,7 @@ from ousd.alerts import (
     ping_heartbeat,
     raise_alert,
 )
-from ousd.chains import DEFAULT_BRIDGE_URL, DEFAULT_DB_PATH, Chain, load_chains, missing_rpc_keys
+from ousd.chains import DEFAULT_DB_PATH, Chain, load_chains, missing_rpc_keys
 from ousd.checks import (
     CHECK_NAMES,
     DEFAULT_MARTS_PATH,
@@ -49,15 +49,14 @@ from ousd.checks import (
     unacceptable,
 )
 from ousd.http import (
-    PoliteClient,
     RateLimitBudgetSpent,
     rate_limit_waits_capped,
     scrubbed_traceback,
 )
-from ousd.ingest import SyncResult, sync_chain
+from ousd.ingest import SyncResult
 from ousd.logs import JsonFormatter, UnknownLogFormat, chain_context, log_format, run_id_var
 from ousd.migrations import SchemaOutOfDate
-from ousd.probes import build_probes, history_for, rpc_for, solana_rpc_for
+from ousd.probes import build_probes
 from ousd.publish import DEFAULT_PUBLISHED_DIR, mark_stale, publish
 from ousd.reconcile import (
     FULL_SCOPE,
@@ -67,8 +66,9 @@ from ousd.reconcile import (
     RunResult,
     run_reconciliation,
 )
-from ousd.solana import SolanaChain, load_solana, sync_solana
-from ousd.sources import BridgeSnapshot, bridge_snapshot
+from ousd.solana import SolanaChain, load_solana
+from ousd.sources import BridgeSnapshot
+from ousd.steps import fetch_bridge, sync_one
 from ousd.store import Store, StoreConflict
 
 log = logging.getLogger(__name__)
@@ -180,12 +180,6 @@ def _load_chains() -> list[AnyChain]:
     return chains
 
 
-def _sync_one(chain: AnyChain, store: Store) -> SyncResult:
-    if isinstance(chain, SolanaChain):
-        return sync_solana(chain, solana_rpc_for(chain), store)
-    return sync_chain(chain, rpc_for(chain), store, history_for(chain))
-
-
 def _sync_line(chain: AnyChain, result: SyncResult) -> str:
     where = "slot " if isinstance(chain, SolanaChain) else ""
     return f"{result.chain}: synced to {where}{result.tip}, {result.transfers_stored} stored"
@@ -218,11 +212,6 @@ def _chain_sync_facts(
     }
 
 
-def _fetch_bridge() -> BridgeSnapshot:
-    url = os.environ.get("BRIDGE_API_URL", DEFAULT_BRIDGE_URL)
-    return bridge_snapshot(PoliteClient(label="bridge"), url)
-
-
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -243,9 +232,9 @@ class Pipeline:
     alerts_dir: Path = DEFAULT_ALERTS_DIR
     sources: Sources = field(default_factory=Sources)
     chains: Callable[[], Sequence[AnyChain]] = _load_chains
-    sync: Callable[[AnyChain, Store], SyncResult] = _sync_one
+    sync: Callable[[AnyChain, Store], SyncResult] = sync_one
     probes: Callable[[Sequence[AnyChain], Store], list[ChainProbe]] = build_probes
-    bridge: Callable[[], BridgeSnapshot] = _fetch_bridge
+    bridge: Callable[[], BridgeSnapshot] = fetch_bridge
     dbt_build: Callable[[float], int] = run_dbt_build
     now: Callable[[], datetime] = _now
     retry_delay: int = RETRY_DELAY

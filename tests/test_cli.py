@@ -3,7 +3,7 @@ import sys
 
 import httpx
 import pytest
-from ousd import cli, probes, reconcile
+from ousd import cli, probes, reconcile, steps
 from ousd.chains import REQUIRED_CHAINS
 from ousd.http import HttpError, PoliteClient
 from ousd.ingest import SyncResult
@@ -47,7 +47,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setenv("TEMPO_RPC_URL", TEMPO_URL)
     monkeypatch.setenv("ETHEREUM_RPC_URL", ETHEREUM_URL)
     # Never the network, whatever a test forgets to patch.
-    monkeypatch.setattr(cli, "bridge_snapshot", lambda *args: GOOD)
+    monkeypatch.setattr(steps, "bridge_snapshot", lambda *args: GOOD)
     return tmp_path / "ousd.duckdb"
 
 
@@ -257,7 +257,7 @@ def test_a_partial_run_survives_bridge_being_down_and_leaks_nothing(env, monkeyp
     def down(*args):
         raise HttpError(f"down {SOLANA_URL}")
 
-    monkeypatch.setattr(cli, "bridge_snapshot", down)
+    monkeypatch.setattr(steps, "bridge_snapshot", down)
 
     assert cli.main(["--chain", "tempo", "reconcile"]) == 3
 
@@ -382,7 +382,7 @@ def test_a_store_conflict_that_escapes_stops_the_run_with_one(env, monkeypatch, 
     def conflict(*args, **kwargs):
         raise StoreConflict("solana: abc stored differently")
 
-    monkeypatch.setattr(cli, "sync_solana", conflict)
+    monkeypatch.setattr(steps, "sync_solana", conflict)
     monkeypatch.setattr(cli, "run_reconciliation", conflict)
 
     assert cli.main(["--chain", "solana", *command]) == 1
@@ -418,7 +418,7 @@ def test_at_block_match_exits_three_and_writes_nothing(env, monkeypatch, capsys)
     before = {table: table_rows(env, table) for table in ("reconciliations", "reconciliation_runs")}
     monkeypatch.setattr(cli, "rpc_for", lambda chain: rpc)
     synced = []
-    monkeypatch.setattr(cli, "sync_chain", lambda *args: synced.append(args))
+    monkeypatch.setattr(steps, "sync_chain", lambda *args: synced.append(args))
 
     assert cli.main(["--chain", "tempo", "reconcile", "--at-block", "102"]) == 3
 
@@ -595,7 +595,7 @@ def test_solana_sync_runs_once_and_prints_the_head_slot(env, monkeypatch, capsys
         calls.append(chain.name)
         return SyncResult("solana", 900, 900, None, 12)
 
-    monkeypatch.setattr(cli, "sync_solana", sync)
+    monkeypatch.setattr(steps, "sync_solana", sync)
 
     assert cli.main(["--chain", "solana", "sync"]) == 0
 
@@ -608,7 +608,7 @@ def test_tempo_runs_without_a_solana_key_and_builds_no_solana_client(monkeypatch
     monkeypatch.delenv("SOLANA_RPC_URL", raising=False)
     synced: list[str] = []
     monkeypatch.setattr(cli, "_sync", lambda chains, store: synced.extend(c.name for c in chains))
-    monkeypatch.setattr(cli, "solana_rpc_for", lambda chain: pytest.fail("built a Solana client"))
+    monkeypatch.setattr(steps, "solana_rpc_for", lambda chain: pytest.fail("built a Solana client"))
     monkeypatch.setattr(
         probes, "solana_rpc_for", lambda chain: pytest.fail("built a Solana client")
     )
@@ -652,10 +652,10 @@ def test_no_key_or_url_reaches_any_output_of_any_command(env, monkeypatch, capsy
     def polite(**kwargs):
         return real(transport=httpx.MockTransport(echo), sleep=lambda _: None, **kwargs)
 
-    monkeypatch.setattr(cli, "PoliteClient", polite)
+    monkeypatch.setattr(steps, "PoliteClient", polite)
     monkeypatch.setattr(probes, "PoliteClient", polite)
     # The real Bridge read, over the failing transport.
-    monkeypatch.setattr(cli, "bridge_snapshot", bridge_snapshot)
+    monkeypatch.setattr(steps, "bridge_snapshot", bridge_snapshot)
     if "--at-block" in argv:
         store = Store(env)
         store.write_range("tempo", [], {}, 50)

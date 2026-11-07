@@ -20,20 +20,12 @@ from ousd.alerts import (
     ping_heartbeat,
     raise_alert,
 )
-from ousd.chains import (
-    DECIMALS,
-    DEFAULT_BRIDGE_URL,
-    DEFAULT_DB_PATH,
-    Chain,
-    load_chains,
-    missing_rpc_keys,
-)
+from ousd.chains import DECIMALS, DEFAULT_DB_PATH, Chain, load_chains, missing_rpc_keys
 from ousd.checks import DEFAULT_MARTS_PATH, evaluate_checks, record_checks, unacceptable
-from ousd.http import HttpError, PoliteClient
-from ousd.ingest import sync_chain
+from ousd.http import HttpError
 from ousd.logs import UnknownLogFormat, chain_context, configure_logging
 from ousd.migrations import LATEST, SchemaOutOfDate, migrate
-from ousd.probes import build_probes, history_for, rpc_for, solana_rpc_for
+from ousd.probes import build_probes, rpc_for
 from ousd.publish import DEFAULT_PUBLISHED_DIR, PublishRefused, PublishUnavailable, publish
 from ousd.reconcile import (
     FULL_SCOPE,
@@ -53,8 +45,9 @@ from ousd.reconcile import (
     exit_code,
     run_reconciliation,
 )
-from ousd.solana import SolanaChain, load_solana, sync_solana
-from ousd.sources import BridgeSnapshot, TransactionProof, bridge_snapshot
+from ousd.solana import SolanaChain, load_solana
+from ousd.sources import TransactionProof
+from ousd.steps import fetch_bridge, sync_one
 from ousd.store import Store, StoreConflict
 
 # Wallets read per progress line, and proofs per progress line. A read this long is otherwise
@@ -83,16 +76,14 @@ def _say(text: str) -> None:
 
 def _sync(chains: Sequence[Chain | SolanaChain], store: Store) -> int:
     for chain in chains:
+        with chain_context(chain.name):
+            result = sync_one(chain, store)
         if isinstance(chain, SolanaChain):
-            with chain_context(chain.name):
-                solana = sync_solana(chain, solana_rpc_for(chain), store)
             print(
-                f"{solana.chain}: synced to slot {solana.tip}, "
-                f"{solana.transfers_stored} transfers stored"
+                f"{result.chain}: synced to slot {result.tip}, "
+                f"{result.transfers_stored} transfers stored"
             )
             continue
-        with chain_context(chain.name):
-            result = sync_chain(chain, rpc_for(chain), store, history_for(chain))
         reorg = f", reorg repaired at {result.reorg_fork_block}" if result.reorg_fork_block else ""
         print(
             f"{result.chain}: synced to {result.tip} (finalized {result.finalized}), "
@@ -246,11 +237,6 @@ def _print_result(status: str, code: int, scope: str, outcomes: Sequence[CheckOu
     return code
 
 
-def _fetch_bridge() -> BridgeSnapshot:
-    url = os.environ.get("BRIDGE_API_URL", DEFAULT_BRIDGE_URL)
-    return bridge_snapshot(PoliteClient(label="bridge"), url)
-
-
 def _print_information(outcomes: Sequence[CheckOutcome]) -> None:
     """A partial run asks Bridge nothing, so its figures are shown here, as information only."""
     latest: dict[str, ChainReconciliation] = {}
@@ -261,7 +247,7 @@ def _print_information(outcomes: Sequence[CheckOutcome]) -> None:
         return
     title = "Bridge comparison (information only, not a check):"
     try:
-        snapshot = _fetch_bridge()
+        snapshot = fetch_bridge()
     except (HttpError, ValueError):
         # No message: a provider's text can hold a URL.
         print(f"{title} Bridge could not be read")
@@ -294,7 +280,7 @@ def _reconcile(
         for chain, probe in zip(chains, build_probes(chains, store), strict=True)
     ]
     result: RunResult = run_reconciliation(
-        probes, store, _report, bridge=_fetch_bridge, census=census
+        probes, store, _report, bridge=fetch_bridge, census=census
     )
     if result.scope == PARTIAL_SCOPE:
         _print_information(result.outcomes)
