@@ -8,7 +8,6 @@ import csv
 import hashlib
 import json
 import logging
-import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
