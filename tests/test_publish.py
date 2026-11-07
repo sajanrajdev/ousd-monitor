@@ -22,6 +22,9 @@ from ousd import checks, cli, migrations
 from ousd import publish as publisher
 from ousd.chains import REQUIRED_CHAINS
 from ousd.publish import PublishRefused
+from ousd.publish import build as publish_build
+from ousd.publish import install as publish_install
+from ousd.publish import provenance as publish_provenance
 from ousd.store import Store
 from publish_world import (
     EVERYDAY,
@@ -213,7 +216,7 @@ def test_the_manifest_records_what_built_it(published):
 
 def test_a_dirty_tree_still_publishes_and_says_so(world, monkeypatch):
     """Publishing a dirty tree is allowed. Releasing one is refused by the site's release step."""
-    monkeypatch.setattr(publisher, "_git_commit", lambda: ("a" * 40, "dirty"))
+    monkeypatch.setattr(publish_build, "_git_commit", lambda: ("a" * 40, "dirty"))
     world.run_checks()
     manifest = read_json(world.publish(), "manifest.json")
     assert manifest["git_commit"] == "a" * 40
@@ -265,10 +268,10 @@ def test_provenance_needs_both_dbt_invocations(world, name):
 
 def test_without_dbt_installed_publish_refuses(world, monkeypatch):
     def missing(package):
-        raise publisher.metadata.PackageNotFoundError(package)
+        raise publish_provenance.metadata.PackageNotFoundError(package)
 
     world.run_checks()
-    monkeypatch.setattr(publisher.metadata, "version", missing)
+    monkeypatch.setattr(publish_provenance.metadata, "version", missing)
     with pytest.raises(PublishRefused, match="dbt-core isn't installed"):
         world.publish()
     assert not world.out.exists()
@@ -286,7 +289,7 @@ def test_only_the_commit_may_have_an_address_shape(published):
 
 def test_without_uv_lock_publish_refuses(world, monkeypatch):
     world.run_checks()
-    monkeypatch.setattr(publisher, "UV_LOCK", world.path / "no-such-uv.lock")
+    monkeypatch.setattr(publish_provenance, "UV_LOCK", world.path / "no-such-uv.lock")
     with pytest.raises(PublishRefused, match=r"cannot read uv\.lock"):
         world.publish()
 
@@ -445,7 +448,7 @@ def test_nothing_is_written_before_everything_validates(world, monkeypatch):
         seen.append(name)
         real(name, payload)
 
-    monkeypatch.setattr(publisher, "_validate", spy)
+    monkeypatch.setattr(publish_build, "_validate", spy)
     world.publish()
     assert sorted(seen) == sorted(JSON_FILES)
 
@@ -805,7 +808,7 @@ def test_a_pointer_that_cannot_be_swapped_leaves_no_new_folder(world, monkeypatc
     def refuse(*args):
         raise OSError("no")
 
-    monkeypatch.setattr(publisher, "_point", refuse)
+    monkeypatch.setattr(publish_install, "_point", refuse)
     with pytest.raises(PublishRefused, match="OSError"):
         world.publish(now=LATER)
     monkeypatch.undo()
@@ -823,7 +826,7 @@ def test_an_interrupt_after_the_swap_keeps_the_folder_the_pointer_names(world, m
         real(root, pointer, target)
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(publisher, "_point", interrupted)
+    monkeypatch.setattr(publish_install, "_point", interrupted)
     with pytest.raises(KeyboardInterrupt):
         world.publish(now=LATER)
     assert (world.out / "latest" / "manifest.json").is_file()
@@ -1448,7 +1451,7 @@ def test_a_refusal_never_stores_a_url_in_the_manifest(world, monkeypatch):
     def explode(*args, **kwargs):
         raise RuntimeError(f"failed at http://base.invalid/v2/{SECRET}")
 
-    monkeypatch.setattr(publisher, "mart_rows", explode)
+    monkeypatch.setattr(publish_build, "mart_rows", explode)
     with pytest.raises(PublishRefused) as refused:
         world.publish(now=LATER)
     assert SECRET not in str(refused.value)
@@ -1533,7 +1536,7 @@ def test_a_provider_value_from_the_environment_refuses_even_without_a_scheme(wor
 def test_a_wallet_reaching_only_a_csv_refuses(world, monkeypatch):
     real = publisher._csv_bytes
     monkeypatch.setattr(
-        publisher, "_csv_bytes", lambda rows, preview: real(rows, preview) + HOLDER.encode()
+        publish_build, "_csv_bytes", lambda rows, preview: real(rows, preview) + HOLDER.encode()
     )
     world.run_checks()
     assert_guard_refuses(world, r"\.csv holds a wallet-shaped value")
@@ -2366,9 +2369,11 @@ def test_exchange_holdings_that_miss_exchange_venues_are_refused() -> None:
         publisher._exchange_holdings(_holdings_tables(5), journey)
 
 
-# The commit, where an image has no checkout. publish.py runs git first, so these replace it.
+# The commit, where an image has no checkout. provenance.py runs git first, so these replace it.
 def _git_fails(*_args, **_kwargs):
-    return publisher.subprocess.CompletedProcess(["git"], 128, "", "fatal: not a git repository")
+    return publish_provenance.subprocess.CompletedProcess(
+        ["git"], 128, "", "fatal: not a git repository"
+    )
 
 
 def _git_missing(*_args, **_kwargs):
@@ -2378,14 +2383,14 @@ def _git_missing(*_args, **_kwargs):
 @pytest.mark.parametrize("no_git", [_git_fails, _git_missing])
 def test_without_git_the_commit_comes_from_ousd_git_commit(monkeypatch, no_git):
     """Whole, and with the tree unknown, as an image has no tree to read."""
-    monkeypatch.setattr(publisher.subprocess, "run", no_git)
+    monkeypatch.setattr(publish_provenance.subprocess, "run", no_git)
     monkeypatch.setenv("OUSD_GIT_COMMIT", "0123456789abcdef0123456789abcdef01234567")
     assert publisher._git_commit() == ("0123456789abcdef0123456789abcdef01234567", "unknown")
 
 
 @pytest.mark.parametrize("no_git", [_git_fails, _git_missing])
 def test_without_git_or_the_variable_publish_refuses(monkeypatch, no_git):
-    monkeypatch.setattr(publisher.subprocess, "run", no_git)
+    monkeypatch.setattr(publish_provenance.subprocess, "run", no_git)
     monkeypatch.delenv("OUSD_GIT_COMMIT", raising=False)
     with pytest.raises(PublishRefused, match="cannot read the git commit"):
         publisher._git_commit()
@@ -2408,7 +2413,7 @@ def test_without_git_or_the_variable_publish_refuses(monkeypatch, no_git):
     ],
 )
 def test_a_malformed_ousd_git_commit_refuses_without_echoing_it(monkeypatch, bad):
-    monkeypatch.setattr(publisher.subprocess, "run", _git_fails)
+    monkeypatch.setattr(publish_provenance.subprocess, "run", _git_fails)
     monkeypatch.setenv("OUSD_GIT_COMMIT", bad)
     with pytest.raises(PublishRefused) as refused:
         publisher._git_commit()
@@ -2427,15 +2432,15 @@ def _git_prints(stdout, status=""):
             # Named, so a user's git config can't hide untracked files.
             assert "--untracked-files=normal" in command
             if status is None:
-                return publisher.subprocess.CompletedProcess(command, 128, "", "fatal")
-            return publisher.subprocess.CompletedProcess(command, 0, status, "")
-        return publisher.subprocess.CompletedProcess(command, 0, stdout, "")
+                return publish_provenance.subprocess.CompletedProcess(command, 128, "", "fatal")
+            return publish_provenance.subprocess.CompletedProcess(command, 0, status, "")
+        return publish_provenance.subprocess.CompletedProcess(command, 0, stdout, "")
 
     return run
 
 
 def test_a_working_git_wins_over_the_variable(monkeypatch):
-    monkeypatch.setattr(publisher.subprocess, "run", _git_prints(f"{COMMIT}\n"))
+    monkeypatch.setattr(publish_provenance.subprocess, "run", _git_prints(f"{COMMIT}\n"))
     # Malformed, so a read of it would refuse: git working means it's never read.
     monkeypatch.setenv("OUSD_GIT_COMMIT", "main")
     assert publisher._git_commit() == (COMMIT, "clean")
@@ -2452,17 +2457,17 @@ def test_a_working_git_wins_over_the_variable(monkeypatch):
     ids=["clean", "changed", "untracked", "unreadable"],
 )
 def test_the_tree_state_is_read_never_guessed(monkeypatch, status, state):
-    monkeypatch.setattr(publisher.subprocess, "run", _git_prints(f"{COMMIT}\n", status))
+    monkeypatch.setattr(publish_provenance.subprocess, "run", _git_prints(f"{COMMIT}\n", status))
     assert publisher._git_commit() == (COMMIT, state)
 
 
 def test_a_git_status_that_hangs_leaves_the_tree_unknown(monkeypatch):
     def run(command, *args, **kwargs):
         if "status" in command:
-            raise publisher.subprocess.TimeoutExpired(command, 10)
-        return publisher.subprocess.CompletedProcess(command, 0, f"{COMMIT}\n", "")
+            raise publish_provenance.subprocess.TimeoutExpired(command, 10)
+        return publish_provenance.subprocess.CompletedProcess(command, 0, f"{COMMIT}\n", "")
 
-    monkeypatch.setattr(publisher.subprocess, "run", run)
+    monkeypatch.setattr(publish_provenance.subprocess, "run", run)
     assert publisher._git_commit() == (COMMIT, "unknown")
 
 
@@ -2480,7 +2485,7 @@ def test_the_real_checkout_gives_a_full_hash_and_its_tree_state(monkeypatch):
 
 @pytest.mark.parametrize("odd", ["", f"warning: something\n{COMMIT}", "HEAD\n", "0123456789ab\n"])
 def test_odd_git_output_refuses(monkeypatch, odd):
-    monkeypatch.setattr(publisher.subprocess, "run", _git_prints(odd))
+    monkeypatch.setattr(publish_provenance.subprocess, "run", _git_prints(odd))
     monkeypatch.setenv("OUSD_GIT_COMMIT", COMMIT)
     with pytest.raises(PublishRefused, match="other than a commit hash"):
         publisher._git_commit()
@@ -2489,15 +2494,15 @@ def test_odd_git_output_refuses(monkeypatch, odd):
 def test_a_hung_git_falls_back_to_the_variable(monkeypatch):
     def hang(*_args, **kwargs):
         assert kwargs["timeout"] == 10
-        raise publisher.subprocess.TimeoutExpired(["git"], 10)
+        raise publish_provenance.subprocess.TimeoutExpired(["git"], 10)
 
-    monkeypatch.setattr(publisher.subprocess, "run", hang)
+    monkeypatch.setattr(publish_provenance.subprocess, "run", hang)
     monkeypatch.setenv("OUSD_GIT_COMMIT", COMMIT)
     assert publisher._git_commit() == (COMMIT, "unknown")
 
 
 def test_a_published_manifest_carries_the_supplied_commit(world, monkeypatch):
-    monkeypatch.setattr(publisher.subprocess, "run", _git_fails)
+    monkeypatch.setattr(publish_provenance.subprocess, "run", _git_fails)
     monkeypatch.setenv("OUSD_GIT_COMMIT", "fedcba9876543210fedcba9876543210fedcba98")
     world.run_checks()
     folder = world.publish()

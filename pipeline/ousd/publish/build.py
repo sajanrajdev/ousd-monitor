@@ -1,34 +1,19 @@
-"""Writes the versioned dataset the site reads, and refuses unless every check passed in this run.
-
-Everything is built and validated in memory first, so a failure can't leave a half dataset. A
-refusal leaves the last good dataset where it is, and marks it stale.
-
---allow-partial is a local preview for site development, never a release. It writes under a
-different folder, under a different pointer, with `preview: true` in every JSON file.
+"""Every file of one dataset, assembled from the store, the marts and the labels and validated
+in memory, and refused unless the run's recorded checks still describe the data.
 """
 
 import csv
 import hashlib
 import io
 import json
-import logging
-import os
-import platform
-import re
-import shutil
-import subprocess
 from collections import Counter
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
-from importlib import metadata
-from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import duckdb
-import jsonschema
 
-from ousd.chains import KEYED_RPC_ENV, REQUIRED_CHAINS, load_chains
+from ousd.chains import REQUIRED_CHAINS
 from ousd.checks import (
     CHECK_NAMES,
     Sources,
@@ -40,31 +25,23 @@ from ousd.checks import (
     read_labels,
     reconciliation_gate,
     unacceptable,
-    utc_moment,
     utc_text,
 )
-from ousd.migrations import SchemaOutOfDate, applied
-from ousd.solana import OUSD_MINT
+from ousd.publish.errors import PublishRefused
+from ousd.publish.provenance import _git_commit, _provenance
+from ousd.publish.safety import (
+    _looks_like_a_name,
+    _read_exchange_listings,
+    _read_legend,
+    _read_source_hosts,
+    _read_unnamed_rule,
+    _refuse_bad_source,
+    _refuse_unsafe_dataset,
+)
+from ousd.publish.schema import MANIFEST_SCHEMA_VERSION, SCHEMA_VERSION, _json_bytes, _validate
 from ousd.store import LatestReconciliation, Store, StoredCheck
 from ousd.verdict import ChainFigures, VerdictInputs, build_verdict, known_limits
 
-logger = logging.getLogger(__name__)
-
-SCHEMA_VERSION = 2
-# The manifest's own schema moved on alone: provenance came in and stale state moved out.
-MANIFEST_SCHEMA_VERSION = 3
-SCHEMA_DIR = Path(__file__).parent / "schemas"
-DEFAULT_PUBLISHED_DIR = "data/published"
-# A sibling of the real output, so nothing that reads data/published can land on it.
-PREVIEW_DIRNAME = "preview-not-for-release"
-LATEST = "latest"
-LATEST_PREVIEW = "latest-preview"
-KEEP_FOLDERS = 14
-# Written beside a published folder's files once it is no longer current, so they never change.
-STALE_FILE = "stale.json"
-_UTC_TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
-# Relative to the repo root, where every command runs, as in Sources.
-UV_LOCK = Path("uv.lock")
 # OUSD's first day. Placed reads artificially low until wallets are placed_days old.
 DAY_ZERO = date(2026, 9, 30)
 INDEPENDENCE_NOTICE = "Independent. Not affiliated with Open Standard or Bridge."
@@ -74,7 +51,6 @@ PREVIEW_NOTICE = (
 )
 PREVIEW_CSV_MARK = "LOCAL PREVIEW, NOT FOR RELEASE"
 UNNAMED_RULE_REFERENCE = "labels/README.md#how-unnamed-clusters-are-found"
-LISTING_SOURCE_TYPE = "exchange_listing"
 VELOCITY_DEFINITIONS = {
     "velocity_bps": {"numerator": "clean_7d / 7", "denominator": "circulating_supply"},
     "velocity_everyday_bps": {
@@ -83,53 +59,6 @@ VELOCITY_DEFINITIONS = {
     },
     "headline_velocity_bps": {"numerator": "headline_7d / 7", "denominator": "total_supply"},
 }
-
-_STAMP = re.compile(r"^(preview-)?[0-9]{8}T[0-9]{6}Z(\.tmp)?$")
-_LEGEND_HEADING = "## How we know: the source legend"
-_RULE_HEADING = "## How unnamed clusters are found"
-_HOSTS_HEADING = "## Where each source lives"
-_LISTINGS_HEADING = "## Exchanges that say they support OUSD"
-_LISTINGS_TABLE = "| Exchange | Source | Date checked |\n|---|---|---|\n"
-_LEGEND_ROW = re.compile(r"^\| `([a-z_]+)` \| (.+?) \| (.+?) \|$")
-_HOST_ROW = re.compile(r"^\| `([a-z_]+)` \| (.+?) \|$")
-# One word, as exchange names are, so a person's name or a sentence can't pass as one.
-_LISTING_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9.-]*")
-_LISTING_HOST_ROW = re.compile(r"^\| ([A-Z][^|]*?) \| `([^`]+)` \|$")
-_LISTING_ROW = re.compile(r"^\| ([^|]+?) \| (https://\S+) \| ([0-9]{4}-[0-9]{2}-[0-9]{2}) \|$")
-_READING_NOTE = re.compile(r"^\*\*Reading a label:\*\* (.+)$", re.MULTILINE)
-_EVM_SHAPE = re.compile(r"0[xX][0-9a-fA-F]{40}")
-# The same address with no prefix. Bounded, so it can't match part of a 64-character hash.
-_BARE_EVM_SHAPE = re.compile(r"(?<![0-9A-Za-z])[0-9a-fA-F]{40}(?![0-9A-Za-z])")
-# Bounded by anything that isn't a letter or digit, so a longer hash can't match part of itself.
-_BASE58_SHAPE = re.compile(r"(?<![0-9A-Za-z])[1-9A-HJ-NP-Za-km-z]{32,44}(?![0-9A-Za-z])")
-# A run id is exactly this, and is also valid base58. Any other length of hex stays suspect.
-_RUN_ID_SHAPE = re.compile(r"[0-9a-f]{32}")
-_URL_SHAPE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
-# What a word of a name can be. A dotted word reads as a host, so a real one is listed by name.
-_NAME_WORD = re.compile(r"\(?[A-Za-z0-9&'-]+\)?")
-_PAIR_WORD = re.compile(r"[A-Z0-9]{1,12}/[A-Z0-9]{1,12}")
-_DOTTED_NAMES = frozenset({"LI.FI"})
-# What a link's path segment can't be. `key` alone, so a slug like key-findings stays readable.
-_PLAIN_SEGMENT = re.compile(r"[A-Za-z0-9._-]+")
-_KEY_SEGMENT = re.compile(
-    r"key|secret|password|passwd|bearer|jwt|credentials?"
-    r"|.*(api[-_]?key|access[-_]?token|auth[-_]?token).*",
-    re.IGNORECASE,
-)
-# A label's link, the one place a wallet-shaped value may be, and only after its own check.
-_LABEL_LINK_PLACE = re.compile(r"labels\.json/(data|exchange_listings)/\d+/source_url")
-# A full commit hash has an address's shape. Its schema allows 40 hex digits and nothing else.
-_COMMIT_PLACE = "manifest.json/git_commit"
-# Other variables that can hold a provider URL. KEYED_RPC_ENV has the rest.
-_RPC_ENV = ("TEMPO_RPC_URL", "ETHEREUM_RPC_URL", "ETHEREUM_BLOCKSCOUT_URL")
-
-# jsonschema follows the spec, where 714.0 is an integer. A float here means a mart changed type.
-_Validator = jsonschema.validators.extend(
-    jsonschema.Draft202012Validator,
-    type_checker=jsonschema.Draft202012Validator.TYPE_CHECKER.redefine(
-        "integer", lambda _, value: isinstance(value, int) and not isinstance(value, bool)
-    ),
-)
 
 # Written as strings of base units, as anything above 2^53 loses exactness in a JSON reader.
 _AMOUNTS = frozenset(
@@ -197,14 +126,6 @@ _RECONCILIATION_COLUMNS = (
     "run_id",
     "in_latest_run",
 )
-
-
-class PublishRefused(RuntimeError):
-    """The dataset can't be published. Its message is ours, so it can be shown and stored."""
-
-
-class PublishUnavailable(PublishRefused):
-    """A database is in use. It says nothing about the data, so nothing is marked stale."""
 
 
 def _published(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -336,198 +257,6 @@ def _refuse_unless_one_run(rows: Sequence[Mapping[str, Any]], latest: LatestReco
         or bridge[0]["run_id"] != latest.run_id
     ):
         raise PublishRefused(f"mart_reconciliation's Bridge row is not from run {latest.run_id}")
-
-
-def _section(text: str, heading: str) -> str:
-    _, found, after = text.partition(heading)
-    if not found:
-        raise PublishRefused(f"labels/README.md has no section {heading.removeprefix('## ')!r}")
-    return after.partition("\n## ")[0]
-
-
-def _read_legend(text: str) -> dict[str, Any]:
-    """The source legend, parsed from labels/README.md so there is one copy of the words."""
-    section = _section(text, _LEGEND_HEADING)
-    note = _READING_NOTE.search(section)
-    if note is None:
-        raise PublishRefused("labels/README.md has no source legend to publish")
-    rows = [
-        {"source_type": match[1], "meaning": match[2], "how_to_check": match[3]}
-        for line in section.splitlines()
-        if (match := _LEGEND_ROW.match(line))
-    ]
-    return {"source_types": rows, "reading_a_label": note[1]}
-
-
-def _read_unnamed_rule(text: str) -> str:
-    return " ".join(_section(text, _RULE_HEADING).split())
-
-
-def _read_source_hosts(text: str) -> dict[str, set[str]]:
-    return {
-        match[1]: set(re.findall(r"`([^`]+)`", match[2]))
-        for line in _section(text, _HOSTS_HEADING).splitlines()
-        if (match := _HOST_ROW.match(line))
-    }
-
-
-def _read_listing_hosts(text: str) -> dict[str, str]:
-    return {
-        match[1]: match[2]
-        for line in _section(text, _HOSTS_HEADING).splitlines()
-        if (match := _LISTING_HOST_ROW.match(line))
-    }
-
-
-def _is_a_past_date(text: str) -> bool:
-    try:
-        return date.fromisoformat(text) <= datetime.now(UTC).date()
-    except ValueError:
-        return False
-
-
-def _read_exchange_listings(text: str) -> list[dict[str, str]]:
-    """Exchanges whose own page says they support OUSD. The page names no wallet, so its link holds
-    no address, and it must be on the host recorded for that exchange. Anything in the table that
-    doesn't read as a row refuses, so an exchange can't drop out unnoticed."""
-    before, found, table = _section(text, _LISTINGS_HEADING).partition(_LISTINGS_TABLE)
-    if not found:
-        raise PublishRefused("labels/README.md has no exchange listings table")
-    if "|" in before:
-        raise PublishRefused("labels/README.md has an exchange listing it can't read")
-    hosts = _read_listing_hosts(text)
-    rows = []
-    for line in filter(None, (line.rstrip() for line in table.splitlines())):
-        match = _LISTING_ROW.match(line)
-        if match is None or not _is_a_past_date(match[3]):
-            raise PublishRefused("labels/README.md has an exchange listing it can't read")
-        if not _LISTING_NAME.fullmatch(match[1]):
-            raise PublishRefused("an exchange listing has an entity that doesn't look like a name")
-        if match[1] not in hosts:
-            raise PublishRefused("an exchange listing isn't on the list of exchanges and hosts")
-        _refuse_bad_source(
-            {
-                "chain": "the exchange list",
-                "address": "",
-                "source_type": LISTING_SOURCE_TYPE,
-                "source_url": match[2],
-            },
-            {LISTING_SOURCE_TYPE: {hosts[match[1]]}},
-        )
-        rows.append(
-            {
-                "entity": match[1],
-                "source_type": LISTING_SOURCE_TYPE,
-                "source_url": match[2],
-                "date_checked": match[3],
-            }
-        )
-    if not rows:
-        raise PublishRefused("labels/README.md has no exchange listings")
-    if len({row["entity"] for row in rows}) != len(rows):
-        raise PublishRefused("labels/README.md lists an exchange twice")
-    return rows
-
-
-def _comparable(address: str) -> str:
-    """EVM addresses are case-insensitive. Base58 addresses are not."""
-    return address.lower() if address.lower().startswith("0x") else address
-
-
-def _wallet_shapes(text: str) -> list[str]:
-    evm = _EVM_SHAPE.findall(text)
-    bare = _BARE_EVM_SHAPE.findall(text)
-    base58 = [shape for shape in _BASE58_SHAPE.findall(text) if not _RUN_ID_SHAPE.fullmatch(shape)]
-    return [*evm, *bare, *base58]
-
-
-def _looks_opaque(text: str) -> bool:
-    """A run of letters and digits too long or too mixed to be a word."""
-    runs = re.split(r"[-_.]", text)
-    return any(len(run) >= 20 or (len(run) >= 12 and any(c.isdigit() for c in run)) for run in runs)
-
-
-def _looks_like_a_name(entity: str) -> bool:
-    """Words only, so a URL, a host or a key with no scheme can't pass as a name."""
-    return all(
-        word in _DOTTED_NAMES
-        or ((_NAME_WORD.fullmatch(word) or _PAIR_WORD.fullmatch(word)) and not _looks_opaque(word))
-        for word in entity.split(" ")
-    )
-
-
-def _is_key_like(segment: str) -> bool:
-    return (
-        not _PLAIN_SEGMENT.fullmatch(segment)
-        or bool(_KEY_SEGMENT.fullmatch(segment))
-        or _looks_opaque(segment)
-    )
-
-
-def _refuse_bad_source(row: Mapping[str, str], hosts: Mapping[str, set[str]]) -> None:
-    """A named label's link must open on the source its type documents, and show only that row.
-    Messages name the chain alone, since a bad value may be the very thing that must not spread."""
-    link = row["source_url"]
-    where = f"a label on {row['chain']}"
-    parts = urlsplit(link)
-    if parts.scheme != "https" or "?" in link or "#" in link or "@" in parts.netloc:
-        raise PublishRefused(f"{where} has a source link that isn't a plain https link")
-    if parts.hostname not in hosts.get(row["source_type"], ()):
-        raise PublishRefused(f"{where} has a source link on a host its source type doesn't list")
-    own = _comparable(row["address"])
-    if any(_comparable(shape) != own for shape in _wallet_shapes(link)):
-        raise PublishRefused(f"{where} has a source link holding another address")
-    for segment in filter(None, parts.path.split("/")):
-        if _comparable(segment) != own and _is_key_like(segment):
-            raise PublishRefused(f"{where} has a source link with a key-like path segment")
-
-
-def _token_contracts() -> set[str]:
-    """OUSD's own contracts, which are public and identify the token rather than any holder."""
-    evm = {chain.token.lower() for chain in load_chains({}).values()}
-    return {*evm, OUSD_MINT}
-
-
-def _provider_values() -> list[str]:
-    names = (*KEYED_RPC_ENV.values(), *_RPC_ENV)
-    return [value for name in names if (value := os.environ.get(name, "").strip())]
-
-
-def _strings(value: Any, place: str) -> Iterator[tuple[str, str]]:
-    if isinstance(value, str):
-        yield place, value
-    elif isinstance(value, Mapping):
-        for key, inner in value.items():
-            yield f"{place}/{key}", str(key)
-            yield from _strings(inner, f"{place}/{key}")
-    elif isinstance(value, list):
-        for index, inner in enumerate(value):
-            yield from _strings(inner, f"{place}/{index}")
-
-
-def _refuse_unsafe_text(place: str, text: str, tokens: set[str], providers: Sequence[str]) -> None:
-    """Names the place, never the value, as the value is what must not spread."""
-    if any(_comparable(shape) not in tokens for shape in _wallet_shapes(text)):
-        raise PublishRefused(f"{place} holds a wallet-shaped value")
-    if _URL_SHAPE.search(text):
-        raise PublishRefused(f"{place} holds a URL")
-    if any(value in text for value in providers):
-        raise PublishRefused(f"{place} holds a provider URL")
-
-
-def _refuse_unsafe_dataset(
-    payloads: Mapping[str, Mapping[str, Any]], tabular: Mapping[str, bytes]
-) -> None:
-    """The last gate on what leaves: the whole dataset is refused for one bad value, wherever a
-    new column, a check's detail or a label put it. A named label's link has its own check."""
-    tokens = _token_contracts()
-    providers = _provider_values()
-    for filename, payload in payloads.items():
-        for place, text in _strings(payload, filename):
-            if not _LABEL_LINK_PLACE.fullmatch(place) and place != _COMMIT_PLACE:
-                _refuse_unsafe_text(place, text, tokens, providers)
-    for filename, data in tabular.items():
-        _refuse_unsafe_text(filename, data.decode(), tokens, providers)
 
 
 def _issuer_coverage(
@@ -761,10 +490,6 @@ def _summary_payload(
     }
 
 
-def _json_bytes(payload: Mapping[str, Any]) -> bytes:
-    return (json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode()
-
-
 def _csv_bytes(rows: Sequence[Mapping[str, Any]], preview: bool = False) -> bytes:
     """Base units and the same columns as the JSON. A preview gets a first column saying so on every
     row, as a CSV travels without its folder and manifest."""
@@ -787,110 +512,6 @@ def _csv_bytes(rows: Sequence[Mapping[str, Any]], preview: bool = False) -> byte
             }
         )
     return buffer.getvalue().encode()
-
-
-def _validate(filename: str, payload: Mapping[str, Any]) -> None:
-    schema = json.loads((SCHEMA_DIR / f"{filename.removesuffix('.json')}.schema.json").read_text())
-    error = jsonschema.exceptions.best_match(_Validator(schema).iter_errors(payload))
-    if error is not None:
-        # The place and the rule, not the value.
-        place = "/".join(str(part) for part in error.absolute_path)
-        raise PublishRefused(f"{filename} fails its schema at {place or 'top'}: {error.validator}")
-
-
-# A full commit hash, and nothing else, so the variable can't carry other text into the manifest.
-_COMMIT_HASH = re.compile(r"[0-9a-f]{40}")
-COMMIT_ENV = "OUSD_GIT_COMMIT"
-
-
-def _git(*args: str) -> subprocess.CompletedProcess[str] | None:
-    try:
-        return subprocess.run(
-            ["git", "--no-optional-locks", *args],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-
-
-def _git_commit() -> tuple[str, str]:
-    """The checkout's commit and whether its tree had changes, or else OUSD_GIT_COMMIT where there
-    is no checkout, as in an image. A tree that can't be read is unknown, never assumed clean."""
-    head = _git("rev-parse", "HEAD")
-    if head is not None and head.returncode == 0:
-        commit = head.stdout.strip()
-        if not _COMMIT_HASH.fullmatch(commit):
-            raise PublishRefused("git printed something other than a commit hash")
-        # Untracked files count, as dbt reads a new model whether or not git knows it. Named, so a
-        # user's status.showUntrackedFiles can't hide them.
-        status = _git("status", "--porcelain", "--untracked-files=normal")
-        if status is None or status.returncode != 0:
-            return commit, "unknown"
-        return commit, "dirty" if status.stdout.strip() else "clean"
-    supplied = os.environ.get(COMMIT_ENV, "")
-    if not supplied:
-        raise PublishRefused("cannot read the git commit, so this dataset couldn't be traced")
-    if not _COMMIT_HASH.fullmatch(supplied):
-        # The rule, never the value.
-        raise PublishRefused(f"{COMMIT_ENV} isn't a full lowercase commit hash of 40 characters")
-    return supplied, "unknown"
-
-
-def _installed(package: str) -> str:
-    try:
-        return metadata.version(package)
-    except metadata.PackageNotFoundError as exc:
-        raise PublishRefused(
-            f"{package} isn't installed, so this dataset couldn't be traced"
-        ) from exc
-
-
-def _read_traced(path: Path, what: str) -> bytes:
-    try:
-        return path.read_bytes()
-    except OSError as exc:
-        raise PublishRefused(f"cannot read {what}, so this dataset couldn't be traced") from exc
-
-
-def _invocation_id(raw: bytes, what: str) -> str:
-    try:
-        found = json.loads(raw)["metadata"]["invocation_id"]
-    except (ValueError, TypeError, KeyError):
-        found = None
-    if not isinstance(found, str) or not found:
-        raise PublishRefused(f"{what} names no dbt invocation, so this dataset couldn't be traced")
-    return found
-
-
-def _dbt_manifest_sha256(sources: Sources) -> str:
-    """The compiled dbt manifest's hash, once its invocation is shown to be the one in run_results,
-    so a manifest left by another dbt command can't be recorded as this build's."""
-    what = "the compiled dbt manifest"
-    raw = _read_traced(sources.run_results.with_name("manifest.json"), what)
-    built = _invocation_id(raw, what)
-    checked = _invocation_id(
-        _read_traced(sources.run_results, "dbt's run results"), "dbt's run results"
-    )
-    if built != checked:
-        raise PublishRefused(f"{what} is from another dbt invocation than the run results")
-    return hashlib.sha256(raw).hexdigest()
-
-
-def _provenance(tree_state: str, store: Store, sources: Sources) -> dict[str, Any]:
-    """What else built this dataset, beside the commit. The dbt manifest is the one beside
-    run_results, which the checks read, and from the same dbt invocation."""
-    return {
-        "tree_state": tree_state,
-        "uv_lock_sha256": hashlib.sha256(_read_traced(UV_LOCK, "uv.lock")).hexdigest(),
-        "python_version": platform.python_version(),
-        "dbt_core_version": _installed("dbt-core"),
-        "dbt_duckdb_version": _installed("dbt-duckdb"),
-        "raw_schema_version": max(applied(store.db), default=0),
-        "dbt_manifest_sha256": _dbt_manifest_sha256(sources),
-    }
 
 
 def _refuse_unless_checked(
@@ -1108,171 +729,3 @@ def _build_files(
     _refuse_unsafe_dataset(every_payload, written)
     files["manifest.json"] = _json_bytes(manifest)
     return version, files
-
-
-def _point(root: Path, pointer: str, target: str) -> None:
-    """Swap the pointer in one step, so a reader sees the old dataset or the new one."""
-    temporary = root / f"{pointer}.tmp"
-    temporary.unlink(missing_ok=True)
-    temporary.symlink_to(target)
-    os.replace(temporary, root / pointer)
-
-
-def _install(root: Path, version: str, files: Mapping[str, bytes], pointer: str) -> Path:
-    root.mkdir(parents=True, exist_ok=True)
-    temporary = root / f"{version}.tmp"
-    final = root / version
-    shutil.rmtree(temporary, ignore_errors=True)
-    temporary.mkdir()
-    try:
-        for name, data in files.items():
-            (temporary / name).write_bytes(data)
-        temporary.rename(final)
-        try:
-            _point(root, pointer, version)
-        except BaseException:
-            # Ctrl-C can land after the swap, and the pointer must never be left dangling.
-            if os.path.realpath(root / pointer) != os.path.realpath(final):
-                shutil.rmtree(final, ignore_errors=True)
-            raise
-    except BaseException:
-        shutil.rmtree(temporary, ignore_errors=True)
-        raise
-    return final
-
-
-def _prune(root: Path, pointer: str) -> None:
-    """Keep the newest folders. The pointer's target stays, whatever its age."""
-    current = (root / pointer).resolve().name
-    folders = sorted(
-        path.name
-        for path in root.iterdir()
-        if path.is_dir() and not path.is_symlink() and _STAMP.match(path.name)
-    )
-    finished = [name for name in folders if not name.endswith(".tmp")]
-    doomed = [name for name in folders if name.endswith(".tmp")]
-    doomed += finished[:-KEEP_FOLDERS]
-    for name in doomed:
-        if name != current:
-            shutil.rmtree(root / name, ignore_errors=True)
-
-
-def _first_stale_since(folder: Path) -> str | None:
-    """When the folder first went stale: from its stale.json, or else from a version 2 manifest,
-    which held its own mark. Anything unreadable counts as no time, so it can't stop a mark."""
-    for name in (STALE_FILE, "manifest.json"):
-        try:
-            since = json.loads((folder / name).read_text()).get("stale_since")
-        except (OSError, ValueError, AttributeError) as exc:
-            if not isinstance(exc, FileNotFoundError):
-                logger.warning("ignored an unreadable %s: %s", name, type(exc).__name__)
-            continue
-        if isinstance(since, str) and _UTC_TIME.fullmatch(since):
-            return since
-    return None
-
-
-def mark_stale(out_root: Path, now: datetime | None = None, reason: str = "") -> bool:
-    """Say beside the last good dataset that it is no longer current. Only stale.json is written,
-    in one step, so the published files never change. False when there is nothing to mark.
-
-    It keeps the first time the dataset went stale, and the newest reason. A damaged stale.json is
-    replaced, so it can't stop this mark or any later one.
-    """
-    moment = utc_moment(now)
-    if not (out_root / LATEST).exists():
-        return False
-    # Resolved once, so a pointer that moves can't send this mark into another folder.
-    folder = (out_root / LATEST).resolve()
-    path = folder / STALE_FILE
-    since = _first_stale_since(folder) or utc_text(moment)
-    mark = {"stale_since": since, "stale_reason": reason}
-    _validate(STALE_FILE, mark)
-    temporary = path.with_name(f"{STALE_FILE}.tmp")
-    try:
-        temporary.write_bytes(_json_bytes(mark))
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return True
-
-
-def _read_and_build(
-    run_id: str,
-    marts_path: Path,
-    raw_path: Path,
-    moment: datetime,
-    allow_partial: bool,
-    sources: Sources,
-) -> tuple[str, dict[str, bytes]]:
-    # A missing file would read as in use, and that is not the refusal to explain.
-    if not raw_path.is_file():
-        raise PublishRefused("the raw database does not exist")
-    if not marts_path.is_file():
-        raise PublishRefused("the marts database does not exist, so run dbt first")
-    try:
-        store = Store(raw_path, read_only=True)
-    except duckdb.IOException as exc:
-        raise PublishUnavailable("the raw database is in use by another process") from exc
-    except SchemaOutOfDate as exc:
-        # Says nothing about the data, so the last good dataset isn't called stale.
-        raise PublishUnavailable(str(exc)) from exc
-    try:
-        marts = duckdb.connect(str(marts_path), read_only=True)
-    except duckdb.IOException as exc:
-        store.close()
-        raise PublishUnavailable("the marts database is in use by another process") from exc
-    try:
-        return _build_files(run_id, store, marts, moment, allow_partial, sources)
-    finally:
-        marts.close()
-        store.close()
-
-
-def publish(
-    run_id: str,
-    marts_path: Path,
-    raw_path: Path,
-    out_root: Path,
-    allow_partial: bool = False,
-    now: datetime | None = None,
-    sources: Sources | None = None,
-) -> Path:
-    """Read check_results for run_id and refuse unless all seven are present and acceptable.
-
-    Build and validate everything, write a new dated folder, then repoint the pointer. Return the
-    new folder. On any failure the pointer and every published number stay as they were, and a
-    real publish marks the last good dataset stale. A preview touches nothing under out_root.
-    """
-    moment = utc_moment(now)
-    files_from = sources or Sources()
-    root = out_root.parent / PREVIEW_DIRNAME if allow_partial else out_root
-    pointer = LATEST_PREVIEW if allow_partial else LATEST
-    # Versions have one-second resolution. A second publish that fast says nothing about the data.
-    if (root / _dataset_version(moment, allow_partial)).exists():
-        raise PublishUnavailable("a dataset with this version exists, so try again in a second")
-    try:
-        version, files = _read_and_build(
-            run_id, marts_path, raw_path, moment, allow_partial, files_from
-        )
-        folder = _install(root, version, files, pointer)
-    except PublishUnavailable:
-        raise
-    except Exception as exc:
-        reason = str(exc) if isinstance(exc, PublishRefused) else type(exc).__name__
-        if not allow_partial:
-            try:
-                mark_stale(out_root, moment, reason)
-            except Exception as stale_error:
-                raise PublishRefused(
-                    f"{reason}. The last good dataset could not be marked stale: "
-                    f"{type(stale_error).__name__}"
-                ) from exc
-        if isinstance(exc, PublishRefused):
-            raise
-        raise PublishRefused(f"publish failed: {reason}") from exc
-    try:
-        _prune(root, pointer)
-    except OSError as exc:
-        logger.warning("could not prune old datasets: %s", type(exc).__name__)
-    return folder
