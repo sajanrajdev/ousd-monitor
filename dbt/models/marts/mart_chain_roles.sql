@@ -29,8 +29,10 @@ select
     j.chain,
     j.day_utc as as_of_day,
     j.total_supply,
-    cast(j.total_supply * 10000 // sum(j.total_supply) over () as integer) as supply_share_bps,
-    cast(j.placed_supply * 10000 // j.total_supply as integer) as placed_share_of_chain_bps,
+    cast(j.total_supply * 10000 // nullif(sum(j.total_supply) over (), 0) as integer)
+        as supply_share_bps,
+    cast(j.placed_supply * 10000 // nullif(j.total_supply, 0) as integer)
+        as placed_share_of_chain_bps,
     cast(coalesce(a.minted_30d, 0) as hugeint) as minted_30d,
     cast(coalesce(a.burned_30d, 0) as hugeint) as burned_30d,
     cast(coalesce(a.dex_flow_30d, 0) as hugeint) as dex_flow_30d,

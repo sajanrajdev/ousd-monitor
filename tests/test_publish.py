@@ -1705,10 +1705,27 @@ def test_thresholds_changed_between_check_and_publish_refuse(world):
 def test_definitions_come_from_the_build_even_if_the_check_is_bypassed(world):
     world.run_checks()
     edit_project(world, "placed_days", 20)
-    definitions = publisher._definitions(world.sources)
+    with world.marts() as marts:
+        definitions = publisher._definitions(world.sources, marts)
     assert definitions["placed_days"] == 14
     assert definitions["placed_min_base_units"] == "1000000000000"
     assert definitions["journey_first_day"] == "2026-10-14"
+
+
+def test_definitions_refuse_marts_from_another_build_than_the_record(world):
+    path = world.sources.run_results
+    results = json.loads(path.read_text())
+    results["metadata"]["invocation_id"] = "00000000-0000-0000-0000-000000000000"
+    path.write_text(json.dumps(results))
+    with world.marts() as marts, pytest.raises(ValueError, match="not from the build dbt recorded"):
+        publisher._definitions(world.sources, marts)
+
+
+def test_build_params_changed_between_check_and_publish_refuse(world):
+    world.run_checks()
+    world.mart_sql("UPDATE mart_build_params SET placed_days = 20")
+    with pytest.raises(PublishRefused, match="changed since these checks ran"):
+        world.publish()
 
 
 def test_a_real_vars_build_publishes_the_values_it_used(world):

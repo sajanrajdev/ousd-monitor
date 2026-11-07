@@ -67,6 +67,25 @@ models:
         description: >
           The lowest the balance has been over the placed window. Empty until the wallet has a
           full window of history. {{ doc("base_units") }}
+  - name: int_sync_coverage
+    description: >
+      One row per chain with a sync cursor: how far it has been ingested and its last complete UTC
+      day. A chain with a cursor and no transfers yet keeps its row, with no last complete day.
+      Grain: one row per `chain`.
+    columns:
+      - name: chain
+        description: '{{ doc("chain") }}'
+        data_tests: [unique, not_null]
+      - name: synced_through
+        description: The newest block (or Solana slot) ingested for the chain.
+      - name: last_transfer_timestamp
+        description: >
+          The time of the chain's newest transfer, in seconds since the Unix epoch. Empty when the
+          chain has no transfers.
+      - name: last_complete_day
+        description: >
+          {{ doc("utc_day") }} The chain's last complete day: the day before its newest transfer.
+          Empty when the chain has no transfers.
   - name: int_chain_days
     description: >
       The calendar of UTC days for each chain, from its first day with any wallet movement to its

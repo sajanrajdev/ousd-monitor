@@ -1,4 +1,4 @@
-{% set n = var("placed_days") | int(14) %}
+{% set n = var("placed_days") | int %}
 
 select
     d.chain,

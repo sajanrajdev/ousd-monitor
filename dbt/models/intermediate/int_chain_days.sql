@@ -6,5 +6,5 @@ select
     cast(unnest(generate_series(min(e.day_utc), c.last_complete_day, interval 1 day)) as date)
         as day_utc
 from {{ ref('int_wallet_events') }} as e
-inner join {{ ref('stg_sync_coverage') }} as c on c.chain = e.chain
+inner join {{ ref('int_sync_coverage') }} as c on c.chain = e.chain
 group by c.chain, c.last_complete_day

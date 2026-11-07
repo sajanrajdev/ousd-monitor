@@ -7,7 +7,6 @@ what it found, so a pass can only ever come from the store.
 import csv
 import hashlib
 import json
-import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -45,22 +44,18 @@ MARTS = (
 # Any of these in dbt's arguments means the build covered less than the whole project.
 _NARROWING_ARGS = ("select", "exclude", "selector", "resource_types", "exclude_resource_types")
 _PASSING_NODE = ("success", "pass")
-# Where each threshold shows in the SQL dbt compiled, as (model, pattern). That SQL is the one
-# record of what a build used: dbt_project.yml can change afterwards, with nothing rebuilt.
-_BUILT_THRESHOLDS = {
-    "placed_days": ("int_wallet_placed", r"count\(\*\) over w_full = (\d+)"),
-    "placed_min_base_units": ("mart_supply_journey", r"still_value >= (\d+)"),
-    "large_transfer_base_units": ("mart_activity_waterfall", r"clean_value >= (\d+)\), 0\)"),
-    "clean_tx_min_base_units": (
-        "mart_activity_waterfall",
-        r"clean_value >= (\d+)\)\s+as clean_tx_count",
-    ),
-    "active_dust_base_units": ("mart_activity_kpis", r"sent_7d >= (\d+)\) as active_wallets_7d"),
-    "active_secondary_base_units": (
-        "mart_activity_kpis",
-        r"sent_7d >= (\d+)\)\s+as active_wallets_over_100_7d",
-    ),
-}
+# The model that records a build's thresholds as one row, with the dbt invocation that built it.
+# dbt_project.yml can change after a build, with nothing rebuilt, so this row is what a build used.
+# The model selects one column for each name here, from the var of that name.
+_BUILD_PARAMS_MODEL = "mart_build_params"
+_THRESHOLDS = (
+    "placed_days",
+    "placed_min_base_units",
+    "large_transfer_base_units",
+    "clean_tx_min_base_units",
+    "active_dust_base_units",
+    "active_secondary_base_units",
+)
 # Day-over-day change, in percent, above which a person should look. They never block.
 _SUPPLY_WARNING_PERCENT = 25
 _EVERYDAY_WARNING_PERCENT = 100
@@ -314,28 +309,53 @@ def sampled_balances(
     )
 
 
-def built_thresholds(results: Mapping[str, Any]) -> dict[str, int]:
-    """The thresholds a build really used, from its own compiled SQL. It raises rather than guess
-    when a model no longer shows one, so a changed model stops publish until this is updated."""
-    compiled = {
-        node["unique_id"].split(".")[-1]: node.get("compiled_code") or ""
-        for node in results.get("results", [])
-    }
-    thresholds = {}
-    for name, (model, pattern) in _BUILT_THRESHOLDS.items():
-        values = set(re.findall(pattern, compiled.get(model, "")))
-        if len(values) != 1:
-            raise ValueError(f"the dbt build record does not show one value of {name}")
-        thresholds[name] = int(values.pop())
-    # The model's window holds the day itself and the days before it.
-    thresholds["placed_days"] -= 1
+def _threshold_row(
+    columns: Sequence[str], rows: Sequence[Sequence[Any]]
+) -> tuple[str, dict[str, int]]:
+    """The one mart_build_params row: the invocation that built it, and its thresholds. It raises
+    rather than guess at any other shape, or at an empty or inexact value. Names are matched
+    whatever their case, as a formatter may change that, so two that differ only in case are
+    refused."""
+    names = [column.lower() for column in columns]
+    problem = f"the marts' {_BUILD_PARAMS_MODEL} does not hold one row of every threshold"
+    if len(rows) != 1 or len(set(names)) != len(names):
+        raise ValueError(problem)
+    row = dict(zip(names, rows[0], strict=True))
+    invocation = row.get("invocation_id")
+    thresholds = {name: row.get(name) for name in _THRESHOLDS}
+    if type(invocation) is not str or not invocation:
+        raise ValueError(problem)
+    # A bool is an int to Python, and a string or float would be a guess at the number.
+    exact = {name: value for name, value in thresholds.items() if type(value) is int}
+    if len(exact) != len(_THRESHOLDS):
+        raise ValueError(problem)
+    return invocation, exact
+
+
+def built_thresholds(
+    marts: duckdb.DuckDBPyConnection, results: Mapping[str, Any]
+) -> dict[str, int]:
+    """The thresholds the marts were built with: their mart_build_params row, which must come from
+    the build that dbt's record describes, so a later build that left the marts alone can't vouch
+    for them."""
+    try:
+        cursor = marts.execute(f"SELECT * FROM {_BUILD_PARAMS_MODEL}")
+    except duckdb.CatalogException as exc:
+        raise ValueError(f"marts have no {_BUILD_PARAMS_MODEL}") from exc
+    columns = [column[0] for column in cursor.description or ()]
+    invocation, thresholds = _threshold_row(columns, cursor.fetchall())
+    if invocation != results.get("metadata", {}).get("invocation_id"):
+        raise ValueError(f"marts' {_BUILD_PARAMS_MODEL} is not from the build dbt recorded")
     return thresholds
 
 
-def _threshold_problems(results: Mapping[str, Any], project: Path) -> list[str]:
-    """The project's thresholds, with any --vars on the build, must be the ones it compiled."""
+def _threshold_problems(
+    results: Mapping[str, Any], project: Path, marts: duckdb.DuckDBPyConnection
+) -> list[str]:
+    """The marts must hold the thresholds of the build dbt recorded, and those must be the
+    project's, with any --vars on that build."""
     try:
-        built = built_thresholds(results)
+        built = built_thresholds(marts, results)
     except ValueError as exc:
         return [str(exc)]
     configured = yaml.safe_load(project.read_text())["vars"]
@@ -346,7 +366,7 @@ def _threshold_problems(results: Mapping[str, Any], project: Path) -> list[str]:
     return []
 
 
-def _dbt_problems(sources: Sources) -> list[str]:
+def _dbt_problems(sources: Sources, marts: duckdb.DuckDBPyConnection) -> list[str]:
     """Reads dbt's own record of each node, because an exit status can't show what was built."""
     try:
         results = json.loads(sources.run_results.read_text())
@@ -365,7 +385,7 @@ def _dbt_problems(sources: Sources) -> list[str]:
         problems.append("dbt build ran no models or no tests")
     if bad := [node["unique_id"] for node in nodes if node["status"] not in _PASSING_NODE]:
         problems.append(f"{len(bad)} dbt nodes did not pass, first {sorted(bad)[0]}")
-    problems += _threshold_problems(results, sources.dbt_project)
+    problems += _threshold_problems(results, sources.dbt_project, marts)
     return problems
 
 
@@ -409,7 +429,7 @@ def _labels_disagree(marts: duckdb.DuckDBPyConnection, path: Path) -> list[str]:
 def dbt_tests(
     store: Store, marts: duckdb.DuckDBPyConnection, chains: Sequence[str], sources: Sources
 ) -> CheckResult:
-    problems = _dbt_problems(sources)
+    problems = _dbt_problems(sources, marts)
     problems += _marts_behind_raw(store, marts, chains)
     problems += _labels_disagree(marts, sources.labels)
     return _result("dbt_tests", problems, "full dbt build passed, over the stored transfers")
@@ -498,14 +518,16 @@ def present_chains(store: Store) -> list[str]:
     ]
 
 
+def _table_rows(marts: duckdb.DuckDBPyConnection, table: str) -> list[dict[str, Any]]:
+    """A table's rows, in a stable order, whatever order the file holds them in."""
+    cursor = marts.execute(f"SELECT * FROM {table} ORDER BY ALL")
+    names = [column[0] for column in cursor.description or ()]
+    return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
+
+
 def mart_rows(marts: duckdb.DuckDBPyConnection) -> dict[str, list[dict[str, Any]]]:
-    """Every published mart, in a stable order, whatever order the file holds them in."""
-    tables: dict[str, list[dict[str, Any]]] = {}
-    for table in MARTS:
-        cursor = marts.execute(f"SELECT * FROM {table} ORDER BY ALL")
-        names = [column[0] for column in cursor.description or ()]
-        tables[table] = [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
-    return tables
+    """Every published mart, in a stable order."""
+    return {table: _table_rows(marts, table) for table in MARTS}
 
 
 def _plain(value: object) -> str:
@@ -517,8 +539,8 @@ def _plain(value: object) -> str:
 
 
 def data_fingerprint(store: Store, marts: duckdb.DuckDBPyConnection, sources: Sources) -> str:
-    """Identifies the raw state, the marts, the labels, dbt's record and the project's thresholds
-    that the checks saw."""
+    """Identifies the raw state, the marts, the labels, dbt's record, the project's thresholds and
+    the thresholds the marts were built with, as the checks saw them."""
     raw = {
         chain: [
             cursor := store.synced_through(chain),
@@ -531,7 +553,8 @@ def data_fingerprint(store: Store, marts: duckdb.DuckDBPyConnection, sources: So
         hashlib.sha256(path.read_bytes()).hexdigest()
         for path in (sources.labels, sources.run_results, sources.dbt_project)
     ]
-    payload = json.dumps([raw, files, mart_rows(marts)], default=_plain, sort_keys=True)
+    built = _table_rows(marts, _BUILD_PARAMS_MODEL)
+    payload = json.dumps([raw, files, mart_rows(marts), built], default=_plain, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 
 

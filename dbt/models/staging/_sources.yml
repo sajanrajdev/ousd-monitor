@@ -92,9 +92,14 @@ sources:
           - name: bridge_total
             description: 'The total the issuer reports. {{ doc("base_units") }}'
           - name: tolerance
-            description: 'The difference allowed between the two totals. {{ doc("base_units") }}'
+            description: >
+              The difference allowed between the two totals. {{ doc("base_units") }} The blocking
+              cross-chain supply check accepts a comparison only when this is 0, so publishing
+              needs the two totals to agree exactly.
           - name: passed
-            description: Whether the two totals agree within the tolerance.
+            description: >
+              Whether the two totals agree within the tolerance. The blocking check needs this true
+              with a tolerance of 0, which is exact agreement.
           - name: run_id
             description: '{{ doc("run_id") }} One row per compared attempt, so a run can appear more than once.'
             data_tests: [not_null]
@@ -115,3 +120,32 @@ sources:
             description: How the run ended.
           - name: exit_code
             description: The process exit code the run ended with.
+
+  - name: labels
+    description: >
+      The public labels file, `labels/labels.csv` unless the `labels_path` var names another, read
+      by dbt-duckdb as an external CSV. Declared here so the labels show in dbt's lineage.
+    meta:
+      external_location: "read_csv('{{ var(\"labels_path\") }}', header = true, all_varchar = true)"
+    tables:
+      - name: labels
+        description: >
+          One row per labeled address, every column read as text. `labels/README.md` defines the
+          columns and the rules a label must meet.
+        columns:
+          - name: chain
+            description: '{{ doc("chain") }}'
+          - name: address
+            description: The labeled address. Solana addresses are case-sensitive.
+          - name: entity
+            description: The name a public source gives the holder. Empty for an unnamed cluster.
+          - name: category
+            description: What the address is, one of the categories `labels/README.md` lists.
+          - name: source_type
+            description: The kind of public source that supports the label.
+          - name: source_url
+            description: Where the label can be checked.
+          - name: confidence
+            description: 'How firmly the source supports the label: high or medium.'
+          - name: date_checked
+            description: The day the source was last checked, as written in the file.

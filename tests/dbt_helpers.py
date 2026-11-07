@@ -97,7 +97,9 @@ def invoke_dbt(
         json.dumps({"labels_path": str(labels_path), **(dbt_vars or {})}),
     ]
     if select:
-        args += ["--select", *select]
+        # A narrowed build leaves out a test with a parent it doesn't build, such as the
+        # relationships test from mart_exchange_holdings to stg_labels when only labels are built.
+        args += ["--select", *select, "--indirect-selection", "buildable"]
     previous = {k: os.environ.get(k) for k in ("OUSD_DB_PATH", "OUSD_MARTS_DB_PATH")}
     os.environ["OUSD_DB_PATH"] = str(raw_path)
     os.environ["OUSD_MARTS_DB_PATH"] = str(marts_path)

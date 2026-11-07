@@ -661,10 +661,10 @@ def _labels_payload(
     }
 
 
-def _definitions(sources: Sources) -> dict[str, Any]:
-    """The thresholds the marts were built with, from the build's own compiled SQL, so a changed
+def _definitions(sources: Sources, marts: duckdb.DuckDBPyConnection) -> dict[str, Any]:
+    """The thresholds the marts were built with, from their own record of the build, so a changed
     dbt_project.yml or a --vars on that build can't make the manifest misdescribe them."""
-    built = built_thresholds(json.loads(sources.run_results.read_text()))
+    built = built_thresholds(marts, json.loads(sources.run_results.read_text()))
     return {
         "placed_days": built["placed_days"],
         **{name: str(built[name]) for name in _DEFINITION_AMOUNTS},
@@ -983,7 +983,7 @@ def _build_files(
     statuses = {check.check_name: check.status for check in checks}
 
     tables = mart_rows(marts)
-    definitions = _definitions(sources)
+    definitions = _definitions(sources, marts)
     journey = _journey_rows(tables, date.fromisoformat(definitions["journey_first_day"]))
     activity = _activity_rows(tables)
     roles = _chain_role_rows(tables)

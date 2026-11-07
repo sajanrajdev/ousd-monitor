@@ -1,4 +1,5 @@
 import hashlib
+import json
 from datetime import date
 
 import pytest
@@ -38,13 +39,18 @@ ROWS = [
 
 
 @pytest.fixture(scope="module")
-def marts(tmp_path_factory):
-    tmp = tmp_path_factory.mktemp("dbt")
+def build_dir(tmp_path_factory):
+    return tmp_path_factory.mktemp("dbt")
+
+
+@pytest.fixture(scope="module")
+def marts(build_dir):
+    # Base has a sync cursor and no transfers yet.
     conn = build_marts(
-        tmp,
+        build_dir,
         ROWS,
         labels=[],
-        sync_state={"tempo": 3, "ethereum": 10, "solana": 50},
+        sync_state={"tempo": 3, "ethereum": 10, "solana": 50, "base": 7},
     )
     yield conn
     conn.close()
@@ -70,9 +76,26 @@ def test_value_above_2_pow_64_survives(marts):
 
 def test_last_complete_day_is_day_before_newest_transfer(marts):
     (day,) = marts.execute(
-        "select last_complete_day from stg_sync_coverage where chain = 'tempo'"
+        "select last_complete_day from int_sync_coverage where chain = 'tempo'"
     ).fetchone()
     assert day == date(2023, 11, 14)
+
+
+def test_a_chain_with_a_cursor_and_no_transfers_keeps_its_coverage_row(marts):
+    row = marts.execute(
+        "select synced_through, last_transfer_timestamp, last_complete_day "
+        "from int_sync_coverage where chain = 'base'"
+    ).fetchone()
+    assert row == (7, None, None)
+    (days,) = marts.execute("select count(*) from int_chain_days where chain = 'base'").fetchone()
+    assert days == 0
+
+
+def test_labels_are_a_source_in_dbt_lineage(marts, build_dir):
+    manifest = json.loads((build_dir / "target" / "manifest.json").read_text())
+    assert manifest["nodes"]["model.ousd_monitor.stg_labels"]["depends_on"]["nodes"] == [
+        "source.ousd_monitor.labels.labels"
+    ]
 
 
 def test_null_block_hash_passes_all_tests(marts):

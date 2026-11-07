@@ -104,7 +104,7 @@ Publishing stops if any of these fail:
 1. **Per-chain supply:** mints minus burns equals `totalSupply()` (or Solana's `getTokenSupply`) at the same block or slot, exactly.
 2. **Cross-chain supply:** the sum of chains, from events proved by check 1, equals Bridge's reported total to the base unit, taking each chain's supply at some block from 5 minutes before to 1 minute after Bridge's own `last_updated` time. Any of 3 attempts, on different snapshots 10 minutes apart, may pass. A snapshot over 30 minutes old is unchecked.
 3. **Sampled balances:** model balances equal `balanceOf` for a sample of wallets, and every same-looking transfer group is proven real from its transaction. A chain with Blockscout history needs one completed census of all wallets. On Solana, every wallet is checked, with one read at one slot.
-4. **dbt tests:** uniqueness, not-null and accepted values.
+4. **dbt tests:** the newest dbt command was a full `dbt build`, and every node passed: uniqueness, not-null, accepted values, relationships and unit tests among them. The marts' one `mart_build_params` row must carry the invocation id that build's `run_results.json` records, which shows the marts came from it, and its thresholds must equal `dbt_project.yml` with any `--vars` on that build.
 5. **Volume waterfall:** the parts add back up to headline volume.
 6. **Freshness:** each chain's newest transfer and reconciliation are within 36 hours.
 
