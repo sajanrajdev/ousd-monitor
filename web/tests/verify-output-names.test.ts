@@ -607,7 +607,7 @@ describe("web code", () => {
     const files = ["app", "components", "lib", "scripts"].flatMap(sourceFiles);
     const offenders = files.filter(
       (path) =>
-        path !== join("scripts", "verify-output.mjs") &&
+        path !== join("scripts", "verify-output", "files.ts") &&
         /_RPC_URL/.test(readFileSync(path, "utf8")),
     );
     expect(offenders).toEqual([]);

@@ -7,15 +7,15 @@
     "node": "^22.12 || ^24"
   },
   "scripts": {
-    "acceptance": "node scripts/acceptance.mjs",
+    "acceptance": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/acceptance.mjs",
     "build": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/build-site.mjs",
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint --max-warnings=0 .",
-    "measure": "node scripts/measure-page.mjs",
+    "measure": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/measure-page.mjs",
     "release": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/build-site.mjs --release",
-    "shots": "node scripts/shots.mjs",
+    "shots": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/shots.mjs",
     "test": "vitest run",
     "types": "NEXT_TELEMETRY_DISABLED=1 next typegen && tsc --noEmit"
   },

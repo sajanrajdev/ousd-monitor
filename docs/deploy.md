@@ -10,9 +10,20 @@ How the hosted run is set up: one Railway cron service that runs the pipeline on
 
 1. `make run`, the whole pipeline. Its environment has the Vercel variables removed.
 2. On success, `make web-release`, with an allowlisted environment: no RPC variable reaches the site build. It refuses anything that isn't release grade, and any warning that isn't acknowledged.
-3. On success, the verified `web/.release/latest` is copied into `.vercel/output/static` with `config.json` set to `{"version": 3}`, and `vercel deploy --prebuilt --non-interactive` uploads it as a preview. The CLI gets the same allowlist plus the three Vercel variables. It never gets `--prod`, and the token is never on a command line. The CLI prints a JSON result; `scripts/deploy-result.mjs` reads it, logs the preview URL, logs Vercel's reason on a failure, and **fails the run if the deployment landed in production** (which a new project's first deploy does).
+3. On success, the verified `web/.release/latest` is copied into `.vercel/output/static`, and `web/scripts/vercel-config.ts` writes its `config.json` with the security headers for that folder (below). Then `vercel deploy --prebuilt --non-interactive` uploads it as a preview. The CLI gets the same allowlist plus the three Vercel variables. It never gets `--prod`, and the token is never on a command line. The CLI prints a JSON result; `scripts/deploy-result.mjs` reads it, logs the preview URL, logs Vercel's reason on a failure, and **fails the run if the deployment landed in production** (which a new project's first deploy does).
 
 Any failure exits non-zero and stops there: a failed run releases and deploys nothing, and the live site keeps the last good data. A run that passes but publishes no new dataset also stops before the release. The run refuses to start if `OUSD_PUBLISHED_DIR` or `OUSD_DATASET_DIR` is set, as the site only reads the default path.
+
+## Security headers
+
+`config.json` carries the headers every response sends, generated per release by [`web/scripts/vercel-config.ts`](../web/scripts/vercel-config.ts) from the folder that is uploaded:
+
+- `Content-Security-Policy`: `script-src 'self'` plus the SHA-256 hash of each inline script in that release, so no `'unsafe-inline'` for scripts. `style-src 'self' 'unsafe-inline'`, because the pages carry data-driven `style` attributes a hash can't cover. `frame-ancestors 'none'`, so the dashboard can't be embedded. Also `default-src 'self'`, `base-uri 'self'`, `form-action 'self'` and `object-src 'none'`.
+- `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, and a `Permissions-Policy` that grants no browser feature to any origin.
+
+The script fails the run, and so raises the deploy alert, if a page holds an inline event handler attribute (`on*=`) or a `javascript:` URL, since a hash can't allow those and the policy would break the page.
+
+The Vercel preview toolbar loads from `vercel.live` and shows policy errors on previews. Turn the toolbar off for the project, or accept them. `web/scripts/serve-release.mjs` serves a built folder with the same headers, to read the browser console locally.
 
 ## Alerts and heartbeat
 
