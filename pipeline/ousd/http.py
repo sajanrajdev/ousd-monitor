@@ -49,6 +49,8 @@ SECRET_URL_VARIABLES = (
     "BRIDGE_API_URL",
     "OUSD_ALERT_WEBHOOK_URL",
     "OUSD_HEARTBEAT_URL",
+    "OUSD_BACKUP_URL",
+    "OUSD_BACKUP_ENDPOINT_URL",
 )
 # Any URL at all, for what scrubbing by known URLs can miss, such as a provider's redirect.
 _ANY_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"<>]+")
