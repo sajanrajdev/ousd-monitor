@@ -479,12 +479,14 @@ def test_days_without_transfers_are_rows_of_zeros(tmp_path):
     )
     conn = build_marts(tmp_path, transfers, [], {"ethereum": 10})
     rows = conn.execute(
-        "select day_utc, headline_value, transfer_count, clean_tx_count, fee_count, minted "
+        "select day_utc, headline_value, transfer_count, clean_tx_count, fee_count, minted, "
+        "burned, fees, fee_liquidity, issuer_flows, same_entity, same_tx_netting, dex_flow, "
+        "lending_flow, clean_large, clean_everyday "
         "from mart_activity_waterfall where chain = 'ethereum' order by day_utc"
     ).fetchall()
     conn.close()
     assert [r[0] for r in rows] == [date(2023, 11, 15 + i) for i in range(5)]
-    assert rows[0][1:] == (5 * OUSD, 1, 0, 0, 5 * OUSD)
+    assert rows[0][1:6] == (5 * OUSD, 1, 0, 0, 5 * OUSD)
     for quiet in rows[1:4]:
-        assert quiet[1:] == (0, 0, 0, 0, 0)
+        assert quiet[1:] == (0,) * 15
     assert rows[4][1:3] == (2 * OUSD, 1)

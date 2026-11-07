@@ -1,33 +1,47 @@
--- Every chain has a row for each UTC day between its first and last day in both activity marts,
--- and the two marts cover the same range of days.
-with marts as (
-    select 'mart_activity_waterfall' as model, chain, day_utc
-    from {{ ref('mart_activity_waterfall') }}
+-- The waterfall has exactly the rows of the shared calendar. The KPI mart has exactly the rows of
+-- the supply journey, with no missing day between its first and last.
+with calendar_diff as (
+    select 'waterfall_missing' as problem, chain, day_utc
+    from (
+        select chain, day_utc from {{ ref('int_chain_days') }}
+        except
+        select chain, day_utc from {{ ref('mart_activity_waterfall') }}
+    )
     union all
-    select 'mart_activity_kpis' as model, chain, day_utc
-    from {{ ref('mart_activity_kpis') }}
+    select 'waterfall_extra' as problem, chain, day_utc
+    from (
+        select chain, day_utc from {{ ref('mart_activity_waterfall') }}
+        except
+        select chain, day_utc from {{ ref('int_chain_days') }}
+    )
 ),
 
-spans as (
-    select
-        model,
-        chain,
-        min(day_utc) as first_day,
-        max(day_utc) as last_day,
-        count(distinct day_utc) as days_present
-    from marts
-    group by model, chain
+journey_diff as (
+    select 'kpis_missing' as problem, chain, day_utc
+    from (
+        select chain, day_utc from {{ ref('mart_supply_journey') }}
+        except
+        select chain, day_utc from {{ ref('mart_activity_kpis') }}
+    )
+    union all
+    select 'kpis_extra' as problem, chain, day_utc
+    from (
+        select chain, day_utc from {{ ref('mart_activity_kpis') }}
+        except
+        select chain, day_utc from {{ ref('mart_supply_journey') }}
+    )
+),
+
+kpi_spans as (
+    select chain, min(day_utc) as first_day, max(day_utc) as last_day, count(*) as days_present
+    from {{ ref('mart_activity_kpis') }}
+    group by chain
 )
 
-select chain, model, first_day, last_day
-from spans
-where days_present <> last_day - first_day + 1
+select problem, chain, day_utc from calendar_diff
 union all
-select
-    chain,
-    'range_mismatch' as model,
-    min(first_day) as first_day,
-    max(last_day) as last_day
-from spans
-group by chain
-having count(distinct first_day) > 1 or count(distinct last_day) > 1 or count(*) <> 2
+select problem, chain, day_utc from journey_diff
+union all
+select 'kpis_gap' as problem, chain, first_day as day_utc
+from kpi_spans
+where days_present <> last_day - first_day + 1

@@ -287,3 +287,32 @@ def test_quiet_days_are_rows_with_zero_activity_and_a_rolling_window(gap_marts):
         ).fetchall()
     ]
     assert days == [FIRST_DAY + timedelta(days=i) for i in range(10)]
+
+
+def no_supply_rows():
+    """Day 0 mints and burns the same balance, so no wallet holds anything at its close."""
+    g = Builder("ethereum")
+    g.send(0, [(ZERO_ADDRESS, HEARTBEAT_FROM, 5 * OUSD)])
+    g.send(0, [(HEARTBEAT_FROM, ZERO_ADDRESS, 5 * OUSD)], offset=200)
+    g.send(1, [(ZERO_ADDRESS, HEARTBEAT_FROM, 50 * OUSD)])
+    for day in (2, 3):
+        g.send(day, [(HEARTBEAT_FROM, RECEIVER, 5 * OUSD)])
+    g.send(4, [(HEARTBEAT_FROM, RECEIVER, 1)])  # makes day 3 the last complete day
+    return g.rows
+
+
+def test_kpi_mart_has_no_row_for_a_day_without_supply(tmp_path):
+    conn = build_marts(tmp_path, no_supply_rows(), [], {"ethereum": 1000})
+    try:
+        calendar = conn.execute(
+            "select day_utc from mart_activity_waterfall order by day_utc"
+        ).fetchall()
+        journey = conn.execute(
+            "select day_utc from mart_supply_journey order by day_utc"
+        ).fetchall()
+        kpis = conn.execute("select day_utc from mart_activity_kpis order by day_utc").fetchall()
+    finally:
+        conn.close()
+    assert [r[0] for r in calendar] == [FIRST_DAY + timedelta(days=i) for i in range(4)]
+    assert [r[0] for r in journey] == [FIRST_DAY + timedelta(days=i) for i in range(1, 4)]
+    assert kpis == journey
