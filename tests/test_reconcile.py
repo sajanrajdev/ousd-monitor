@@ -3118,7 +3118,11 @@ def test_an_evm_chain_reads_only_its_sample_with_no_census_asked_for(store):
 
 def test_reconcile_imports_no_chain_family_code():
     imported = set()
-    for node in ast.walk(ast.parse(Path(reconcile.__file__).read_text())):
+    for node in (
+        node
+        for path in Path(reconcile.__file__).parent.glob("*.py")
+        for node in ast.walk(ast.parse(path.read_text()))
+    ):
         if isinstance(node, ast.Import):
             imported |= {alias.name for alias in node.names}
         if isinstance(node, ast.ImportFrom):

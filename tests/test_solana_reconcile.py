@@ -1142,9 +1142,12 @@ def test_supply_then_balances_moves_the_cursor_past_the_recorded_row(store):
 
 
 def test_reconcile_imports_nothing_from_solana():
-    tree = ast.parse(Path(reconcile.__file__).read_text())
     imported: set[str] = set()
-    for node in ast.walk(tree):
+    for node in (
+        node
+        for path in Path(reconcile.__file__).parent.glob("*.py")
+        for node in ast.walk(ast.parse(path.read_text()))
+    ):
         if isinstance(node, ast.Import):
             imported.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
