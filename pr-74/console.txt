@@ -1,0 +1,6 @@
+Console output on the real-dataset build served with the security headers (web/scripts/serve-release.mjs), 1440 and 390 px, pages /, /methodology/ and /reconciliation/:
+
+1440 console messages: 0
+390 console messages: 0
+
+No Content-Security-Policy violations.
