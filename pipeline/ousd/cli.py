@@ -1,4 +1,5 @@
-"""Command line entry point: `ousd sync`, `reconcile`, `check`, `publish` and `migrate`."""
+"""Command line entry point: `ousd sync`, `reconcile`, `check`, `publish`, `migrate`, `backup`
+and `restore`."""
 
 import argparse
 import logging
@@ -11,6 +12,7 @@ from pathlib import Path
 
 import duckdb
 
+from ousd import backup
 from ousd.chains import (
     DECIMALS,
     DEFAULT_BRIDGE_URL,
@@ -22,7 +24,7 @@ from ousd.chains import (
 from ousd.checks import DEFAULT_MARTS_PATH, evaluate_checks, record_checks, unacceptable
 from ousd.http import HttpError, PoliteClient
 from ousd.ingest import sync_chain
-from ousd.migrations import SchemaOutOfDate, migrate
+from ousd.migrations import LATEST, SchemaOutOfDate, migrate
 from ousd.probes import build_probes, history_for, rpc_for, solana_rpc_for
 from ousd.publish import DEFAULT_PUBLISHED_DIR, PublishRefused, PublishUnavailable, publish
 from ousd.reconcile import (
@@ -371,6 +373,94 @@ def _migrate() -> int:
     return 0
 
 
+def _held(exc: duckdb.IOException) -> int:
+    """Exit 2 for a database another process holds. The error text carries the path, so it is
+    never echoed."""
+    held = "lock" in str(exc).lower()
+    print(
+        "error: database in use: another process holds it; try again when it finishes"
+        if held
+        else "error: cannot open the database; check OUSD_DB_PATH",
+        file=sys.stderr,
+    )
+    return 2
+
+
+def _schema(version: int | None) -> str:
+    if version is None:
+        return "no schema version (from before migrations)"
+    return f"schema version {version}"
+
+
+def _backup() -> int:
+    """Copy the raw database, then upload the copy when OUSD_BACKUP_URL is set. No chain key."""
+    raw_path = Path(os.environ.get("OUSD_DB_PATH", DEFAULT_DB_PATH))
+    if not raw_path.is_file():
+        print("error: the raw database does not exist; check OUSD_DB_PATH", file=sys.stderr)
+        return 1
+    try:
+        settings = backup.settings_from_env(os.environ)
+        made = backup.take(raw_path, settings.folder, datetime.now(UTC))
+    except duckdb.IOException as exc:
+        return _held(exc)
+    except (backup.BackupError, OSError) as failure:
+        print(f"error: {failure}", file=sys.stderr)
+        return 1
+    print(f"backup: {made.path} ({made.size} bytes, {_schema(made.schema_version)})")
+    print(f"sha256: {made.sha256}")
+    try:
+        removed = backup.prune_local(
+            settings.folder, settings.keep_daily, settings.keep_weekly, made.path.name
+        )
+    except OSError as failure:
+        print(f"error: retention failed: {failure}; the new copy is kept", file=sys.stderr)
+        return 1
+    for name in removed:
+        print(f"removed: {settings.folder / name}")
+    if settings.remote is None:
+        print("upload: skipped, OUSD_BACKUP_URL is not set")
+        return 0
+    remote = settings.remote
+    try:
+        client = backup.make_client(remote)
+        # Object names only: the bucket and prefix come from OUSD_BACKUP_URL, never echoed.
+        print(f"uploaded: {backup.upload(made, remote, client)} to object storage")
+        for name in backup.prune_remote(
+            remote, client, settings.keep_daily, settings.keep_weekly, made.path.name
+        ):
+            print(f"removed: {name} from object storage")
+    except (backup.BackupError, OSError) as failure:
+        print(f"error: {failure}; the local copy is kept", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _restore(source: Path, force: bool) -> int:
+    """Verify a copy and put it at OUSD_DB_PATH. It needs no key and no network."""
+    target = Path(os.environ.get("OUSD_DB_PATH", DEFAULT_DB_PATH))
+    try:
+        restored = backup.restore(source, target, force=force, at=datetime.now(UTC))
+    except duckdb.IOException as exc:
+        return _held(exc)
+    except backup.RestoreRefused as refusal:
+        print(f"RESTORE REFUSED: {refusal}", file=sys.stderr)
+        return 1
+    except (backup.BackupError, OSError) as failure:
+        print(f"error: {failure}", file=sys.stderr)
+        return 1
+    print(f"verified: sha256 {restored.sha256}")
+    print(f"restored: {source} to {target}")
+    if restored.replaced is not None:
+        print(f"kept: the database it replaced is at {restored.replaced}")
+    # restore refuses a copy newer than the code, so this is the only mismatch left.
+    if restored.schema_version is None or restored.schema_version < LATEST:
+        print(
+            f"migrations: the copy has {_schema(restored.schema_version)} and this code is at "
+            f"{LATEST}; the next writer applies the rest, or run `ousd migrate` before `ousd check`"
+        )
+    return 0
+
+
 def _publish(run_id: str, allow_partial: bool) -> int:
     try:
         folder = publish(
@@ -431,6 +521,29 @@ def main(argv: list[str] | None = None) -> int:
         "when it opens the database; check and publish only read, so they refuse until it is "
         "done. Exit 0 on success, 1 on a failure, 2 when the database is in use.",
     )
+    commands.add_parser(
+        "backup",
+        help="copy the raw database, and upload the copy when OUSD_BACKUP_URL is set",
+        description="Checkpoint the raw database under the writer lock and copy it to "
+        "OUSD_BACKUP_DIR (default data/backups) as ousd-YYYYMMDDTHHMMSSZ.duckdb with a .sha256. "
+        "With OUSD_BACKUP_URL and its credentials set, upload it to S3-compatible storage. "
+        "Retention keeps the newest copy of the last OUSD_BACKUP_KEEP_DAILY days (default 7) and "
+        "of the last OUSD_BACKUP_KEEP_WEEKLY weeks (default 4), here and in the bucket.",
+        epilog="Exit 0 on success, 1 on a failure (a failed upload keeps the local copy), 2 when "
+        "the database is in use.",
+    )
+    restore = commands.add_parser(
+        "restore",
+        help="verify a backup against its checksum and restore it to OUSD_DB_PATH",
+        description="Verify FILE against FILE.sha256, then put it at OUSD_DB_PATH. A database "
+        "already there is replaced only with --force, and kept beside it, renamed. A copy older "
+        "than the code is migrated by the next writer, or by `ousd migrate`.",
+        epilog="Exit 0 on success, 1 on a failure or refusal, 2 when the database is in use.",
+    )
+    restore.add_argument("file", type=Path, help="the backup, with its .sha256 beside it")
+    restore.add_argument(
+        "--force", action="store_true", help="replace an existing database, keeping it renamed"
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -442,6 +555,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.chain:
             parser.error("--chain does not apply to migrate: it covers the whole database")
         return _migrate()
+
+    if args.command in ("backup", "restore"):
+        if args.chain:
+            parser.error(f"--chain does not apply to {args.command}: it covers the whole database")
+        return _backup() if args.command == "backup" else _restore(args.file, args.force)
 
     if args.command in ("check", "publish"):
         if args.chain:
@@ -479,16 +597,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         store = Store(os.environ.get("OUSD_DB_PATH", DEFAULT_DB_PATH))
     except duckdb.IOException as exc:
-        # A running sync holds the file. Not a verdict, so not exit 1. The error text carries the
-        # path, so it is never echoed.
-        held = "lock" in str(exc).lower()
-        print(
-            "error: database in use: another process holds it; try again when it finishes"
-            if held
-            else "error: cannot open the database; check OUSD_DB_PATH",
-            file=sys.stderr,
-        )
-        return 2
+        # A running sync holds the file. Not a verdict, so not exit 1.
+        return _held(exc)
     except SchemaOutOfDate as newer:
         print(f"error: {newer}", file=sys.stderr)
         return 2

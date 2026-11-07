@@ -1,5 +1,5 @@
 .PHONY: check lint types test build models dbt-docs sync reconcile publish preview run daily \
-	dagster-dev py-lint py-types py-test py-build \
+	dagster-dev backup py-lint py-types py-test py-build \
 	web-tools web-install web-lint web-types web-test web-samples web-build web-release web-browser \
 	web-shots web-acceptance
 
@@ -68,6 +68,11 @@ preview:
 	run_id=$${RUN_ID:-preview-$$(date -u +%Y%m%dT%H%M%SZ)}; \
 	uv run --locked $(ENV_FILE) ousd check --run-id "$$run_id" --allow-partial; \
 	uv run --locked $(ENV_FILE) ousd publish --run-id "$$run_id" --allow-partial
+
+# A checksummed copy of the raw database in data/backups, uploaded when OUSD_BACKUP_URL is set.
+# For manual use: the daily run doesn't call it. Exit 2 means another process holds the database.
+backup:
+	uv run --locked $(ENV_FILE) ousd backup
 
 # Dagster needs an absolute home. The folder is created first, and data/ is gitignored. Load the
 # module as a file: the pipeline/dagster folder has no __init__.py, so it can't shadow dagster.

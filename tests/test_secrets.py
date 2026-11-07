@@ -1,4 +1,5 @@
-"""A keyed RPC URL, or the key alone, must never reach a log line, an exception or a repr."""
+"""A keyed RPC URL, or the key alone, must never reach a log line, an exception or a repr. Nor
+may the object storage credentials backups use."""
 
 import json
 import logging
@@ -8,13 +9,16 @@ import traceback
 
 import httpx
 import pytest
+from botocore.stub import Stubber
 from conftest import make_chain
-from ousd import cli, probes
+from ousd import backup, cli, probes
+from ousd.backup import BackupError
 from ousd.chains import Chain, missing_rpc_keys
 from ousd.decode import TRANSFER_TOPIC
 from ousd.http import HttpError, PoliteClient
 from ousd.solana import SolanaChain, SolanaDataError, SolanaRpc, SolanaRpcError
 from ousd.sources import BlockscoutClient, RpcClient, RpcError
+from test_backup import refuse_every_request
 
 KEY = "k3y9aZ7QwErTyUiOpAsDfGhJkLzXcVbNm1234567890abcdefghijklmnopqr"
 # Where sources.py cuts a provider's reply in an error.
@@ -811,3 +815,250 @@ def test_the_solana_chain_and_client_reprs_hide_the_keyed_url(url):
 
     assert KEY not in repr(chain)
     assert KEY not in repr(rpc)
+
+
+# Object storage credentials for backups. The secret key is KEY; the access key ID is treated
+# as a secret too.
+
+ACCESS_KEY_ID = "SCWQ7ZK3M9P2X4B8N6V1"
+BACKUP_ENV = {
+    "OUSD_BACKUP_URL": "s3://ousd-backups/raw",
+    "OUSD_BACKUP_ENDPOINT_URL": "https://s3.fr-par.scw.cloud",
+    "OUSD_BACKUP_REGION": "fr-par",
+    "OUSD_BACKUP_ACCESS_KEY_ID": ACCESS_KEY_ID,
+    "OUSD_BACKUP_SECRET_ACCESS_KEY": KEY,
+}
+
+
+def backup_remote() -> backup.Remote:
+    remote = backup.settings_from_env(BACKUP_ENV).remote
+    assert remote is not None
+    return remote
+
+
+def quoting_failure() -> Exception:
+    """An error as a provider or botocore might raise it, quoting both credentials."""
+    failure = RuntimeError(f"denied {ACCESS_KEY_ID} {KEY}")
+    failure.response = {  # type: ignore[attr-defined]
+        "Error": {"Code": "SignatureDoesNotMatch", "Message": f"{ACCESS_KEY_ID} {KEY}"}
+    }
+    return failure
+
+
+class FailingS3:
+    def __init__(self, operation: str) -> None:
+        self.operation = operation
+
+    def _maybe_fail(self, operation: str, reply=None):
+        if operation == self.operation:
+            raise quoting_failure()
+        return reply
+
+    def upload_file(self, **kwargs):
+        return self._maybe_fail("upload_file")
+
+    def head_object(self, **kwargs):
+        return self._maybe_fail("head_object", {"ContentLength": 4})
+
+    def put_object(self, **kwargs):
+        return self._maybe_fail("put_object")
+
+    def list_objects_v2(self, **kwargs):
+        return self._maybe_fail("list_objects_v2", {"Contents": [], "IsTruncated": False})
+
+    def delete_object(self, **kwargs):
+        return self._maybe_fail("delete_object")
+
+
+def test_the_backup_settings_and_remote_reprs_hide_the_credentials():
+    settings = backup.settings_from_env(BACKUP_ENV)
+
+    for text in (repr(settings), repr(settings.remote), str(settings.remote)):
+        assert KEY not in text
+        assert ACCESS_KEY_ID not in text
+
+
+@pytest.mark.parametrize("operation", ["upload_file", "head_object", "put_object"])
+def test_a_failing_upload_quoting_the_credentials_is_clean(operation, tmp_path, caplog):
+    copy = tmp_path / "ousd-20261106T063005Z.duckdb"
+    copy.write_bytes(b"data")
+    backup.checksum_path(copy).write_text("0" * 64 + "  " + copy.name + "\n")
+    made = backup.Backup(copy, "0" * 64, 4, 1)
+
+    with pytest.raises(BackupError) as raised:
+        backup.upload(made, backup_remote(), FailingS3(operation))
+
+    assert "SignatureDoesNotMatch" in str(raised.value)
+    assert_clean(raised.value, caplog, KEY, ACCESS_KEY_ID)
+
+
+@pytest.mark.parametrize("operation", ["list_objects_v2", "delete_object"])
+def test_a_failing_prune_quoting_the_credentials_is_clean(operation, caplog):
+    s3 = FailingS3(operation)
+    if operation == "delete_object":
+        names = [f"ousd-2026110{day}T000000Z.duckdb" for day in (1, 2)]
+        contents = [{"Key": "raw/" + name} for name in names]
+        contents += [{"Key": "raw/" + name + ".sha256"} for name in names]
+        s3.list_objects_v2 = lambda **kwargs: {"Contents": contents, "IsTruncated": False}  # type: ignore[method-assign]
+
+    with pytest.raises(BackupError) as raised:
+        backup.prune_remote(backup_remote(), s3, keep_daily=1, keep_weekly=0)
+
+    assert_clean(raised.value, caplog, KEY, ACCESS_KEY_ID)
+
+
+def test_a_real_botocore_client_error_quoting_the_credentials_is_clean(caplog):
+    remote = backup_remote()
+    client = backup.make_client(remote)
+    stubber = Stubber(client)
+    stubber.add_client_error(
+        "list_objects_v2",
+        service_error_code="AccessDenied",
+        service_message=f"denied for {ACCESS_KEY_ID} with {KEY}",
+        http_status_code=403,
+    )
+
+    with stubber, pytest.raises(BackupError) as raised:
+        backup.prune_remote(remote, client, keep_daily=1, keep_weekly=0)
+
+    assert str(raised.value) == "object storage listing failed: AccessDenied"
+    assert_clean(raised.value, caplog, KEY, ACCESS_KEY_ID)
+
+
+@pytest.mark.parametrize("operation", ["upload", "listing"])
+def test_a_signed_request_refused_with_a_403_quoting_the_credentials_is_clean(
+    operation, tmp_path, caplog, capfd
+):
+    copy = tmp_path / "ousd-20261106T063005Z.duckdb"
+    copy.write_bytes(b"data")
+    backup.checksum_path(copy).write_text("0" * 64 + "  " + copy.name + "\n")
+    made = backup.Backup(copy, "0" * 64, 4, 1)
+    remote = backup_remote()
+    client = backup.make_client(remote)
+    sent = refuse_every_request(client, f"denied for {ACCESS_KEY_ID} with {KEY}")
+
+    with pytest.raises(BackupError) as raised:
+        if operation == "upload":
+            backup.upload(made, remote, client)
+        else:
+            backup.prune_remote(remote, client, keep_daily=1, keep_weekly=0)
+
+    # botocore signed a real request, which names the access key, and got the reply back.
+    assert ACCESS_KEY_ID in str(sent[0].headers["Authorization"])
+    assert str(raised.value) == f"object storage {operation} failed: AccessDenied"
+    assert_clean(raised.value, caplog, KEY, ACCESS_KEY_ID)
+    captured = capfd.readouterr()
+    records = [record.getMessage() for record in caplog.records]
+    for secret in (KEY, ACCESS_KEY_ID):
+        assert secret not in captured.out + captured.err
+        assert not any(secret in record for record in records)
+
+
+def test_the_client_is_built_by_a_call_whose_repr_holds_no_credential(monkeypatch):
+    passed = []
+    call = backup._call
+
+    def spy(remote, operation, build):
+        passed.append(build)
+        return call(remote, operation, build)
+
+    monkeypatch.setattr(backup, "_call", spy)
+
+    backup.make_client(backup_remote())
+
+    assert len(passed) == 1
+    for text in (repr(passed[0]), str(passed[0])):
+        assert KEY not in text
+        assert ACCESS_KEY_ID not in text
+
+
+def test_building_the_client_logs_no_credential(caplog):
+    client = backup.make_client(backup_remote())
+
+    assert KEY not in caplog.text
+    assert ACCESS_KEY_ID not in caplog.text
+    assert KEY not in repr(client)
+    assert logging.getLogger("botocore").getEffectiveLevel() >= logging.WARNING
+
+
+def test_the_client_ignores_aws_variables_for_credentials_and_endpoint(monkeypatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAAMBIENT000000000")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "ambient-secret")
+    monkeypatch.setenv("AWS_ENDPOINT_URL", "https://elsewhere.invalid")
+    monkeypatch.setenv("AWS_ENDPOINT_URL_S3", "https://elsewhere-s3.invalid")
+
+    client = backup.make_client(backup_remote())
+
+    assert client.meta.endpoint_url == "https://s3.fr-par.scw.cloud"  # type: ignore[attr-defined]
+    credentials = client._request_signer._credentials  # type: ignore[attr-defined]
+    assert (credentials.access_key, credentials.secret_key) == (ACCESS_KEY_ID, KEY)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"), [("OUSD_BACKUP_REGION", "not a region!"), ("AWS_PROFILE", "missing")]
+)
+def test_a_client_that_cannot_be_built_is_a_clean_cli_error(
+    name, value, monkeypatch, tmp_path, capsys, caplog
+):
+    monkeypatch.setenv("OUSD_DB_PATH", str(tmp_path / "ousd.duckdb"))
+    monkeypatch.setenv("OUSD_BACKUP_DIR", str(tmp_path / "backups"))
+    for key, setting in BACKUP_ENV.items():
+        monkeypatch.setenv(key, setting)
+    monkeypatch.setenv(name, value)
+    cli.Store(tmp_path / "ousd.duckdb").close()
+
+    assert cli.main(["backup"]) == 1
+
+    captured = capsys.readouterr()
+    assert "error: object storage client setup failed: " in captured.err
+    for secret in (KEY, ACCESS_KEY_ID):
+        assert secret not in captured.out + captured.err + caplog.text
+
+
+def test_an_error_code_quoting_a_credential_is_scrubbed(tmp_path, caplog):
+    failure = RuntimeError("x")
+    failure.response = {"Error": {"Code": f"Bad{KEY}"}}  # type: ignore[attr-defined]
+
+    class Echo(FailingS3):
+        def list_objects_v2(self, **kwargs):
+            raise failure
+
+    with pytest.raises(BackupError) as raised:
+        backup.prune_remote(backup_remote(), Echo("none"), keep_daily=1, keep_weekly=0)
+
+    assert "[credential]" in str(raised.value)
+    assert_clean(raised.value, caplog, KEY)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("OUSD_BACKUP_URL", f"s3://{ACCESS_KEY_ID}:{KEY}@ousd-backups/raw"),
+        ("OUSD_BACKUP_URL", f"s3://ousd-backups/raw?secret={KEY}"),
+        ("OUSD_BACKUP_ENDPOINT_URL", f"https://{ACCESS_KEY_ID}:{KEY}@s3.fr-par.scw.cloud"),
+    ],
+)
+def test_a_url_holding_a_credential_is_refused_without_echoing_it(name, value, caplog):
+    with pytest.raises(BackupError) as raised:
+        backup.settings_from_env({**BACKUP_ENV, name: value})
+
+    assert name in str(raised.value)
+    assert_clean(raised.value, caplog, KEY, ACCESS_KEY_ID)
+
+
+def test_a_failing_backup_through_the_cli_never_shows_the_credentials(
+    monkeypatch, tmp_path, capsys, caplog
+):
+    monkeypatch.setenv("OUSD_DB_PATH", str(tmp_path / "ousd.duckdb"))
+    monkeypatch.setenv("OUSD_BACKUP_DIR", str(tmp_path / "backups"))
+    for name, value in BACKUP_ENV.items():
+        monkeypatch.setenv(name, value)
+    cli.Store(tmp_path / "ousd.duckdb").close()
+    monkeypatch.setattr(backup, "make_client", lambda remote: FailingS3("upload_file"))
+
+    assert cli.main(["-v", "backup"]) == 1
+
+    captured = capsys.readouterr()
+    for secret in (KEY, ACCESS_KEY_ID):
+        assert secret not in captured.out + captured.err + caplog.text
+    assert "the local copy is kept" in captured.err
