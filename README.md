@@ -1,84 +1,70 @@
 # Open USD Monitor
 
-An independent dashboard asking one question: is Open USD (OUSD) supply turning into money that moves?
+[![CI](https://github.com/sajanrajdev/ousd-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/sajanrajdev/ousd-monitor/actions/workflows/ci.yml)
+[![Licence: MIT](https://img.shields.io/badge/code-MIT-blue.svg)](LICENSE)
 
-OUSD is a stablecoin issued by Bridge for Open Standard, with launch liquidity committed by its partners. Supply that partners place is not demand. This project reads the public chain data on Tempo, Ethereum, Base and Solana, checks that its own numbers add up, and shows how much of the supply is placed, how much is held by venues, and how much of the transfer volume is real activity.
+An independent public dashboard that asks one question: is Open USD (OUSD) supply turning into money that moves? OUSD is a stablecoin issued by Bridge for Open Standard, and supply that its partners place is not the same as demand. This project reads public chain data on Tempo, Ethereum, Base and Solana, checks that its own numbers add up, and shows how much supply is placed, how much sits with venues, and how much of the transfer volume is everyday activity.
 
-**Independent.** Not affiliated with Open Standard, Bridge or any partner. Not financial advice, and not an attestation: it says nothing about the reserves behind OUSD. For reserves, read Bridge's own reports. [The methodology](docs/methodology.md) says what each number means and how far to trust it.
+![The dashboard: total supply, placed share, everyday volume and velocity, then supply by chain](docs/img/dashboard.png)
 
-## Status
+**Independent.** Not affiliated with Open Standard, Bridge or any partner. Not financial advice, and not an attestation: it says nothing about the reserves behind OUSD, so read Bridge's own reports for that. [The methodology](docs/methodology.md) says what each number means and how far to trust it.
 
-First public version.
-
-- **Data pipeline:** it ingests all four chains, reconciles them against `totalSupply()` and against Bridge's reported total, models the results with dbt, runs seven blocking checks and publishes a versioned dataset. The latest recorded reconciliation is in [lessons learned](docs/build-log.md), with the time it ran.
-- **Site:** a static site built from the latest dataset that passed every check. Each page shows when its data was read, and warns when that is more than 36 hours old.
-- **Daily run:** live on Railway. A cron job runs the pipeline at 06:00 UTC and deploys a preview of the site only when every check passes. Production is promoted by hand. See [deploying the daily run](docs/deploy.md).
-- **Next:** see [the roadmap](docs/roadmap.md).
-
-More: [the PRD](docs/PRD.md), [the architecture](docs/architecture.md), [operations](docs/operations.md) and [the design system](docs/design-system.md).
-
-## Run it
-
-You need [uv](https://docs.astral.sh/uv/), which installs Python 3.12 and the dependencies. The site also needs Node 22.12 or newer and npm.
+## See it
 
 ```sh
-make check   # lint, types and tests for the pipeline and the site, with no chain access
+make demo
 ```
 
-`make check` needs no `.env`. A clean install does reach package registries.
+This builds the bundled sample dataset and serves it at <http://127.0.0.1:8000/>. It needs [uv](https://docs.astral.sh/uv/) and Node 22.12+ or 24, and no keys, no `.env` and no chain access. Every page says it is a sample. Set `DEMO_PORT` to use another port.
 
-To ingest, reconcile and publish real data you need keyed RPC URLs for Base and Solana in `.env` (copy `.env.example`). [Operations](docs/operations.md) covers the order of the steps, the keys, the reconciliation exit codes, the one-writer rule, the daily run, alerts, and backup and restore.
-
-```sh
-make sync        # ingest transfers to the tip, repairing any reorg
-make reconcile   # compare the events with each chain's supply and with Bridge's total
-make models      # dbt: raw to staging to marts, with tests
-make publish     # run the checks, then publish only if all pass
-make run         # all of the above in one process
-```
-
-Run one writer at a time: these commands share the DuckDB file `data/ousd.duckdb` (git ignores `data/`), and the second to start exits 2 with "database in use". The first full reconcile needs `--census`, and the first Ethereum sync can take hours. Both are explained in [operations](docs/operations.md).
-
-## The site
-
-The site is static Next.js. It reads a published dataset at build time, and visitors' browsers read nothing else.
-
-```sh
-make web-install   # install the site's packages
-make web-samples   # build both bundled samples, which are marked as samples on every page
-make web-build     # build from the newest dataset it finds, else the sample
-make web-release   # a release build: refuses sample, preview and unchecked data
-```
-
-Always use these targets and never a bare `pnpm`; [operations](docs/operations.md#the-site) says why and lists the rest.
+Live site: _link to follow once the site is public._
 
 ## How it works
 
-| Module | Job |
-|---|---|
-| `chains.py` | Per-chain settings: token, start block, range limits, reorg lookback |
-| `http.py` | Throttling, retries with backoff, and honoring rate limit hints |
-| `sources.py` | JSON-RPC, Blockscout paging and Bridge's API |
-| `decode.py` | Transfer logs to integers and addresses |
-| `store.py` | DuckDB tables. Amounts are `HUGEINT` base units, never floats |
-| `ingest.py` | Idempotent sync and reorg repair |
-| `solana.py` | Solana ingestion from finalized data, and its supply and balance checks |
-| `probes.py` | One reader per chain, so `reconcile.py` stays chain-agnostic |
-| `reconcile.py` | Mints minus burns against supply at the same block, sampled balances, same-looking groups and the Bridge check |
-| `checks.py` | The seven blocking checks |
-| `publish.py` | The versioned dataset the site reads, written only if every check passed |
-| `pipeline/dagster/` | The daily job, its schedule and failure sensor |
-| `dbt/` | Staging, intermediate and mart models, with tests |
-| `labels/` | Entity labels, each with its public source and confidence |
-| `web/` | The static site and its build and release scripts |
+```mermaid
+flowchart LR
+  chains["Tempo, Ethereum,<br/>Base, Solana"] --> raw[("DuckDB<br/>raw store")]
+  raw --> rec["Reconciliation"]
+  rec --> marts["dbt marts"]
+  marts --> checks{"Blocking<br/>checks"}
+  checks --> data["Versioned<br/>dataset"]
+  data --> site["Static site"]
+```
 
-- **Idempotent:** a transfer's key is chain, block or slot, and log index. Each range and its cursor commit together. Reading a row again changes nothing, and a different row at the same position stops the sync.
-- **Paging:** a Blockscout page may end inside a block, so that block is requested again from its start. A range ends only on a response with nothing past its first block, not on a short page. Blockscout never serves unfinalized blocks, because its rows have no block hash.
-- **Reorgs:** each run compares stored block hashes with the chain, newest first, and rolls back to the first match. That relies on the stored hashes being one chain, so a new block must extend the stored block below it. The window covers at least the lookback and every unfinalized block. Reorgs here are rare, so this is tested with simulated reorgs only.
-- **Late logs:** each run reads the newest stored blocks again, in case a lagging node returned too few logs the first time.
-- **Failures:** each HTTP attempt has a 120 second deadline, and failures are retried with backoff. Provider URLs never reach logs or errors, as they can hold keys.
-- **Reconciliation:** `totalSupply()` is read by block hash, so it can't land on a competing fork. Bridge's total is compared with the sum of all four chains, each at a block near Bridge's own time.
+Transfers are ingested to the chain tip, reconciled, modelled, checked and only then published. If any check fails, nothing new is published and the last good dataset is marked stale.
 
-## License
+## What makes the numbers trustworthy
 
-[MIT](LICENSE). The data comes from public chains and Bridge's public API; the entity labels in `labels/` each cite their own public source.
+- **Exact integers.** Amounts stay as integers in base units from the chain to the dataset. Rounding happens only when a number is shown.
+- **Reconciled to `totalSupply()`.** Each chain's transfer events must add up to the contract's supply, to the base unit.
+- **Cross-checked against the issuer.** The four-chain total is compared with the total Bridge's API reports.
+- **Blocking checks.** Seven checks run before every publish, and a failure stops it.
+- **Immutable, versioned datasets.** Each release is a new folder with a manifest, never an edit in place.
+- **Public label sources.** Every entity label records its public source and a confidence, and nothing is named by inference.
+
+OUSD is identified by contract address, because the ticker also belongs to Origin Dollar.
+
+## Run the pipeline
+
+You need keyed RPC URLs for Base and Solana in `.env` (copy `.env.example`). Tempo and Ethereum use public defaults.
+
+```sh
+make check   # lint, types and tests for the pipeline and the site; no keys, no chain access
+make run     # ingest, reconcile, model, check and publish to data/published/latest
+```
+
+[Operations](docs/operations.md) covers the order of the steps, the keys, the one-writer rule, the daily run, alerts, and backup and restore.
+
+## Documentation
+
+- [Methodology](docs/methodology.md): what each number means
+- [Architecture](docs/architecture.md): the stack and the code layout
+- [Operations](docs/operations.md): running, deploying and recovering
+- [Roadmap](docs/roadmap.md): what is next
+- [Lessons learned](docs/build-log.md): what went wrong, and what was fixed
+- [Design system](docs/design-system.md): the visual system
+- [Contributing](CONTRIBUTING.md) and [security](SECURITY.md)
+
+## Licence
+
+The code is MIT, in [LICENSE](LICENSE). The published dataset is CC-BY-4.0.

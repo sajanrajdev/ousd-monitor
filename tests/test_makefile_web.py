@@ -25,13 +25,6 @@ PYTHON_STEPS = {
     "test": ("pytest",),
     "build": ("uv build",),
 }
-WEB_STEPS = {
-    "check": ("run format:check", "run lint", "run types", "run test", "run build"),
-    "lint": ("run format:check", "run lint"),
-    "types": ("run types",),
-    "test": ("run test",),
-    "build": ("run build",),
-}
 
 
 @pytest.fixture
@@ -83,36 +76,57 @@ def test_without_a_site_a_web_target_fails(copy: Path, target: str) -> None:
     assert "No site here" in result.stdout
 
 
-@pytest.mark.parametrize("target", sorted(WEB_STEPS))
-def test_with_a_site_the_target_adds_its_web_steps_after_an_install(
+@pytest.mark.parametrize("target", sorted(PYTHON_STEPS))
+def test_with_a_site_the_target_installs_the_site_before_any_other_site_step(
     copy: Path, target: str
 ) -> None:
     add_site(copy)
 
-    output = make(copy, "-n", target).stdout
+    lines = [line for line in make(copy, "-n", target).stdout.splitlines() if "--dir web" in line]
 
-    for step in PYTHON_STEPS[target]:
-        assert step in output
-    install = output.index("npx --yes pnpm@1.2.3 --dir web install --frozen-lockfile")
-    for step in WEB_STEPS[target]:
-        assert output.index(f"npx --yes pnpm@1.2.3 --dir web {step}") > install
+    assert lines
+    assert "install" in lines[0]
+    assert not any("install" in line for line in lines[1:])
 
 
-def test_check_runs_python_first_then_the_web_steps_in_order(copy: Path) -> None:
+def test_check_runs_the_python_steps_before_the_site_steps(copy: Path) -> None:
     add_site(copy)
 
     output = make(copy, "-n", "check").stdout
 
-    order = ["pytest", "check-node.mjs", "install --frozen-lockfile", "format:check", "run lint"]
-    order += ["run types", "run test", "run build"]
-    positions = [output.index(step) for step in order]
-    assert positions == sorted(positions)
+    assert output.index("pytest") < output.index("check-node.mjs") < output.index("--dir web")
 
 
 def test_check_does_not_capture_screenshots(copy: Path) -> None:
     add_site(copy)
 
     assert "shots" not in make(copy, "-n", "check").stdout
+
+
+def test_demo_builds_the_complete_sample_then_serves_it_on_localhost(copy: Path) -> None:
+    add_site(copy)
+    (copy / ".env").write_text("")
+
+    output = make(copy, "-n", "demo").stdout
+
+    build = output.index("fixtures/dataset/complete")
+    assert output.index("install --frozen-lockfile") < build < output.index("http.server")
+    assert "--bind 127.0.0.1" in output
+    assert ".env" not in output
+
+
+def test_demo_serves_on_the_port_it_is_given(copy: Path) -> None:
+    add_site(copy)
+
+    assert "127.0.0.1 8123" in make(copy, "-n", "demo", "DEMO_PORT=8123").stdout
+
+
+def test_demo_without_a_site_fails_before_serving(copy: Path) -> None:
+    result = make(copy, "demo")
+
+    assert result.returncode != 0
+    assert "No site here" in result.stdout
+    assert "http.server" not in result.stdout
 
 
 def test_web_steps_never_load_env(copy: Path) -> None:

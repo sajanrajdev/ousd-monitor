@@ -1,7 +1,7 @@
 .PHONY: check lint types test build models dbt-docs sync reconcile publish preview run daily \
 	dagster-dev backup py-lint py-types py-test py-build \
 	web-tools web-install web-lint web-types web-test web-samples web-build web-release web-browser \
-	web-shots web-acceptance
+	web-shots web-acceptance demo demo-build
 
 # Load .env when it exists, so a keyed provider can replace the public defaults.
 ENV_FILE := $(if $(wildcard .env),--env-file .env)
@@ -144,3 +144,14 @@ web-shots: web-samples
 # Local only. Never called by check. Needs the browser from web-browser.
 web-acceptance: web-samples
 	$(PNPM) run acceptance
+
+# The complete sample, built and served on localhost. It needs no keys, no .env and no chain
+# access, and the page says it is a sample. DEMO_PORT picks the port; stop it with Ctrl-C.
+DEMO_PORT ?= 8000
+
+demo-build: web-install
+	OUSD_DATASET_DIR=fixtures/dataset/complete $(PNPM) run build complete
+
+demo: demo-build
+	@echo "Serving the sample site at http://127.0.0.1:$(DEMO_PORT)/ (Ctrl-C to stop)"
+	uv run --locked python -m http.server --directory web/.build/complete --bind 127.0.0.1 $(DEMO_PORT)
