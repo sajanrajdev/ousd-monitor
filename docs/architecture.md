@@ -40,7 +40,7 @@ Prefer a small system that's clearly correct over a big one that looks impressiv
 ## Layout
 
 ```
-pipeline/ousd/      Python package: chains, sources, ingest, store, reconcile, probes, publish, backup, cli
+pipeline/ousd/      Python package: chains, sources, ingest, store, reconcile, probes, checks, publish, steps, backup, cli
 pipeline/dagster/   Dagster definitions, schedules and asset checks
 dbt/                dbt project: staging, intermediate, marts, tests
 labels/             Versioned entity labels, each with source type, source and confidence
@@ -49,6 +49,27 @@ tests/              Python tests. No network, ever
 docs/               PRD, architecture, operations, roadmap, design system, methodology, lessons learned
 data/               Local DuckDB and published output. Not in git
 ```
+
+Inside `pipeline/ousd/`, the two modules that decide what gets published are packages, each split by job. Callers import from the package alone, which re-exports every name they use.
+
+| Module | Holds |
+|---|---|
+| `reconcile/status.py` | What a check can find: outcomes, reasons, exit codes, a run's status, and the probe interface |
+| `reconcile/recorder.py` | The one place a run's check rows are filed |
+| `reconcile/supply.py` | Blocking check 1, and the `--at-block` diagnostic |
+| `reconcile/balances.py` | Blocking check 3: sampled balances and the census |
+| `reconcile/groups.py` | Same-looking transfer groups, proven from their transactions |
+| `reconcile/bridge.py` | Blocking check 2, against Bridge |
+| `reconcile/runner.py` | `run_reconciliation`: every chain's checks, then Bridge with its retries |
+| `publish/__init__.py` | `publish`, the one entry point |
+| `publish/build.py` | Assembles each file's rows and payload, and refuses unless the run's checks still hold |
+| `publish/safety.py` | The label legend and listings, and the refusal of wallets, URLs, keys and non-names |
+| `publish/provenance.py` | The commit, tree, lock file, tool versions and dbt build behind a dataset |
+| `publish/install.py` | The temporary folder, rename, `latest` pointer, pruning and `stale.json` |
+| `publish/schema.py`, `publish/errors.py` | Schema validation, and the two refusals |
+
+- **The store boundary (decision):** SQL against the raw database lives in `store.py`, behind a named `Store` method for each query. `tests/test_store_boundary.py` fails on a `.db.execute`, `.db.executemany`, `.db.sql` or `.db.query` anywhere else in `pipeline/`, as ruff has no such rule. `migrations.py` is exempt, as it runs before a `Store` exists. A transaction opened by a caller, as in `reconcile/runner.py`, is not a query and stays where it is.
+- **Shared steps:** `steps.py` holds one chain's sync and the read of Bridge's total, which `cli.py` and the Dagster definitions both call. Each caller keeps its own error handling, output and exit codes.
 
 ## Data flow
 
