@@ -6,7 +6,14 @@ import { HairlineTable } from "@/components/hairline-table";
 import { NoteMarks, type PinnedNote } from "@/components/pinned-notes";
 import { dayRange } from "@/lib/aggregate";
 import type { ChainOption } from "@/lib/chain-scope";
-import type { ActivityRow, Definitions, DatasetState, JourneyRow, KpiRow } from "@/lib/dataset";
+import type {
+  ActivityRow,
+  ChainName,
+  Definitions,
+  DatasetState,
+  JourneyRow,
+  KpiRow,
+} from "@/lib/dataset";
 import { CARD_ANCHORS, CHAIN_NAMES, definitionHref } from "@/lib/definitions";
 import type { ExchangeRow } from "@/lib/exchange-rows";
 import { formatBps, formatCompact, formatExact, formatUtcDate, UNKNOWN_TEXT } from "@/lib/format";
@@ -39,6 +46,7 @@ export type JourneyViewProps = {
   definitions: Definitions;
   state: DatasetState;
   exchanges: ExchangeRow[];
+  chainExchanges?: Partial<Record<ChainName, ExchangeRow[]>>;
   // Only a test passes this, to show a segment added here reaches the bar, legend and table.
   segmentConfig?: SegmentConfig[];
 };
@@ -216,10 +224,16 @@ function rowName(option: ChainOption): string {
   return option.label === "All" ? "All chains" : "All covered";
 }
 
-// One bar for a filter option, with its name and total. Wallet counts are in the table, by chain.
-function SupplyRow({ panel }: { panel: SupplyPanel }) {
+// One bar for a filter option, with its name and total. Wallet counts are in the table, by chain. On
+// a chain's card its own bar is marked and the others are muted.
+function SupplyRow({ panel, mark }: { panel: SupplyPanel; mark?: "selected" | "muted" }) {
   return (
-    <div className="supply-row" data-supply-row={panel.option.value}>
+    <div
+      className="supply-row"
+      data-supply-row={panel.option.value}
+      data-selected={mark === "selected" ? "" : undefined}
+      data-muted={mark === "muted" ? "" : undefined}
+    >
       <p className="supply-row__head">
         <span className="supply-row__name">{rowName(panel.option)}</span>{" "}
         <span data-row-total>
@@ -239,23 +253,24 @@ function SupplyRow({ panel }: { panel: SupplyPanel }) {
   );
 }
 
-// Every chain together in one view, as the page had it before the filter: the first panel's bar
-// over all of them, then one bar per chain. Its legend, figures, notes and tables are the first
-// panel's, which covers every chain. It compares chains, so the filter highlights a row and hides
-// none.
+// One card per filter option, and every chain's bar on each, as the page had it before the filter:
+// the bar over all of them first, then one per chain. Its heading, legend, figures, notes and tables
+// are the option's own. On a chain's card that chain's bar is marked and the others are muted, so the
+// bars still compare chains and don't move when the filter changes.
 function SupplyCard({
+  panel,
   panels,
   definitions,
   state,
 }: {
+  panel: SupplyPanel;
   panels: SupplyPanel[];
   definitions: Definitions;
   state: DatasetState;
 }) {
-  const [panel] = panels;
-  const { chains, rows, kpis } = panel;
+  const { option, chains, rows, kpis, exchanges } = panel;
+  const chosen = option.value === "all" ? null : option.value;
   const asOf = dayRange(rows.map((row) => row.day)) ?? definitions.journey_first_day;
-  const entities = panel.segments.flatMap((segment) => segment.entities ?? []);
   // With no legend, a segment's note has no row, so its marker goes on the title.
   const footnotes = useId();
   const notes = panel.notes
@@ -263,7 +278,6 @@ function SupplyCard({
     .map((note) => (panel.bar ? note : { ...note, at: undefined }));
   return (
     <ChartCard
-      id={CARD_ANCHORS.supply}
       takeaway={panel.heading}
       detail={<SupplyDetail panel={panel} definitions={definitions} />}
       source={SOURCE}
@@ -273,7 +287,9 @@ function SupplyCard({
       summary={
         rows.length === 0
           ? UNKNOWN_TEXT
-          : `Where supply sits on ${scopeText(chains)}, together and per chain: issuer inventory, placed, DEX, lending and exchange venues, and free-floating. Circulating is everything except issuer inventory and placed.`
+          : chosen
+            ? `Where supply sits on ${scopeText(chains)}: issuer inventory, placed, DEX, lending and exchange venues, and free-floating, beside the other chains' bars, muted. Circulating is everything except issuer inventory and placed.`
+            : `Where supply sits on ${scopeText(chains)}, together and per chain: issuer inventory, placed, DEX, lending and exchange venues, and free-floating. Circulating is everything except issuer inventory and placed.`
       }
       notes={notes}
       footnotes={footnotes}
@@ -303,10 +319,11 @@ function SupplyCard({
               wallets: row.active_wallets_7d.toLocaleString("en-US"),
             }))}
           />
-          {entities.length > 0 ? (
+          {exchanges.rows.length > 0 || chosen ? (
             <div data-labels-table>
-              <p className="font-semibold">Named exchanges, across chains</p>
-              <ExchangeRows rows={entities} />
+              <p className="font-semibold">{exchanges.caption}</p>
+              <ExchangeRows rows={exchanges.rows} />
+              {exchanges.unsplit ? <p data-exchanges-unsplit>{exchanges.unsplit}</p> : null}
             </div>
           ) : null}
         </>
@@ -314,7 +331,11 @@ function SupplyCard({
     >
       <div className="supply-rows" data-supply-rows>
         {panels.map((row) => (
-          <SupplyRow key={row.option.value} panel={row} />
+          <SupplyRow
+            key={row.option.value}
+            panel={row}
+            mark={!chosen ? undefined : row.option.value === chosen ? "selected" : "muted"}
+          />
         ))}
       </div>
     </ChartCard>
@@ -378,24 +399,32 @@ export function JourneyView({
   definitions,
   state,
   exchanges,
+  chainExchanges,
   segmentConfig = SEGMENT_CONFIG,
 }: JourneyViewProps) {
+  const panels = options.map((option) =>
+    supplyPanel(option, {
+      journey,
+      activity,
+      kpis,
+      definitions,
+      exchanges,
+      chainExchanges,
+      config: segmentConfig,
+    }),
+  );
   return (
     <section id="supply-journey" data-section="view-a" className="card-grid">
-      <SupplyCard
-        panels={options.map((option) =>
-          supplyPanel(option, {
-            journey,
-            activity,
-            kpis,
-            definitions,
-            exchanges,
-            config: segmentConfig,
-          }),
+      <ChainPanels options={options} id={CARD_ANCHORS.supply}>
+        {(option) => (
+          <SupplyCard
+            panel={panels.find((panel) => panel.option.value === option.value)!}
+            panels={panels}
+            definitions={definitions}
+            state={state}
+          />
         )}
-        definitions={definitions}
-        state={state}
-      />
+      </ChainPanels>
       <ChainPanels options={options} id={CARD_ANCHORS.series}>
         {(option) => (
           <SeriesCard

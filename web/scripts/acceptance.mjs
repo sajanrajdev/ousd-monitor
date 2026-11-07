@@ -218,10 +218,17 @@ const shownPanels = (page) =>
       .map((panel) => panel.dataset.chainPanel),
   );
 
-// The cards a filter option changes, so each check covers every one of them. The supply card shows
-// every chain at once, so a filter option highlights its row there instead.
-const FILTERED_CARDS = ["#placed-vs-circulating", "#headline-to-clean", "#everyday-by-week"];
+// The cards a filter option changes, so each check covers every one of them. The supply card keeps
+// every chain's bar under each option, and marks the chosen one.
+const FILTERED_CARDS = [
+  "#where-supply-sits",
+  "#placed-vs-circulating",
+  "#headline-to-clean",
+  "#everyday-by-week",
+];
 const SUPPLY = "#where-supply-sits";
+// The supply card the filter shows. Each check that reads it starts on All.
+const SUPPLY_CARD = `${SUPPLY} > [data-chain-panel] > .chart-card:visible`;
 const SERIES = "#placed-vs-circulating";
 
 // Open is drawn: with a script that's data-open, and without one it's :hover or :focus-within.
@@ -700,7 +707,6 @@ async function checkTap(browser, origin, folder, markup, where, options) {
 async function checkToggle(page, where) {
   for (const [name, cardSelector] of [
     ["#harness-plain", "#harness-plain"],
-    [SUPPLY, SUPPLY],
     ...FILTERED_CARDS.map((box) => [box, `${box} > [data-chain-panel] > .chart-card:visible`]),
   ]) {
     const card = page.locator(cardSelector).first();
@@ -1462,7 +1468,8 @@ async function checkStepLines(page, where, js) {
 
 // What a reader sees of the supply card: every chain's bar at once, each part at its share and each
 // label whole, the band inside placed, and the bracket on the first. Under every option the legend
-// and caveats stay, and the chosen chain's bar is marked by weight and a rule, never opacity.
+// and caveats stay, the heading names the chosen chain, and its bar is marked by weight and a rule.
+// Only the other chains' bars fade, never a word, so contrast holds.
 async function checkSupplyOptions(page, where) {
   const values = await page
     .locator(".chain-filter input")
@@ -1472,8 +1479,10 @@ async function checkSupplyOptions(page, where) {
     await page.locator(`.chain-filter input[value="${value}"]`).check({ force: true });
     const shown = await page.evaluate(
       ([box, chosen, slack]) => {
-        const panel = document.querySelector(`${box} [data-supply-row="${chosen}"]`);
-        const card = document.querySelector(box);
+        const card = document.querySelector(`${box} > [data-chain-panel="${chosen}"]`);
+        const panel = card.querySelector(`[data-supply-row="${chosen}"]`);
+        const heading = card.querySelector(".chart-card__head h2").textContent;
+        const label = panel.querySelector(".supply-row__name").textContent;
         const style = getComputedStyle(panel);
         const name = getComputedStyle(panel.querySelector(".supply-row__name"));
         const marked =
@@ -1486,9 +1495,17 @@ async function checkSupplyOptions(page, where) {
             row.dataset.supplyRow !== "all" &&
             getComputedStyle(row).borderLeftColor !== "rgba(0, 0, 0, 0)",
         ).length;
+        const muted = [
+          ...card.querySelectorAll("[data-supply-row][data-muted] .supply-bar__track"),
+        ];
         const faded = [...card.querySelectorAll("*")].filter(
-          (element) => Number(getComputedStyle(element).opacity) < 1,
+          (element) => Number(getComputedStyle(element).opacity) < 1 && !muted.includes(element),
         ).length;
+        const mutedRight =
+          chosen === "all"
+            ? muted.length === 0
+            : muted.length === card.querySelectorAll("[data-supply-row]").length - 1 &&
+              muted.every((bar) => Number(getComputedStyle(bar).opacity) < 1);
         const track = panel.querySelector(".supply-bar__track")?.getBoundingClientRect();
         const off = [];
         const clipped = [];
@@ -1539,8 +1556,10 @@ async function checkSupplyOptions(page, where) {
           band,
           bracketFits,
           marked: chosen === "all" || marked,
+          named: chosen === "all" || heading.includes(`of ${label} supply`),
           others,
           faded,
+          mutedRight,
           rows: card.querySelectorAll("[data-supply-legend] [data-segment]").length,
           bandRows: card.querySelectorAll("[data-supply-legend] [data-band]").length,
           wallets: [...card.querySelectorAll('[data-stat="active-wallets"]')].filter(seen).length,
@@ -1565,11 +1584,23 @@ async function checkSupplyOptions(page, where) {
     check("the bracket starts where circulating starts", where, shown.bracketFits, value);
     check("the bracket's word stays inside the bar", where, shown.wordFits, value);
     legendRows.add(`${shown.rows}+${shown.bandRows}`);
-    check("wallets are never summed beside the bars", where, shown.wallets === 0, value);
+    check(
+      "wallets are never summed beside the bars, and a chain's own count shows on its card",
+      where,
+      shown.wallets === (value === "all" ? 0 : 1),
+      value,
+    );
+    check("the heading names the chosen chain", where, shown.named, value);
+    check("only the other chains' bars are muted", where, shown.mutedRight, value);
     check("the card keeps the floor note", where, shown.floor === 1, value);
     check("the chosen chain's bar is marked", where, shown.marked, value);
     check("and no other is", where, shown.others === 0, `${value}: ${shown.others}`);
-    check("nothing on the supply card fades", where, shown.faded === 0, `${value}: ${shown.faded}`);
+    check(
+      "nothing else on the supply card fades",
+      where,
+      shown.faded === 0,
+      `${value}: ${shown.faded}`,
+    );
     await checkInView(page, `${where} on ${value}`);
     await checkLegendRows(page, `${where} on ${value}`);
   }
@@ -1611,7 +1642,7 @@ async function checkLegendRows(page, where) {
 
 // An open table may wrap an amount anywhere, and never a chain's name or a heading inside a word.
 async function checkTableWords(page, where) {
-  const toggle = page.locator(`${SUPPLY} .data-toggle`);
+  const toggle = page.locator(SUPPLY_CARD).locator(".data-toggle");
   await toggle.locator("> summary").click();
   const split = await toggle
     .locator("table")
@@ -1638,10 +1669,25 @@ async function checkTableWords(page, where) {
   await toggle.locator("> summary").click();
 }
 
+// The drawer's time, with a margin, before a list's open or closed state can be read.
+const DRAWER_SETTLE_MS = 350;
+
+// Waits for the drawer, and then for the page to stop scrolling.
+async function settle(page) {
+  await page.waitForTimeout(DRAWER_SETTLE_MS);
+  let last = -1;
+  for (let tries = 0; tries < 20; tries += 1) {
+    const y = await page.evaluate(() => window.scrollY);
+    if (y === last) return;
+    last = y;
+    await page.waitForTimeout(100);
+  }
+}
+
 // A card's footnotes: closed at first, opened by keyboard on its toggle, with or without a script,
 // as a list whose numbers match the markers, which a marker also opens, landing on its footnote.
-async function checkFootnotes(page, where) {
-  const card = page.locator(SUPPLY);
+async function checkFootnotes(page, where, js) {
+  const card = page.locator(SUPPLY_CARD);
   const details = card.locator(".footnotes");
   const summary = details.locator("> summary");
   const list = details.locator(".footnotes__list");
@@ -1658,6 +1704,7 @@ async function checkFootnotes(page, where) {
   );
   await summary.focus();
   await page.keyboard.press("Enter");
+  await page.waitForTimeout(DRAWER_SETTLE_MS);
   check("Enter on Footnotes opens the list", where, await list.isVisible());
   const [listBox, openSummary] = await Promise.all([list.boundingBox(), summary.boundingBox()]);
   check("which opens below the card's content", where, listBox.y > openSummary.y);
@@ -1674,11 +1721,12 @@ async function checkFootnotes(page, where) {
     numbers.length > 0 && numbers.every(Boolean),
   );
   await page.keyboard.press("Enter");
+  await page.waitForTimeout(DRAWER_SETTLE_MS);
   check("Enter again closes it", where, !(await list.isVisible()));
   const marker = card.locator("a[data-fn-ref]").last();
   const target = (await marker.getAttribute("href")).slice(1);
   await marker.click();
-  await page.waitForTimeout(300);
+  await settle(page);
   const landed = await page.evaluate((id) => {
     const item = document.getElementById(id);
     const box = item.getBoundingClientRect();
@@ -1686,12 +1734,110 @@ async function checkFootnotes(page, where) {
   }, target);
   check("a marker opens the list at its footnote", where, landed);
   if (await list.isVisible()) await summary.click();
+  await page.waitForTimeout(DRAWER_SETTLE_MS);
+  if (js) await checkMarkerStaysPut(page, where, listBox.height);
   await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+}
+
+// With a script, a marker on a card in view opens the list where the page is: no jump to the
+// footnote and no new address. The page moves only when the list would end below the viewport, and
+// then only until its bottom shows, never putting the list at the top. Focus goes to the footnote.
+async function checkMarkerStaysPut(page, where, listHeight) {
+  for (const place of ["fits", "ends below"]) {
+    const card = page.locator(SUPPLY_CARD);
+    const summary = card.locator(".footnotes > summary");
+    // The card's top just under what sticks over the page, which on a wide card leaves room for
+    // the list, and its toggle near the bottom, which doesn't.
+    await page.evaluate(
+      ([selector, place]) => {
+        const card = document.querySelector(selector);
+        const sticky = [".site-header", ".dashboard .chain-filter"]
+          .map((part) => document.querySelector(part))
+          .filter((part) => part && ["sticky", "fixed"].includes(getComputedStyle(part).position))
+          .map((part) => part.getBoundingClientRect().bottom);
+        const box = card.getBoundingClientRect();
+        const summary = card.querySelector(".footnotes > summary").getBoundingClientRect();
+        const by =
+          place === "fits"
+            ? box.top - Math.max(0, ...sticky) - 8
+            : summary.top - (window.innerHeight - 60);
+        window.scrollBy({ top: by, behavior: "instant" });
+      },
+      [`${SUPPLY} > [data-chain-panel="all"] > .chart-card`, place],
+    );
+    const before = await page.evaluate(() => ({
+      y: window.scrollY,
+      hash: location.hash,
+    }));
+    const { bottom: summaryBottom } = await summary.evaluate((element) =>
+      element.getBoundingClientRect().toJSON(),
+    );
+    const fits = summaryBottom + listHeight + 16 <= HEIGHT;
+    // The last marker in view and uncovered by the sticky header or filter, so the card is already
+    // in view where it's clicked, and the click itself scrolls nothing.
+    const index = await card.evaluate((element) => {
+      const markers = [...element.querySelectorAll("a[data-fn-ref]")];
+      let found = -1;
+      markers.forEach((marker, at) => {
+        const box = marker.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        if (box.bottom <= window.innerHeight && marker.contains(hit)) found = at;
+      });
+      return found;
+    });
+    if (index < 0) {
+      check("a marker is in view to click", where, false, place);
+      continue;
+    }
+    const marker = card.locator("a[data-fn-ref]").nth(index);
+    const target = (await marker.getAttribute("href")).slice(1);
+    await marker.click();
+    await settle(page);
+    const after = await page.evaluate((id) => {
+      const list = document.getElementById(id).closest(".footnotes__list").getBoundingClientRect();
+      const header = document.querySelector(".site-header").getBoundingClientRect().bottom;
+      return {
+        y: window.scrollY,
+        hash: location.hash,
+        listBottom: list.bottom,
+        listTop: list.top,
+        footnoteTop: document.getElementById(id).getBoundingClientRect().top,
+        header,
+        focused: document.activeElement?.id === id,
+      };
+    }, target);
+    if (fits) {
+      check(
+        "a marker on a card in view leaves the page where it is when the list fits",
+        where,
+        Math.abs(after.y - before.y) <= 1,
+        `${before.y} to ${after.y}`,
+      );
+    } else {
+      check(
+        "and when it doesn't fit, scrolls only until the list's bottom shows",
+        where,
+        after.y > before.y && after.footnoteTop > after.header + 1,
+        `${before.y} to ${after.y}, footnote top ${Math.round(after.footnoteTop)}`,
+      );
+    }
+    check(
+      "the opened list ends inside the viewport",
+      where,
+      after.listBottom <= HEIGHT + 1,
+      `${place}: ${Math.round(after.listBottom)}`,
+    );
+    check("a marker leaves the address as it was", where, after.hash === before.hash, place);
+    check("and moves focus to its footnote", where, after.focused, place);
+    await summary.click();
+    await page.waitForTimeout(DRAWER_SETTLE_MS);
+  }
 }
 
 // A row may sit under the toggle, so opening it has to show every one of them, whole.
 async function checkExchangeRowsOpen(page, where) {
-  const toggle = page.locator(`${SUPPLY} .data-toggle`);
+  const card = page.locator(SUPPLY_CARD);
+  const toggle = card.locator(".data-toggle");
   await toggle.locator("> summary").click();
   const rows = toggle.locator("[data-exchange-row]");
   const total = await rows.count();
@@ -1703,8 +1849,8 @@ async function checkExchangeRowsOpen(page, where) {
     check("an open toggle shows each exchange row whole", where, seen.every(Boolean), `${index}`);
   }
   const notes =
-    (await page.locator(`${SUPPLY} .footnotes > summary`).isVisible()) &&
-    (await page.locator(`${SUPPLY} .footnotes__list > [data-note="exchange-floor"]`).count()) === 1;
+    (await card.locator(".footnotes > summary").isVisible()) &&
+    (await card.locator('.footnotes__list > [data-note="exchange-floor"]').count()) === 1;
   check("and the floor note is in the footnotes, a tap away beside them", where, notes);
   await toggle.locator("> summary").click();
 }
@@ -1891,7 +2037,7 @@ async function checkFolder(browser, folder, harness, widths) {
       if (js) await group("Escape", () => checkEscapeStaysPut(page, where));
       if (!js) await group("no script", () => checkWithoutJavaScript(page, where));
       await group("the toggle", () => checkToggle(page, where));
-      await group("footnotes", () => checkFootnotes(page, where));
+      await group("footnotes", () => checkFootnotes(page, where, js));
       await group("targets", () => checkTargets(page, where));
       await group("sideways scroll", () => checkNoSidewaysScroll(page, where));
       if (js && AXE_WIDTHS.has(width)) await group("axe", () => checkAxe(page, where));

@@ -732,6 +732,19 @@ After this round, by `measure-page.mjs` on the same dataset, footnotes closed: 3
 - **Real data that was already old when built is treated like a passing page the reader's clock finds old.** It has the same clock state and nothing at the top, as the review moved only staleness. A failed newer run still counts as a failed check and keeps its trust row.
 - **Where the browser can style a details element's content** (`::details-content`), the toggle keeps its place on the last row and the list takes the full width below. A browser that can't puts the open list on a row of its own with the toggle at its right.
 
+### Fourth round
+
+Two bugs from the maintainer, UI only.
+
+| # | Decision | As built |
+|---|---|---|
+| 1 | The first supply card follows the chain filter | Choosing a chain left the card's heading, legend, figures and table at every chain's values. Each option now has its own supply card, as the other filtered cards do, so it works with JavaScript off. A chain's card has that chain's heading ("71.78% of Base supply stayed 14+ days in $1M-plus wallets."), legend, exchange-linked line, circulating, clean volume, active wallets, footnotes and tables, all from the dataset's per-chain fields as written. Every card keeps every chain's bar, the chosen one marked and the others muted, which was clearer than one bar alone: the bars still compare chains, and nothing moves when the filter changes. "All" is the card as it was. Named exchanges on a chain's card are that chain's holdings from `exchange_holdings`; a name from a listing, or one holding nothing, has no chain, so a chain's card says those "aren't split by chain" and leaves them to All. `verify-output` holds each panel's legend and table to the dataset's own rows, not the page's supply code, and refuses by name a chain's panel that shows every chain's figures |
+| 2 | Footnotes open like a drawer, and a marker doesn't jump the page | With a script, the "Footnotes" toggle and a marker open and close the list by animating its height with a light fade, 220 ms, ease-out, and at once under `prefers-reduced-motion`. A marker cancels the browser's jump to its anchor and leaves the address alone, opens the list where the page is, and scrolls only if the list would end below the viewport, by the least that brings its bottom into view, never aligning it to the top. Focus then moves to the footnote (`preventScroll`) and it lights briefly. Without a script the details element and the marker links work as before, jump included. A browser check clicks a marker on a card in view and requires the page not to move when the list fits, the least scroll when it doesn't, the list's bottom inside the viewport, the address unchanged and focus on the footnote |
+
+After this round, by `measure-page.mjs` on the same dataset, filter on All and footnotes closed: 345 words at 1440 and 339 at 390, and 3,165 px at 1440 and 5,284 px at 390, as before, with 65,724 bytes gzipped, up from 57,410 for the four chain copies of the supply card.
+
+The other cards were checked for the same bug in the browser under each option. The step line, waterfall and weekly cards already showed each option's own panel. The velocity chart and the chain grid compare chains, so each figure carries its chain's name and the chosen chain is highlighted; they were left as they are.
+
 ## Maintainer actions
 
 | When | Action |

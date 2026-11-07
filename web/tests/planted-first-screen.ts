@@ -255,7 +255,7 @@ export type PlantedBand = {
 export function plantedBands(bands: PlantedBand[], { withLines = true } = {}): string {
   const lines = bands
     .filter(() => withLines)
-    .filter(({ key, amount }) => key === "all" && BigInt(amount) > 0n)
+    .filter(({ amount }) => BigInt(amount) > 0n)
     .map(({ key, line }) => `<p data-exchange-linked="${key}">${line}</p>`)
     .join("");
   const rows = bands
@@ -336,7 +336,7 @@ export type PlantedSupplyPanel = {
   table: PlantedTable;
   kpiRows: Record<string, string>[];
   placedNote: string;
-  entities: number;
+  exchanges: { caption: string; rows: PlantedRow[]; unsplit: string | null };
 };
 export type PlantedSeriesPanel = {
   value: string;
@@ -405,42 +405,58 @@ function plantedLegend({ key, parts, notes }: PlantedSupplyPanel, prefix: string
   return `<ul class="chart-legend" data-supply-legend>${rows.join("")}</ul>`;
 }
 
-// The supply card, as the view writes it: one card, a bar row per filter option, and the first
-// option's legend, figures, notes and tables.
-export function plantedSupplyPanels(
-  panels: PlantedSupplyPanel[],
-  id: string,
-  rowsHtml: string,
-): string {
+// The supply card, as the view writes it: a card per filter option, each with every option's bar,
+// its own marked and the rest muted on a chain's card, and its own legend, figures, notes and tables.
+export function plantedSupplyPanels(panels: PlantedSupplyPanel[], id: string): string {
   if (panels.length === 0) return "";
-  const [all] = panels;
-  const prefix = notesPrefix();
-  const rows = panels
-    .map(
-      (panel) =>
-        `<div data-supply-row="${panel.value}"><p><span class="supply-row__name">${panel.value}</span> <span data-row-total>${panel.rowTotal}</span></p>${plantedSupplyBar(panel)}</div>`,
-    )
-    .join("");
-  const stats = all.stats
-    .map(
-      ({ key, label, value }) =>
-        `<div data-stat="${key}"><dt>${label}</dt><dd data-stat-value>${value}</dd></div>`,
-    )
-    .join("");
-  const entities = all.entities > 0 ? `<div data-labels-table><ul>${rowsHtml}</ul></div>` : "";
-  const walletsTable = plantedTable(
-    { columns: WALLET_TABLE, rows: all.kpiRows },
-    `Last 7 days. ${PLANTED_WALLETS_CAPTION}`,
-  );
-  return plantedPanelCard(
-    all.heading,
-    `<div class="chart-area" aria-hidden="true"><div data-supply-rows>${rows}</div></div>${plantedLegend(all, prefix)}<dl>${stats}</dl>`,
-    `<p data-full-note="placed">${escaped(all.placedNote)}</p>`,
-    `${plantedTable(all.table)}${walletsTable}${entities}`,
-    id,
-    escapedNotes(all.notes),
-    prefix,
-  );
+  const items = panels.map((panel) => {
+    const prefix = notesPrefix();
+    const rows = panels
+      .map((bar) => {
+        const mark =
+          panel.value === "all" ? "" : bar.value === panel.value ? " data-selected" : " data-muted";
+        return `<div data-supply-row="${bar.value}"${mark}><p><span class="supply-row__name">${bar.value}</span> <span data-row-total>${bar.rowTotal}</span></p>${plantedSupplyBar(bar)}</div>`;
+      })
+      .join("");
+    const stats = panel.stats
+      .map(
+        ({ key, label, value }) =>
+          `<div data-stat="${key}"><dt>${label}</dt><dd data-stat-value>${value}</dd></div>`,
+      )
+      .join("");
+    const { caption, rows: named, unsplit } = panel.exchanges;
+    const entities =
+      named.length > 0 || panel.value !== "all"
+        ? `<div data-labels-table><p>${caption}</p><ul>${plantedExchangeRows(named)}</ul>${unsplit ? `<p data-exchanges-unsplit>${unsplit}</p>` : ""}</div>`
+        : "";
+    const walletsTable = plantedTable(
+      { columns: WALLET_TABLE, rows: panel.kpiRows },
+      `Last 7 days. ${PLANTED_WALLETS_CAPTION}`,
+    );
+    return `<div data-chain-panel="${panel.value}">${plantedPanelCard(
+      panel.heading,
+      `<div class="chart-area" aria-hidden="true"><div data-supply-rows>${rows}</div></div>${plantedLegend(panel, prefix)}<dl>${stats}</dl>`,
+      `<p data-full-note="placed">${escaped(panel.placedNote)}</p>`,
+      `${plantedTable(panel.table)}${walletsTable}${entities}`,
+      "",
+      escapedNotes(panel.notes),
+      prefix,
+    )}</div>`;
+  });
+  return `<div id="${id}" class="chain-panels">${items.join("")}</div>`;
+}
+
+// Every row a main page writes, in its order: All's, then each chain's own on its supply card.
+export function plantedEveryRow(expected: {
+  exchangeRows: PlantedRow[];
+  supplyPanels: PlantedSupplyPanel[];
+}): PlantedRow[] {
+  return [
+    ...expected.exchangeRows,
+    ...expected.supplyPanels
+      .filter(({ value }) => value !== "all")
+      .flatMap(({ exchanges }) => exchanges.rows),
+  ];
 }
 
 export function plantedSeriesPanels(panels: PlantedSeriesPanel[], id: string): string {
@@ -648,7 +664,7 @@ export function plantedRealMain(
     kpiScope: string | null;
     kpiValues: string[];
     essentialNotes: Note[];
-    exchangeRows: Parameters<typeof plantedExchangeRows>[0];
+    exchangeRows: PlantedRow[];
     bands: PlantedBand[];
     filter: { value: string; label: string }[];
     supplyPanels: PlantedSupplyPanel[];
@@ -667,12 +683,12 @@ export function plantedRealMain(
     <section data-section="kpi-row">${plantedKpis(expected.kpiScope ?? "", expected.kpiValues)}</section>
     ${plantedNotes(expected.essentialNotes, null)}
     <div class="dashboard">${plantedFilter(expected.filter)}
-    ${plantedSupplyPanels(expected.supplyPanels, CARD_ANCHORS.supply, plantedExchangeRows(expected.exchangeRows))}
+    ${plantedSupplyPanels(expected.supplyPanels, CARD_ANCHORS.supply)}
     ${plantedSeriesPanels(expected.seriesPanels, CARD_ANCHORS.series)}
     ${plantedWaterfallPanels(expected.waterfallPanels, CARD_ANCHORS.waterfall)}
     ${plantedWeeklyPanels(expected.weeklyPanels, CARD_ANCHORS.weekly)}
     ${plantedVelocity(expected.velocity, CARD_ANCHORS.velocity)}
     ${plantedGrid(expected.grid, "A heading.", CARD_ANCHORS.chainRoles)}</div>
-    ${plantedFlight(expected.exchangeRows.map(plantedRowFlight))}
+    ${plantedFlight(plantedEveryRow(expected).map(plantedRowFlight))}
     ${plantedBands(expected.bands, { withLines: false })}</main>`;
 }

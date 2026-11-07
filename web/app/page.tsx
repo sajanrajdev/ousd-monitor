@@ -7,7 +7,7 @@ import { ChainRolesView } from "@/components/views/chain-roles";
 import { JourneyView } from "@/components/views/journey";
 import { chainOptions } from "@/lib/chain-scope";
 import { getDataset } from "@/lib/dataset";
-import { exchangeRows } from "@/lib/exchange-rows";
+import { chainExchangeRows, exchangeRows } from "@/lib/exchange-rows";
 
 export default function Home() {
   const dataset = getDataset();
@@ -31,6 +31,11 @@ export default function Home() {
           definitions={manifest.definitions}
           state={state}
           exchanges={exchangeRows(dataset.labels)}
+          chainExchanges={Object.fromEntries(
+            options.flatMap(({ value }) =>
+              value === "all" ? [] : [[value, chainExchangeRows(dataset.labels, value)]],
+            ),
+          )}
         />
         <ActivityView
           options={options}

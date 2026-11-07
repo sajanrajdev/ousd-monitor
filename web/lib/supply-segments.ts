@@ -273,8 +273,8 @@ export function legendAmount(segment: Pick<SupplySegment, "amount" | "coverage">
     : formatCompact(segment.amount);
 }
 
-// The exchange venues segment is a floor on every panel. Its named rows add up across chains, so
-// they go only where their sum can sit under the segment: the panel that covers every chain.
+// The exchange venues segment is a floor on every panel. Its named rows are the panel's own, across
+// chains on All and one chain's holdings on a chain, so their sum sits under the segment.
 export function exchangeExtras(entities?: ExchangeRow[]): SegmentExtras {
   return { venue_exchange: { coverage: "floor", ...(entities ? { entities } : {}) } };
 }
@@ -289,6 +289,9 @@ export type SupplyStat = { key: string; label: string; value: string };
 
 export type SupplyPanel = {
   option: ChainOption;
+  // The named exchanges under its table: every one across chains on All, a chain's own holdings on
+  // a chain, and what a chain's list leaves out, said as not split by chain.
+  exchanges: { caption: string; rows: ExchangeRow[]; unsplit: string | null };
   chains: ChainName[];
   rows: JourneyRow[];
   kpis: KpiRow[];
@@ -310,8 +313,35 @@ export type SupplyInputs = {
   kpis: KpiRow[];
   definitions: Definitions;
   exchanges: ExchangeRow[];
+  // Each chain's own named exchanges, from its holdings. A chain missing here has none.
+  chainExchanges?: Partial<Record<ChainName, ExchangeRow[]>>;
   config?: SegmentConfig[];
 };
+
+export const EXCHANGES_UNSPLIT =
+  "Names from a listing, or with nothing held, aren't split by chain, so All lists them.";
+
+// What one option lists by name. A chain shows only what the dataset holds on that chain.
+function panelExchanges(
+  option: ChainOption,
+  exchanges: ExchangeRow[],
+  chainExchanges: Partial<Record<ChainName, ExchangeRow[]>>,
+): SupplyPanel["exchanges"] {
+  if (option.value === "all") {
+    return { caption: "Named exchanges, across chains", rows: exchanges, unsplit: null };
+  }
+  const rows = chainExchanges[option.value] ?? [];
+  const name = CHAIN_NAMES[option.value];
+  const left = exchanges.some((row) => !rows.some((own) => own.entity === row.entity));
+  return {
+    caption:
+      rows.length > 0
+        ? `Named exchanges on ${name}`
+        : `No labeled exchange wallet holds OUSD on ${name}.`,
+    rows,
+    unsplit: left ? EXCHANGES_UNSPLIT : null,
+  };
+}
 
 // Circulating comes from activity, and only from the day the journey row is from, so a figure beside
 // a bar never belongs to another day.
@@ -402,12 +432,21 @@ function supplyColumns(config: SegmentConfig[], extras: SegmentExtras) {
 // Everything one filter option's supply card shows, for the view and for verify-output alike.
 export function supplyPanel(
   option: ChainOption,
-  { journey, activity, kpis, definitions, exchanges, config = SEGMENT_CONFIG }: SupplyInputs,
+  {
+    journey,
+    activity,
+    kpis,
+    definitions,
+    exchanges,
+    chainExchanges = {},
+    config = SEGMENT_CONFIG,
+  }: SupplyInputs,
 ): SupplyPanel {
   const rows = newestByChain(journey).filter((row) => option.chains.includes(row.chain));
   const own = newestByChain(kpis).filter((row) => option.chains.includes(row.chain));
   const circulating = circulatingByChain(rows, activity);
-  const extras = exchangeExtras(option.value === "all" ? exchanges : undefined);
+  const named = panelExchanges(option, exchanges, chainExchanges);
+  const extras = exchangeExtras(named.rows);
   const bar =
     option.value === "all"
       ? allChainsBar(rows, config)
@@ -420,6 +459,7 @@ export function supplyPanel(
   ];
   return {
     option,
+    exchanges: named,
     chains: option.chains,
     rows,
     kpis: own,

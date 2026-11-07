@@ -90,6 +90,8 @@ export function Footnotes({ notes, prefix }: { notes: PinnedNote[]; prefix: stri
           <li
             key={`${note.kind}:${note.chain ?? ""}`}
             id={footnoteId(prefix, index + 1)}
+            // So a marker can move focus here without the page jumping to it.
+            tabIndex={-1}
             data-note={note.kind}
             data-chain={note.chain}
           >

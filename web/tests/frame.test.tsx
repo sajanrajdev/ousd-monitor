@@ -88,11 +88,11 @@ describe("the main page", () => {
       (label) => label.textContent,
     );
     expect(labels).toEqual(["All covered", "Tempo", "Ethereum"]);
-    // The supply card shows every chain at once, so only the step line has panels.
+    // The supply card and the step line have a panel per option.
     expect(container.querySelectorAll('[data-section="view-a"] [data-chain-panel]')).toHaveLength(
-      3,
+      6,
     );
-    const rows = [...container.querySelectorAll("[data-supply-row]")].map(
+    const rows = [...container.querySelectorAll('[data-chain-panel="all"] [data-supply-row]')].map(
       (row) => row.querySelector(".supply-row__name")!.textContent,
     );
     expect(rows).toEqual(["All covered", "Tempo", "Ethereum"]);

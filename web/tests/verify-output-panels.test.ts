@@ -62,14 +62,15 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
   };
   const faults = (panel: string, value: string) =>
     check(panel).filter((problem: string) => problem.includes(`the ${value} panel`));
-  // The supply card is one card: a fault in one of its bar rows, or in the card around them.
+  // The supply card has a panel per option, each with every option's bar: a fault in one of All's
+  // bar rows, or in All's card around them. A chain's panel is changed with inPanel.
   const S = CARD_ANCHORS.supply;
-  const CARD = `index.html: #${S}`;
+  const CARD = `index.html: the all panel of #${S}`;
   const rowOf = (html: string, value: string) => {
-    const start = html.indexOf(`<div data-supply-row="${value}"`);
+    const start = html.indexOf(`<div data-supply-row="${value}"`, html.indexOf(`id="${S}"`));
     const ends = [
       html.indexOf("<div data-supply-row=", start + 1),
-      html.indexOf("<ul data-supply-legend>", start),
+      html.indexOf("data-supply-legend", start),
     ];
     return { start, end: Math.min(...ends.filter((at) => at !== -1)) };
   };
@@ -77,11 +78,7 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     const { start, end } = rowOf(main, value);
     return `${main.slice(0, start)}${change(main.slice(start, end))}${main.slice(end)}`;
   };
-  const inCard = (change: (card: string) => string) => {
-    const start = main.indexOf(`id="${S}"`);
-    const end = main.indexOf('<div id="', start);
-    return `${main.slice(0, start)}${change(main.slice(start, end))}${main.slice(end)}`;
-  };
+  const inCard = (change: (card: string) => string) => inPanel("all", change, S);
   // A change from the legend on, which takes in the card's footnotes after its as-of line.
   const inLegend = (change: (legend: string) => string) =>
     inCard((html) => {
@@ -132,7 +129,7 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
     );
   });
 
-  it("refuses a missing bar row, one hidden by its markup, or the card split into panels", () => {
+  it("refuses a missing bar row, one hidden by its markup, or a bar marked wrong", () => {
     const { start, end } = rowOf(main, "base");
     const gone = `${main.slice(0, start)}${main.slice(end)}`;
     expect(cardFaults(gone)).toEqual(
@@ -142,10 +139,62 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
       row.replace('data-supply-row="base"', 'data-supply-row="base" hidden'),
     );
     expect(rowFaults(hidden, "base")).toContain(`${CARD}, the base bar: it's hidden by its markup`);
-    const split = inCard((card) =>
-      card.replace("<div data-supply-rows>", '<div data-chain-panel="all"><div data-supply-rows>'),
+    // On Base's card, Tempo's bar not muted, and on All's, a bar marked as chosen.
+    const loud = inPanel(
+      "base",
+      (panel) => panel.replace('data-supply-row="tempo" data-muted', 'data-supply-row="tempo"'),
+      S,
     );
-    expect(cardFaults(split)).toContain(`${CARD}: is split into filter panels`);
+    expect(faults(loud, "base")).toContain(
+      `index.html: the base panel of #${S}, the tempo bar: it's none, not muted`,
+    );
+    const marked = inRow("base", (row) =>
+      row.replace('data-supply-row="base"', 'data-supply-row="base" data-selected'),
+    );
+    expect(rowFaults(marked, "base")).toContain(`${CARD}, the base bar: it's selected, not none`);
+  });
+
+  // The bug the maintainer found: choosing a chain left every figure at All's. Base's card with All's
+  // legend, figures and tables is refused by name, against the dataset's own rows.
+  it("refuses a chain's card that shows every chain's figures", () => {
+    const allPanel = main.slice(...Object.values(panelOf(main, S, "all")));
+    const fromLegend = (html: string) => html.slice(html.indexOf('<ul class="chart-legend"'));
+    const allLegend = fromLegend(allPanel);
+    const swapped = inPanel(
+      "base",
+      (panel) => `${panel.slice(0, panel.length - fromLegend(panel).length)}${allLegend}`,
+      S,
+    );
+    expect(swapped).not.toBe(main);
+    const base = `index.html: the base panel of #${S}`;
+    expect(faults(swapped, "base")).toEqual(
+      expect.arrayContaining([
+        `${base}: its placed_supply legend amount isn't Base's in the dataset`,
+        `${base}: its free_floating legend amount isn't Base's in the dataset`,
+        expect.stringContaining(`${base}: its table's chains aren't Base's`),
+        `${base}: its named exchanges aren't the dataset's for it`,
+      ]),
+    );
+    expect(check(main)).toEqual([]);
+  });
+
+  it("refuses a chain's card that loses its names or says nothing of those left to All", () => {
+    const base = `index.html: the base panel of #${S}`;
+    const panel = main.slice(...Object.values(panelOf(main, S, "base")));
+    const unsplit = /<p data-exchanges-unsplit>.*?<\/p>/.exec(panel)?.[0];
+    if (unsplit) {
+      const quiet = inPanel("base", (html) => html.replace(unsplit, ""), S);
+      expect(faults(quiet, "base")).toContain(
+        `${base}: it doesn't say which names aren't split by chain`,
+      );
+    }
+    const lost = inPanel("base", (html) => html.replace(/<li data-exchange-row>.*?<\/li>/, ""), S);
+    if (lost !== main) {
+      expect(faults(lost, "base")).toContain(
+        `${base}: its named exchanges aren't the dataset's for it`,
+      );
+    }
+    expect(Boolean(unsplit) || lost !== main).toBe(true);
   });
 
   it("refuses a heading or a row's total that isn't the dataset's", () => {
@@ -408,10 +457,8 @@ describe("the supply panels", { timeout: WHOLE_PAGE_TIMEOUT_MS }, () => {
   });
 
   it("refuses exchange rows that left the card's toggle", () => {
-    const moved = main.replace("<div data-labels-table>", "<div>");
-    expect(cardFaults(moved)).toEqual(
-      expect.arrayContaining([expect.stringContaining("exchange rows under its toggle")]),
-    );
+    const moved = inCard((html) => html.replace("<div data-labels-table>", "<div>"));
+    expect(cardFaults(moved)).toContain(`${CARD}: its named exchanges aren't the dataset's for it`);
   });
 
   it("refuses a step line panel that isn't the dataset's", () => {

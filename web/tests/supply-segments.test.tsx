@@ -5,8 +5,8 @@ import { JourneyView } from "@/components/views/journey";
 import { JOURNEY_PARTS, newestByChain } from "@/lib/aggregate";
 import { chainOptions } from "@/lib/chain-scope";
 import { loadDataset } from "@/lib/dataset/load";
-import type { JourneyRow } from "@/lib/dataset/rows";
-import { exchangeRows } from "@/lib/exchange-rows";
+import type { ChainName, JourneyRow } from "@/lib/dataset/rows";
+import { chainExchangeRows, exchangeRows } from "@/lib/exchange-rows";
 import { formatExact } from "@/lib/format";
 import {
   exchangeExtras,
@@ -61,8 +61,9 @@ function renderLarge(overrides: Partial<Parameters<typeof JourneyView>[0]> = {})
 }
 
 // One card holds every chain: a bar row per filter option, and the first option's legend and tables.
+// All's card. Each option has its own, and each holds every option's bar.
 const supplyCardEl = (container: HTMLElement) =>
-  container.querySelector<HTMLElement>("#where-supply-sits")!;
+  container.querySelector<HTMLElement>('#where-supply-sits > [data-chain-panel="all"]')!;
 const supplyRowEl = (container: HTMLElement, value: string) =>
   supplyCardEl(container).querySelector<HTMLElement>(`[data-supply-row="${value}"]`)!;
 
@@ -143,17 +144,31 @@ describe("supplySegments", () => {
     expect(all.coverage).toBe("floor");
   });
 
-  it("gives a single chain's panel the floor but not the rows, which add up across chains", () => {
+  it("gives a single chain's panel the floor and only that chain's own rows, not All's", () => {
+    const chain = options[2].value as ChainName;
+    const own = chainExchangeRows(dataset.labels, chain);
     const panel = supplyPanel(options[2], {
       journey: dataset.journey,
       activity: dataset.activity,
       kpis: dataset.summary.kpis,
       definitions,
       exchanges: exchangeRows(dataset.labels),
+      chainExchanges: { [chain]: own },
     });
     const exchange = panel.segments.find((segment) => segment.key === "venue_exchange")!;
     expect(exchange.coverage).toBe("floor");
-    expect(exchange.entities).toBeUndefined();
+    expect(exchange.entities).toEqual(own);
+    expect(panel.exchanges.rows).toEqual(own);
+    // A chain given no rows lists none, rather than falling back to All's.
+    const bare = supplyPanel(options[2], {
+      journey: dataset.journey,
+      activity: dataset.activity,
+      kpis: dataset.summary.kpis,
+      definitions,
+      exchanges: exchangeRows(dataset.labels),
+    });
+    expect(bare.exchanges.rows).toEqual([]);
+    expect(bare.exchanges.caption).toMatch(/^No labeled exchange wallet holds OUSD on /);
   });
 
   it("refuses rows that add up to more than their segment", () => {

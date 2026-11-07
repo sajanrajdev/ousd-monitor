@@ -9,8 +9,14 @@ import { deriveState } from "../lib/dataset/state.ts";
 import { allChainKpis, newestByChain } from "../lib/aggregate.ts";
 import { chainOptions } from "../lib/chain-scope.ts";
 import { CARD_ANCHORS, CHAIN_NAMES, REQUIRED_CHAINS, TOKEN_CONTRACTS } from "../lib/definitions.ts";
-import { exchangeRows } from "../lib/exchange-rows.ts";
-import { formatBps, formatCompact, formatExact, UNKNOWN_TEXT } from "../lib/format.ts";
+import { chainExchangeRows, exchangeRows } from "../lib/exchange-rows.ts";
+import {
+  formatBps,
+  formatCompact,
+  formatExact,
+  formatFloorDollars,
+  UNKNOWN_TEXT,
+} from "../lib/format.ts";
 import {
   day0Scope,
   historyLabel,
@@ -694,9 +700,15 @@ function checkLinksAndRequests(page, document, problems) {
 const plainText = (element) => element?.textContent.replace(/\s+/g, " ").trim() ?? "";
 
 // The rows are the dataset's, in its order, and each says exactly what the dataset gives and nothing
-// more. A row may sit in a closed disclosure, but it can't be hidden.
+// more. A row may sit in a closed disclosure, but it can't be hidden. A chain's own rows, on its
+// supply card, are held by checkPanelExchanges and named by checkPayload.
+const ownRows = (document) =>
+  [...document.querySelectorAll("[data-exchange-row]")].filter(
+    (row) => !row.closest('[data-chain-panel]:not([data-chain-panel="all"])'),
+  );
+
 function checkExchangeRows(page, document, expected, problems) {
-  const rows = [...document.querySelectorAll("[data-exchange-row]")];
+  const rows = ownRows(document);
   if (rows.length !== expected.exchangeRows.length) {
     problems.push(`${page}: there are ${rows.length} exchange rows`);
   }
@@ -763,10 +775,18 @@ function checkNames(place, raw, expected, problems) {
   for (const name of namesFound(raw, expected)) problems.push(`${place}: names "${name}"`);
 }
 
-// Every name is blocked, and only a row's own name is taken out first, so one anywhere else is still
-// caught: the head, an attribute, a template, a sentence or serialized props.
+// Every row the main page writes, in its order: All's, then each chain's own on its supply card.
+const everyRow = (expected) => [
+  ...expected.exchangeRows,
+  ...expected.supplyPanels
+    .filter(({ value }) => value !== "all")
+    .flatMap(({ exchanges }) => exchanges.rows),
+];
+
+// Every name is blocked, and only a row's own name is taken out first, once per row, so one
+// anywhere else is still caught: the head, an attribute, a template, a sentence or serialized props.
 function checkMainNames(page, html, expected, problems) {
-  const names = expected.exchangeRows.map((row) => row.entity);
+  const names = everyRow(expected).map((row) => row.entity);
   const { document } = new JSDOM(html).window;
   for (const row of document.querySelectorAll("[data-exchange-row]")) {
     const name = row.querySelector("[data-exchange-name]");
@@ -1109,66 +1129,114 @@ function checkPanelAgainstKpis(where, panel, want, problems) {
   }
 }
 
-// One card shows every chain at once, as before the filter: a bar per filter option, the first over
-// all of them. It compares chains, so it has no filter panels. Its legend, figures, notes and tables
-// are the first option's, which covers every chain.
+// Held to the dataset's own rows, which the page's supply code doesn't read, so a fault in that code
+// can't set what this check expects: a chain's panel showing every chain's figures is caught here.
+function checkPanelAgainstRows(where, panel, { scope, legend, band, table }, problems) {
+  for (const [key, value] of Object.entries(legend)) {
+    const row = panel.querySelector(`[data-supply-legend] [data-segment="${key}"]`);
+    if (plainText(row?.querySelector("[data-segment-amount]")).replace("≥", "") !== value) {
+      problems.push(`${where}: its ${key} legend amount isn't ${scope}'s in the dataset`);
+    }
+  }
+  const line = panel.querySelector('[data-supply-legend] [data-band="placed_supply"]');
+  if (band !== null && !plainText(line).includes(` ${band} `)) {
+    problems.push(`${where}: its exchange-linked line isn't ${scope}'s in the dataset`);
+  }
+  const shown = [
+    ...(panel.querySelector(".data-toggle table")?.querySelectorAll("tbody tr") ?? []),
+  ];
+  const names = shown.map((tr) => plainText(tr.querySelector('[data-label="Chain"]')));
+  if (names.join() !== table.map(({ chain }) => chain).join()) {
+    problems.push(`${where}: its table's chains aren't ${scope}'s, as ${names.join()}`);
+    return;
+  }
+  table.forEach(({ chain, cells }, index) => {
+    for (const [label, value] of Object.entries(cells)) {
+      const cell = shown[index].querySelector(`[data-label="${label}"]`);
+      if (plainText(cell) !== value) {
+        problems.push(`${where}: its table's ${label} for ${chain} isn't the dataset's`);
+      }
+    }
+  });
+}
+
+// The names under a panel's table are its own: every one across chains on All, a chain's holdings on
+// a chain, which says what it leaves out rather than showing All's.
+function checkPanelExchanges(where, panel, { rows, unsplit }, problems) {
+  const named = [...panel.querySelectorAll(".data-toggle [data-labels-table] [data-exchange-row]")];
+  const said = named.map(
+    (row) =>
+      `${plainText(row.querySelector("[data-exchange-name]"))}: ${plainText(row.querySelector("[data-exchange-detail]"))}`,
+  );
+  const want = rows.map(({ entity, detail }) => `${entity}: ${detail}`);
+  if (said.join("; ") !== want.join("; ")) {
+    problems.push(`${where}: its named exchanges aren't the dataset's for it`);
+  }
+  const note = panel.querySelector(".data-toggle [data-exchanges-unsplit]");
+  if ((unsplit ?? "") !== plainText(note)) {
+    problems.push(`${where}: it doesn't say which names aren't split by chain`);
+  }
+}
+
+// A card per filter option, each with every chain's bar, the first over all of them, so the bars
+// compare chains whichever is chosen. Its heading, legend, figures, notes and tables are the option's
+// own. On a chain's card that chain's bar is marked and the others are muted.
 function checkSupplyPanels(page, document, expected, problems) {
   if (expected.supplyPanels.length === 0) return;
   const id = CARD_ANCHORS.supply;
-  const card = document.getElementById(id);
-  const where = `${page}: #${id}`;
-  if (!card?.matches(".chart-card")) {
-    problems.push(`${where}: isn't one card`);
-    return;
-  }
-  if (card.querySelector("[data-chain-panel]")) {
-    problems.push(`${where}: is split into filter panels`);
-  }
-  const rows = [...card.querySelectorAll("[data-supply-row]")];
-  const said = rows.map((row) => row.dataset.supplyRow);
+  const box = panelsOf(page, document, id, expected, problems);
   const wanted = expected.supplyPanels.map(({ value }) => value);
-  if (said.join() !== wanted.join()) {
-    problems.push(`${where}: has bars for ${said.join()}, not ${wanted.join()}`);
-  }
   for (const want of expected.supplyPanels) {
-    const row = rows.find((candidate) => candidate.dataset.supplyRow === want.value);
-    const at = `${where}, the ${want.value} bar`;
-    if (!row) continue;
-    if (!inView(row)) problems.push(`${at}: it's hidden by its markup`);
-    if (viewText(row.querySelector("[data-row-total]")).trim() !== want.rowTotal) {
-      problems.push(`${at}: its total isn't the dataset's`);
+    const panel = panelOf(box, want.value);
+    const where = `${page}: the ${want.value} panel of #${id}`;
+    if (!panel) continue;
+    if (!inView(panel)) problems.push(`${where}: it's hidden by its markup`);
+    const rows = [...panel.querySelectorAll("[data-supply-row]")];
+    const said = rows.map((row) => row.dataset.supplyRow);
+    if (said.join() !== wanted.join()) {
+      problems.push(`${where}: has bars for ${said.join()}, not ${wanted.join()}`);
     }
-    checkPanelBar(at, row, want, problems);
-  }
-  const [all] = expected.supplyPanels;
-  const heading = card.querySelector(".chart-card__head h2, .chart-card__head h3");
-  if (viewText(heading).trim() !== all.heading) {
-    problems.push(`${where}: its heading isn't the dataset's`);
-  }
-  checkPanelLegend(where, card, all, problems);
-  checkPanelStats(where, card, all.stats, problems);
-  checkPanelNotes(where, card, all.notes, problems);
-  const full = card.querySelector('.chart-card__head .tip__panel [data-full-note="placed"]');
-  if (!full?.textContent.includes(all.placedNote)) {
-    problems.push(`${where}: its tooltip has lost the placed note in full`);
-  }
-  checkPanelAgainstKpis(where, card, all, problems);
-  const tables = card.querySelectorAll(".data-toggle table");
-  checkTableRows(where, tables[0], all.table.columns, all.table.rows, problems);
-  if (
-    tables.length < 2 ||
-    !tables[1].querySelector("caption")?.textContent.includes(WALLETS_ACROSS_CHAINS_NOTE)
-  ) {
-    problems.push(`${where}: its table of wallets doesn't say what a wallet is`);
-  } else {
-    checkTableRows(where, tables[1], WALLET_TABLE_COLUMNS, all.kpiRows, problems);
-  }
-  // Rows add up across chains, so they sit under the first option. checkExchangeRows holds each one.
-  const named = card.querySelectorAll(".data-toggle [data-labels-table] [data-exchange-row]");
-  if (named.length !== all.entities) {
-    problems.push(
-      `${where}: it has ${named.length} exchange rows under its toggle, not ${all.entities}`,
-    );
+    for (const bar of expected.supplyPanels) {
+      const row = rows.find((candidate) => candidate.dataset.supplyRow === bar.value);
+      const at = `${where}, the ${bar.value} bar`;
+      if (!row) continue;
+      if (!inView(row)) problems.push(`${at}: it's hidden by its markup`);
+      if (viewText(row.querySelector("[data-row-total]")).trim() !== bar.rowTotal) {
+        problems.push(`${at}: its total isn't the dataset's`);
+      }
+      const mark = want.value === "all" ? "none" : bar.value === want.value ? "selected" : "muted";
+      const has = row.hasAttribute("data-selected")
+        ? "selected"
+        : row.hasAttribute("data-muted")
+          ? "muted"
+          : "none";
+      if (has !== mark) problems.push(`${at}: it's ${has}, not ${mark}`);
+      checkPanelBar(at, row, bar, problems);
+    }
+    const heading = panel.querySelector(".chart-card__head h2, .chart-card__head h3");
+    if (viewText(heading).trim() !== want.heading) {
+      problems.push(`${where}: its heading isn't the dataset's`);
+    }
+    checkPanelLegend(where, panel, want, problems);
+    checkPanelStats(where, panel, want.stats, problems);
+    checkPanelNotes(where, panel, want.notes, problems);
+    const full = panel.querySelector('.chart-card__head .tip__panel [data-full-note="placed"]');
+    if (!full?.textContent.includes(want.placedNote)) {
+      problems.push(`${where}: its tooltip has lost the placed note in full`);
+    }
+    checkPanelAgainstKpis(where, panel, want, problems);
+    checkPanelAgainstRows(where, panel, want.fromRows, problems);
+    const tables = panel.querySelectorAll(".data-toggle table");
+    checkTableRows(where, tables[0], want.table.columns, want.table.rows, problems);
+    if (
+      tables.length < 2 ||
+      !tables[1].querySelector("caption")?.textContent.includes(WALLETS_ACROSS_CHAINS_NOTE)
+    ) {
+      problems.push(`${where}: its table of wallets doesn't say what a wallet is`);
+    } else {
+      checkTableRows(where, tables[1], WALLET_TABLE_COLUMNS, want.kpiRows, problems);
+    }
+    checkPanelExchanges(where, panel, want.exchanges, problems);
   }
 }
 
@@ -1492,10 +1560,11 @@ function checkPayload(place, flight, expected, problems) {
   }
   const words = (element) => flightText(element.children, values).replace(/\s+/g, " ").trim();
   const rows = props.filter((element) => element["data-exchange-row"]);
-  if (rows.length !== expected.exchangeRows.length) {
+  const want = everyRow(expected);
+  if (rows.length !== want.length) {
     problems.push(`${place}: the payload has ${rows.length} exchange rows`);
   }
-  expected.exchangeRows.forEach(({ entity, detail, sourceHref, sourceText }, index) => {
+  want.forEach(({ entity, detail, sourceHref, sourceText }, index) => {
     const row = rows[index];
     if (!row || words(row) !== `${entity}, ${detail}. Source: ${sourceText}.`) {
       problems.push(`${place}: the payload's row for "${entity}" isn't the dataset's`);
@@ -1541,7 +1610,8 @@ function checkPayload(place, flight, expected, problems) {
 // table, as the dataset gives them.
 function checkBands(page, document, expected, problems) {
   const lines = [...document.querySelectorAll("[data-exchange-linked]")];
-  const drawn = expected.bands.filter(({ key, amount }) => key === "all" && BigInt(amount) > 0n);
+  // Each option's card has its own legend, so each band above zero has its line, on its own card.
+  const drawn = expected.bands.filter(({ amount }) => BigInt(amount) > 0n);
   if (lines.length !== drawn.length) {
     problems.push(`${page}: there are ${lines.length} exchange-linked lines`);
   }
@@ -1682,7 +1752,7 @@ export function verifyOutput(outDir, expected) {
     // Serialized props, as a name or address in them is on its way to the reader.
     if (name.endsWith(".txt") && !name.startsWith(`methodology${sep}`)) {
       const own = OWN_PAYLOAD.test(name);
-      const names = own ? expected.exchangeRows.map((row) => row.entity) : [];
+      const names = own ? everyRow(expected).map((row) => row.entity) : [];
       checkNames(name, withoutPayloadNames(content, names, '"'), expected, problems);
       if (own) checkPayload(name, content, expected, problems);
       checkAddresses(name, [content], new Set(), problems);
@@ -1757,6 +1827,43 @@ function kpiFigures(option, kpis, journey) {
   };
 }
 
+// The supply parts a row holds, by the names the legend and table give them, read straight from the
+// dataset so they don't depend on the page's supply code. Exchange venues are a floor.
+const ROW_PARTS = [
+  ["issuer_inventory", "Issuer inventory"],
+  ["placed_supply", "Placed"],
+  ["placed_exchange_linked", "Of placed, exchange-linked"],
+  ["venue_dex", "DEX venues"],
+  ["venue_lending", "Lending venues"],
+  ["venue_exchange", "Exchange venues, at least"],
+  ["free_floating", "Free-floating"],
+];
+
+// What an option's legend and table must say, from each chain's newest journey row as written:
+// summed over every chain on All, and one chain's own on a chain.
+function rowFigures(option, journey) {
+  const rows = newestByChain(journey).filter((row) => option.chains.includes(row.chain));
+  const sum = (key) => rows.reduce((held, row) => held + BigInt(row[key]), 0n).toString();
+  const legend = Object.fromEntries(
+    ROW_PARTS.filter(([key]) => key !== "placed_exchange_linked").map(([key]) => [
+      key,
+      key === "venue_exchange" ? formatFloorDollars(sum(key)) : formatCompact(sum(key)),
+    ]),
+  );
+  return {
+    scope: option.value === "all" ? "every chain" : CHAIN_NAMES[option.value],
+    legend: rows.length > 0 ? legend : {},
+    band: rows.length > 0 ? formatCompact(sum("placed_exchange_linked")) : null,
+    table: rows.map((row) => ({
+      chain: CHAIN_NAMES[row.chain],
+      cells: Object.fromEntries([
+        ["Total", formatExact(row.total_supply)],
+        ...ROW_PARTS.map(([key, label]) => [label, formatExact(row[key])]),
+      ]),
+    })),
+  };
+}
+
 // What each filter option's supply card and step line must say, from the same functions the view uses.
 function expectedPanels(files) {
   const { manifest, summary, journey, activity, labels } = files;
@@ -1767,6 +1874,9 @@ function expectedPanels(files) {
     kpis: summary.kpis,
     definitions: manifest.definitions,
     exchanges: exchangeRows(labels),
+    chainExchanges: Object.fromEntries(
+      manifest.coverage.chains_included.map((chain) => [chain, chainExchangeRows(labels, chain)]),
+    ),
   };
   const activityInputs = {
     activity: activity.data,
@@ -1813,7 +1923,8 @@ function expectedPanels(files) {
         chains: option.chains.length,
         ...kpiFigures(option, summary.kpis, journey.data),
         placedNote: PLACED_NOTE,
-        entities: panel.segments.flatMap((segment) => segment.entities ?? []).length,
+        exchanges: panel.exchanges,
+        fromRows: rowFigures(option, journey.data),
       };
     }),
     velocity: velocityExpected(summary.kpis, manifest.warnings),

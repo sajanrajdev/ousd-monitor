@@ -1,6 +1,7 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { describe, expect, it } from "vitest";
+import { ExplainEnhance } from "@/components/explain-enhance";
 import {
   footnoteId,
   Footnotes,
@@ -102,5 +103,36 @@ describe("footnotes", () => {
     );
     const results = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(results.violations).toEqual([]);
+  });
+
+  // With a script, a marker opens its list in place: no jump to the footnote, no new address, and
+  // focus moved to the footnote, which lights briefly. The toggle opens and closes it.
+  it("opens the list from a marker in place, focusing and lighting the footnote", () => {
+    render(
+      <>
+        <h2>Title</h2>
+        <NoteMarks notes={notes} prefix="card" />
+        <Footnotes notes={notes} prefix="card" />
+        <ExplainEnhance />
+      </>,
+    );
+    const before = location.hash;
+    const marker = screen.getByRole("link", { name: "Footnote 1" });
+    const followed = fireEvent.click(marker);
+    expect(followed).toBe(false);
+    expect(location.hash).toBe(before);
+    const details = document.querySelector<HTMLDetailsElement>("details.footnotes")!;
+    expect(details.open).toBe(true);
+    const item = document.getElementById(footnoteId("card", 1))!;
+    expect(document.activeElement).toBe(item);
+    expect(item.hasAttribute("data-flash")).toBe(true);
+    // A marker with its list open leaves it open.
+    fireEvent.click(marker);
+    expect(details.open).toBe(true);
+    const summary = details.querySelector("summary")!;
+    expect(fireEvent.click(summary)).toBe(false);
+    expect(details.open).toBe(false);
+    fireEvent.click(summary);
+    expect(details.open).toBe(true);
   });
 });

@@ -728,6 +728,13 @@ html:not([data-tips]) .tip--info:is(:hover, :focus-within) > .tip__icon,
   display: inline;
 }
 
+/* Words only assistive tech reads are never what the browser holds the page still by. A card's
+   hidden summary keeps the static place of an absolute box, which moves when its footnotes open,
+   and as the anchor it scrolled the page by the list's height. */
+.sr-only {
+  overflow-anchor: none;
+}
+
 /* The card's footnotes: a toggle at the right of its last row, beside Table and the as-of date,
    opening a numbered list below the card's content. */
 .chart-card > .chart-card__meta:has(+ .footnotes) {
@@ -795,8 +802,24 @@ html:not([data-tips]) .tip--info:is(:hover, :focus-within) > .tip__icon,
   font-weight: 600;
 }
 
-.footnotes__list > li:target {
+/* The footnote a marker landed on: by its address with no script, and lit briefly with one. */
+.footnotes__list > li:target,
+.footnotes__list > li[data-flash] {
   background: var(--color-secondary-strong);
+}
+
+.footnotes__list > li {
+  transition: background-color 600ms ease-out;
+}
+
+.footnotes__list > li:focus:not(:focus-visible) {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .footnotes__list > li {
+    transition: none;
+  }
 }
 
 .data-toggle {
@@ -1464,7 +1487,7 @@ html[data-freshness="stale"] .site-footer .freshness-text__fresh {
   right: 0.75rem;
 }
 
-/* Every chain's bar in one view, the sum first. The filter highlights a row by weight and a rule. */
+/* Every chain's bar in one view, the sum first. A chain's card marks its row by weight and a rule. */
 .supply-rows {
   display: grid;
   gap: 0.75rem;
@@ -1494,24 +1517,23 @@ html[data-freshness="stale"] .site-footer .freshness-text__fresh {
   font-weight: 650;
 }
 
-@supports selector(:has(*)) {
-  :root:has(.chain-filter input[value="tempo"]:checked) [data-supply-row="tempo"],
-  :root:has(.chain-filter input[value="ethereum"]:checked) [data-supply-row="ethereum"],
-  :root:has(.chain-filter input[value="base"]:checked) [data-supply-row="base"],
-  :root:has(.chain-filter input[value="solana"]:checked) [data-supply-row="solana"] {
-    border-left-color: var(--color-maroon);
-  }
+/* A chain's card marks its own bar and mutes the others, which stay for comparison. Only the bar's
+   fill is muted, so the row's name, total and bracket keep their contrast. */
+.supply-row[data-selected] {
+  border-left-color: var(--color-maroon);
+}
 
-  :root:has(.chain-filter input[value="tempo"]:checked) [data-supply-row="tempo"] .supply-row__name,
-  :root:has(.chain-filter input[value="ethereum"]:checked)
-    [data-supply-row="ethereum"]
-    .supply-row__name,
-  :root:has(.chain-filter input[value="base"]:checked) [data-supply-row="base"] .supply-row__name,
-  :root:has(.chain-filter input[value="solana"]:checked)
-    [data-supply-row="solana"]
-    .supply-row__name {
-    font-weight: 650;
-  }
+.supply-row[data-selected] .supply-row__name {
+  font-weight: 650;
+}
+
+.supply-row[data-muted] .supply-bar__track {
+  opacity: 0.35;
+}
+
+/* A faded bar can't hold a word at full contrast, so its direct labels give way to the legend. */
+.supply-row[data-muted] .supply-bar__label {
+  visibility: hidden;
 }
 
 /* A card spans the content width, so from a wide card its chart gets most of it. */

@@ -49,10 +49,11 @@ export function journeyHeading(rows: JourneyRow[], definitions: Definitions): st
   const share = all && floorBps(BigInt(all.placed_supply), BigInt(all.total_supply));
   if (!all || share === null) return UNKNOWN_TEXT;
   const minimum = formatCompact(definitions.placed_min_base_units);
-  return scopedHeading(
-    all.chains,
-    `${formatBps(share)} of supply stayed ${definitions.placed_days}+ days in ${minimum}-plus wallets.`,
-  );
+  // Below all four chains it names the ones it covers inside the sentence: "of Base supply".
+  const whose = REQUIRED_CHAINS.every((chain) => all.chains.includes(chain))
+    ? "supply"
+    : `${scopeText(all.chains)} supply`;
+  return `${formatBps(share)} of ${whose} stayed ${definitions.placed_days}+ days in ${minimum}-plus wallets.`;
 }
 
 export type SeriesPoint = { day: string; total_supply: string; placed_supply: string };

@@ -114,25 +114,24 @@ describe("the journey heading", () => {
     expect(text.split(/\s+/).length).toBeLessThanOrEqual(12);
   });
 
-  it("prefixes its chains at partial scope, and never says all", () => {
+  it("names its chains at partial scope, and never says all", () => {
     const { rows, definitions } = sampleOf("partial");
     const text = journeyHeading(rows, definitions);
-    expect(text.startsWith("On Tempo and Ethereum, ")).toBe(true);
-    expect(text).toContain(expectedShare(rows));
+    expect(text).toContain(`${expectedShare(rows)} of Tempo and Ethereum supply stayed`);
     expect(text).not.toMatch(/\ball\b/i);
-    expect(text.replace("On Tempo and Ethereum, ", "").split(/\s+/).length).toBeLessThanOrEqual(12);
+    expect(text.split(/\s+/).length).toBeLessThanOrEqual(15);
   });
 
   it("names a single chain", () => {
     expect(journeyHeading([row("base", "10000", "2500")], definitions)).toBe(
-      "On Base, 25.00% of supply stayed 14+ days in $1M-plus wallets.",
+      "25.00% of Base supply stayed 14+ days in $1M-plus wallets.",
     );
   });
 
   it("takes other thresholds from the definitions, not a hard-coded $1M or 14", () => {
     const other = { placed_days: 30, placed_min_base_units: "2500000000000" } as Definitions;
     expect(journeyHeading([row("base", "10000", "2500")], other)).toBe(
-      "On Base, 25.00% of supply stayed 30+ days in $2.5M-plus wallets.",
+      "25.00% of Base supply stayed 30+ days in $2.5M-plus wallets.",
     );
   });
 
@@ -142,9 +141,11 @@ describe("the journey heading", () => {
   });
 
   it("shows zero placed as 0.00%, and all of it as 100.00%", () => {
-    expect(journeyHeading([row("tempo", "10000", "0")], definitions)).toContain("0.00% of supply");
+    expect(journeyHeading([row("tempo", "10000", "0")], definitions)).toContain(
+      "0.00% of Tempo supply",
+    );
     expect(journeyHeading([row("tempo", "10000", "10000")], definitions)).toContain(
-      "100.00% of supply",
+      "100.00% of Tempo supply",
     );
   });
 

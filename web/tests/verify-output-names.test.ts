@@ -466,10 +466,18 @@ describe("exchange names on the main page", () => {
       );
     });
 
-    it("refuses a chain's own line, as the one legend is the first option's", () => {
-      const extra = `<p data-exchange-linked="ethereum">${bands[1].line}</p>`;
+    it("refuses a chain's line lost, or a line for a chain with no band", () => {
+      const lost = plantedBands(bands).replace(/<p data-exchange-linked="ethereum">.*?<\/p>/, "");
+      expect(lost).not.toBe(plantedBands(bands));
+      expect(verifyOutput(mainWith(lost), expected)).toEqual(
+        expect.arrayContaining([
+          "index.html: there are 1 exchange-linked lines",
+          "index.html: the exchange-linked line for ethereum isn't the dataset's",
+        ]),
+      );
+      const extra = `<p data-exchange-linked="tempo">${bands[1].line}</p>`;
       expect(verifyOutput(mainWith(`${plantedBands(bands)}${extra}`), expected)).toContain(
-        "index.html: there are 2 exchange-linked lines",
+        "index.html: there are 3 exchange-linked lines",
       );
     });
 

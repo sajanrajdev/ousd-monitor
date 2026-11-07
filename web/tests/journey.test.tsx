@@ -6,7 +6,7 @@ import { ChainFilter } from "@/components/chain-filter";
 import { JourneyView } from "@/components/views/journey";
 import { chainOptions } from "@/lib/chain-scope";
 import { loadDataset } from "@/lib/dataset/load";
-import { exchangeRows } from "@/lib/exchange-rows";
+import { chainExchangeRows, exchangeRows } from "@/lib/exchange-rows";
 import { UNKNOWN_TEXT } from "@/lib/format";
 import {
   EXCHANGE_FLOOR_LINK,
@@ -41,6 +41,12 @@ function view(dir = "fixtures/dataset/complete", change?: (dir: string) => void)
         definitions={dataset.manifest.definitions}
         state={dataset.state}
         exchanges={exchangeRows(dataset.labels)}
+        chainExchanges={Object.fromEntries(
+          dataset.manifest.coverage.chains_included.map((chain) => [
+            chain,
+            chainExchangeRows(dataset.labels, chain),
+          ]),
+        )}
       />
     ),
   };
@@ -48,10 +54,11 @@ function view(dir = "fixtures/dataset/complete", change?: (dir: string) => void)
 
 const VALUES = ["all", "tempo", "ethereum", "base", "solana"];
 
-// The supply card is one card with every chain in it, a bar row per filter option. Its legend,
-// figures, notes and tables are the first option's, which covers every chain.
-const card = (container: HTMLElement) =>
-  container.querySelector<HTMLElement>("#where-supply-sits")!;
+// The supply card has a panel per filter option, each with a bar row per option. Its legend,
+// figures, notes and tables are the option's own. `card` is All's, over every chain.
+const supplyPanel = (container: HTMLElement, value: string) =>
+  container.querySelector<HTMLElement>(`#where-supply-sits > [data-chain-panel="${value}"]`)!;
+const card = (container: HTMLElement) => supplyPanel(container, "all");
 const row = (container: HTMLElement, value: string) =>
   card(container).querySelector<HTMLElement>(`[data-supply-row="${value}"]`)!;
 const series = (container: HTMLElement, value: string) =>
@@ -70,19 +77,22 @@ const noteWords = (note: Element) => note.querySelector("[data-note-text]")!.tex
 const noteTip = (note: Element) => note.querySelector("[data-note-full]")?.textContent ?? null;
 
 describe("journey view", () => {
-  it("renders one supply card with a bar per filter option, and a step line for each", () => {
+  it("renders a supply card and a step line per filter option, each card with every bar", () => {
     const { container } = render(view().ui);
-    const supply = card(container);
-    expect(supply.matches(".chart-card")).toBe(true);
-    expect(supply.querySelector("[data-chain-panel]")).toBeNull();
-    expect(
-      [...supply.querySelectorAll("[data-supply-row]")].map((r) =>
-        r.getAttribute("data-supply-row"),
-      ),
-    ).toEqual(VALUES);
+    const supplies = [...container.querySelectorAll("#where-supply-sits > [data-chain-panel]")];
+    expect(supplies.map((panel) => panel.getAttribute("data-chain-panel"))).toEqual(VALUES);
+    for (const supply of supplies) {
+      expect(
+        [...supply.querySelectorAll("[data-supply-row]")].map((r) =>
+          r.getAttribute("data-supply-row"),
+        ),
+      ).toEqual(VALUES);
+    }
     const panels = [...container.querySelectorAll("#placed-vs-circulating > [data-chain-panel]")];
     expect(panels.map((panel) => panel.getAttribute("data-chain-panel"))).toEqual(VALUES);
-    for (const each of [supply, ...panels.map((panel) => panel.querySelector(".chart-card")!)]) {
+    for (const each of [...supplies, ...panels].map((panel) =>
+      panel.querySelector(".chart-card")!,
+    )) {
       expect(each.querySelector("h2")!.textContent!.length).toBeGreaterThan(10);
       expect(
         each.querySelector(".chart-card__head > .tip--info > .tip__panel")!.textContent,
@@ -90,7 +100,42 @@ describe("journey view", () => {
       expect(each.querySelector(".chart-card__meta time")).toBeTruthy();
       expect(each.querySelector('a[href^="/methodology/#"]')).toBeTruthy();
     }
-    expect(container.querySelectorAll(".chart-card")).toHaveLength(1 + VALUES.length);
+    expect(container.querySelectorAll(".chart-card")).toHaveLength(2 * VALUES.length);
+  });
+
+  // The maintainer's bug: choosing a chain changed nothing on this card. Each chain's card has that
+  // chain's heading, legend, figures and table, and marks its own bar with the others muted.
+  it("gives a chain's card that chain's heading, legend, figures and table", () => {
+    const { dataset, ui } = view();
+    const { container } = render(ui);
+    const all = card(container);
+    for (const value of VALUES.slice(1)) {
+      const panel = supplyPanel(container, value);
+      const name = panel.querySelector(`[data-supply-row="${value}"] .supply-row__name`)!;
+      expect(panel.querySelector("h2")!.textContent).toContain(`of ${name.textContent} supply`);
+      const rows = [...panel.querySelectorAll("table")[0].querySelectorAll("tbody tr")];
+      expect(rows.map((tr) => tr.querySelector('[data-label="Chain"]')!.textContent)).toEqual([
+        name.textContent,
+      ]);
+      const own = dataset.journey.filter((r) => r.chain === value).at(-1)!;
+      expect(rows[0].querySelector('[data-label="Placed"]')!.textContent).toBe(
+        `$${(BigInt(own.placed_supply) / 1_000_000n).toLocaleString("en-US")}`,
+      );
+      expect(
+        panel.querySelector('[data-segment="placed_supply"] [data-segment-amount]')!.textContent,
+      ).not.toBe(
+        all.querySelector('[data-segment="placed_supply"] [data-segment-amount]')!.textContent,
+      );
+      expect(panel.querySelector('[data-stat="active-wallets"]')).not.toBeNull();
+      for (const bar of panel.querySelectorAll("[data-supply-row]")) {
+        const mine = bar.getAttribute("data-supply-row") === value;
+        expect(bar.hasAttribute("data-selected")).toBe(mine);
+        expect(bar.hasAttribute("data-muted")).toBe(!mine);
+      }
+    }
+    for (const bar of all.querySelectorAll("[data-supply-row]")) {
+      expect(bar.hasAttribute("data-selected") || bar.hasAttribute("data-muted")).toBe(false);
+    }
   });
 
   it("draws one bar per option, of that option's own chains, named in its row", () => {
@@ -143,7 +188,7 @@ describe("journey view", () => {
     const tables = card(container).querySelectorAll("table");
     expect(tables[0].querySelectorAll("tbody tr")).toHaveLength(4);
     expect(tables[1].querySelectorAll("tbody tr")).toHaveLength(4);
-    expect(container.querySelectorAll("#where-supply-sits .data-toggle")).toHaveLength(1);
+    expect(card(container).querySelectorAll(".data-toggle")).toHaveLength(1);
   });
 
   it("marks exchange venues as a floor and shows the exchange-linked band inside placed", () => {
@@ -171,11 +216,19 @@ describe("journey view", () => {
     );
   });
 
-  it("carries data-exchange-linked once, in the legend, and draws a band only where there is one", () => {
+  it("carries data-exchange-linked once per card with a band, in its legend, and draws a band only where there is one", () => {
     const { container } = render(view().ui);
     const lines = [...container.querySelectorAll("[data-exchange-linked]")];
-    expect(lines.map((line) => line.getAttribute("data-exchange-linked"))).toEqual(["all"]);
-    expect(lines[0].closest("[data-supply-legend]")).not.toBeNull();
+    expect(lines.map((line) => line.getAttribute("data-exchange-linked"))).toEqual([
+      "all",
+      "ethereum",
+    ]);
+    for (const line of lines) {
+      expect(line.closest("[data-supply-legend]")).not.toBeNull();
+      expect(line.closest("[data-chain-panel]")!.getAttribute("data-chain-panel")).toBe(
+        line.getAttribute("data-exchange-linked"),
+      );
+    }
     expect(
       row(container, "tempo").querySelector('[data-testid="exchange-linked-band"]'),
     ).toBeNull();
@@ -184,9 +237,9 @@ describe("journey view", () => {
     ).not.toBeNull();
   });
 
-  it("shows each exchange beside its source, once, under the card's data toggle", () => {
+  it("shows each exchange beside its source, once, under All's data toggle", () => {
     const { container } = render(view().ui);
-    const rows = [...container.querySelectorAll("[data-exchange-row]")];
+    const rows = [...card(container).querySelectorAll("[data-exchange-row]")];
     expect(rows.map((r) => r.textContent)).toEqual([
       "Sample Exchange, 2 wallets, at least $610,000,000. Source: each wallet's label.",
       "Sample Listing, no wallet labeled. Source: its OUSD listing.",
@@ -200,6 +253,29 @@ describe("journey view", () => {
     expect(links[0].getAttribute("href")).toBe("/methodology/#named-labels");
     expect(links[1].getAttribute("href")).toBe("https://example.com/sample-listing/ousd");
     expect(links[1].getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("lists only a chain's own holdings on its card, and says the rest aren't split by chain", () => {
+    const { dataset, ui } = view();
+    const { container } = render(ui);
+    for (const value of VALUES.slice(1)) {
+      const panel = supplyPanel(container, value);
+      const own = chainExchangeRows(dataset.labels, value as "tempo");
+      const rows = [...panel.querySelectorAll("[data-exchange-row]")];
+      expect(rows.map((r) => r.querySelector("[data-exchange-detail]")!.textContent)).toEqual(
+        own.map((r) => r.detail),
+      );
+      // The listing names no chain, so a chain's card never shows it.
+      expect(panel.textContent).not.toContain("Sample Listing");
+      expect(panel.querySelector("[data-exchanges-unsplit]")!.textContent).toContain(
+        "aren't split by chain",
+      );
+      if (own.length === 0) {
+        expect(panel.querySelector("[data-labels-table]")!.textContent).toMatch(
+          /No labeled exchange wallet holds OUSD on /,
+        );
+      }
+    }
   });
 
   it("marks the floor and coverage notes, short and then in full in each footnote", () => {

@@ -6,6 +6,101 @@ const HOVER_OPEN_MS = 100;
 const HOVER_CLOSE_MS = 200;
 // The space a panel keeps from the viewport's edge, as the page margin is at 390.
 const EDGE_PX = 16;
+// A footnotes list opens and closes like a drawer, and a footnote a marker lands on lights briefly.
+const DRAWER_MS = 220;
+const FLASH_MS = 1200;
+// What a list's bottom keeps clear of the viewport's, when the page has to move to show it.
+const BOTTOM_GAP_PX = 16;
+
+const reducedMotion = () =>
+  window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+const drawers = new WeakMap<HTMLElement, Animation>();
+// A list still drawn while it closes, which is open to the browser and shut to the reader.
+const closing = new WeakSet<HTMLDetailsElement>();
+
+const listOf = (details: HTMLDetailsElement) =>
+  details.querySelector<HTMLElement>(":scope > .footnotes__list");
+const footnotesOpen = (details: HTMLDetailsElement) => details.open && !closing.has(details);
+
+// Opens or closes a card's footnotes, its list growing or shrinking in height with a light fade,
+// from wherever a running one has got to. With reduced motion it's at once, as the details element
+// is with no script. Returns where the open list ends, measured before it's drawn growing.
+function setFootnotes(details: HTMLDetailsElement, open: boolean): number {
+  const list = listOf(details);
+  const running = list && drawers.get(list);
+  const from = running && list ? getComputedStyle(list) : null;
+  const start = from ? { height: from.height, opacity: Number(from.opacity) } : null;
+  running?.cancel();
+  closing.delete(details);
+  details.open = true;
+  const bottom = list?.getBoundingClientRect().bottom ?? 0;
+  if (!list || reducedMotion() || typeof list.animate !== "function") {
+    details.open = open;
+    return bottom;
+  }
+  const shut = { height: "0px", opacity: 0, paddingTop: "0px", marginTop: "0px" };
+  const full = { height: `${list.getBoundingClientRect().height}px`, opacity: 1 };
+  if (!open) closing.add(details);
+  list.style.overflow = "hidden";
+  const animation = list.animate(open ? [start ?? shut, full] : [start ?? full, shut], {
+    duration: DRAWER_MS,
+    easing: "ease-out",
+  });
+  drawers.set(list, animation);
+  // One cancelled for a newer one leaves the list to that one.
+  const done = () => {
+    if (drawers.get(list) !== animation) return;
+    list.style.removeProperty("overflow");
+    drawers.delete(list);
+  };
+  animation.oncancel = done;
+  animation.onfinish = () => {
+    done();
+    if (!open) {
+      closing.delete(details);
+      details.open = false;
+    }
+  };
+  return bottom;
+}
+
+// Where the page has to be for a list's bottom to show, moving the least it can and never taking
+// `top` under the header, or null when it already fits. It never aligns the list to the top.
+function revealTarget(bottom: number, top: Element): number | null {
+  const below = bottom + BOTTOM_GAP_PX - window.innerHeight;
+  if (below <= 0) return null;
+  const header = document.querySelector(".site-header")?.getBoundingClientRect().bottom ?? 0;
+  const room = top.getBoundingClientRect().top - header - BOTTOM_GAP_PX;
+  const by = Math.max(0, Math.min(below, room));
+  return by > 0 ? window.scrollY + by : null;
+}
+
+// A marker opens its card's list where the page is, with no jump to the footnote and no change to
+// the address, scrolls only as far as the list's bottom needs, then moves focus to the footnote and
+// lights it, so the reader sees which one it is. The page can't scroll past its end while the list
+// is still growing, so a scroll cut short there finishes when the drawer does.
+function openFootnote(footnote: HTMLElement): void {
+  const details = footnote.closest<HTMLDetailsElement>("details.footnotes");
+  const list = details && listOf(details);
+  if (!details || !list) return;
+  const bottom = footnotesOpen(details)
+    ? list.getBoundingClientRect().bottom
+    : setFootnotes(details, true);
+  const target = revealTarget(bottom, footnote);
+  const behavior = reducedMotion() ? "instant" : "smooth";
+  if (target !== null) {
+    window.scrollTo({ top: target, behavior });
+    drawers
+      .get(list)
+      ?.finished.then(() => {
+        if (window.scrollY < target - 1) window.scrollTo({ top: target, behavior });
+      })
+      .catch(() => {});
+  }
+  footnote.focus({ preventScroll: true });
+  footnote.dataset.flash = "";
+  setTimeout(() => delete footnote.dataset.flash, FLASH_MS);
+}
 
 function tipAt(target: EventTarget | null): HTMLElement | null {
   return target instanceof Element ? target.closest<HTMLElement>("[data-tip]") : null;
@@ -126,11 +221,20 @@ function listen(root: Document): () => void {
   const onClick = (event: MouseEvent) => {
     clearTimeout(openTimer);
     const target = event.target instanceof Element ? event.target : null;
-    // A footnote marker opens its card's list before the browser goes to the footnote.
+    // A footnote marker opens its card's list in place. Without a script it's a link to it.
     const ref = target?.closest<HTMLAnchorElement>("a[data-fn-ref]");
     const footnote = ref && root.getElementById(ref.hash.slice(1));
-    const list = footnote?.closest("details");
-    if (list) list.open = true;
+    const plain = !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+    if (footnote && plain) {
+      event.preventDefault();
+      openFootnote(footnote);
+    }
+    // The Footnotes toggle, by click, Enter or Space, opens and closes its list as a drawer.
+    const drawer = target?.closest("summary")?.parentElement;
+    if (drawer instanceof HTMLDetailsElement && drawer.matches(".footnotes")) {
+      event.preventDefault();
+      setFootnotes(drawer, !footnotesOpen(drawer));
+    }
     const tip = tipAt(target);
     const trigger = tip && target?.closest(".tip__trigger");
     if (tip && trigger && trigger.tagName === "BUTTON") {
