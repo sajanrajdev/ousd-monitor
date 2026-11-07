@@ -9,7 +9,7 @@ import traceback
 import httpx
 import pytest
 from conftest import make_chain
-from ousd import cli
+from ousd import cli, probes
 from ousd.chains import Chain, missing_rpc_keys
 from ousd.decode import TRANSFER_TOPIC
 from ousd.http import HttpError, PoliteClient
@@ -651,12 +651,15 @@ def test_scrub_hides_hyphen_and_underscore_parts_whole_but_does_not_split_them(u
 def test_a_failing_sync_through_the_cli_never_shows_the_key(monkeypatch, tmp_path, capsys, caplog):
     monkeypatch.setenv("TEMPO_RPC_URL", URLS[0])
     monkeypatch.setenv("OUSD_DB_PATH", str(tmp_path / "ousd.duckdb"))
-    transport = httpx.MockTransport(lambda request: httpx.Response(500, text=f"down {URLS[0]}"))
+    # A client error is not retried, and its body goes into the error text, so the echoed URL has
+    # to be scrubbed for the key to stay out.
+    transport = httpx.MockTransport(lambda request: httpx.Response(403, text=f"denied {URLS[0]}"))
 
     def polite(**kwargs):
         return PoliteClient(transport=transport, sleep=lambda _: None, **kwargs)
 
-    monkeypatch.setattr(cli, "PoliteClient", polite)
+    # Sync clients are built in probes; cli.PoliteClient is only the Bridge client.
+    monkeypatch.setattr(probes, "PoliteClient", polite)
 
     with pytest.raises(HttpError) as raised:
         cli.main(["--chain", "tempo", "sync"])

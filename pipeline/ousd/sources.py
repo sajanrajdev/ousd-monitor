@@ -292,14 +292,13 @@ class BlockscoutClient:
         return _parse(self._http, self._url, what, read)
 
     def _logs_url(self, tx_hash: str) -> httpx.URL:
-        invalid = False
         try:
             base = httpx.URL(self._url)
             return base.copy_with(path=f"{base.path.rstrip('/')}/v2/transactions/{tx_hash}/logs")
         except httpx.InvalidURL:
-            # Its text can quote part of the URL. Raised below, outside the handler.
-            invalid = True
-        assert invalid
+            pass
+        # Raised outside the handler: the InvalidURL text can quote part of the URL, and raising
+        # inside would attach it as the cause.
         raise ValueError("invalid Blockscout URL")
 
     def pages(

@@ -2,9 +2,12 @@
 
 import json
 import logging
+import math
+import random
 import re
 import time
 from collections.abc import Callable
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.parse import parse_qsl, quote, quote_plus, unquote, urlsplit
 
@@ -25,15 +28,37 @@ MAX_SERVER_WAIT = 3600.0
 REQUEST_DEADLINE = 120.0
 # Shortest URL part worth hiding on its own. Shorter parts are words like "v2" or "base".
 MIN_SECRET_PART = 8
+# Largest response body read by default. A client can set its own limit.
+MAX_RESPONSE_BYTES = 64 * 1024 * 1024
 # Pauses at least this long are logged, so a quiet process means a hang and not a wait.
 VISIBLE_WAIT = 5.0
 
 
-def _server_wait(response: httpx.Response) -> float:
+def _retry_after(value: str, now: float) -> float:
+    """A Retry-After value as seconds: either a number or an HTTP date."""
+    try:
+        seconds = float(value)
+    except ValueError:
+        pass
+    else:
+        if math.isnan(seconds):
+            raise ValueError(f"bad Retry-After: {value!r}")
+        return seconds
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"bad Retry-After: {value!r}") from None
+    if when.tzinfo is None:
+        raise ValueError(f"bad Retry-After: {value!r}")
+    return when.timestamp() - now
+
+
+def _server_wait(response: httpx.Response, now: float) -> float:
     """Seconds the server asked us to wait, or 0 if it did not say."""
     try:
         if "retry-after" in response.headers:
-            return min(float(response.headers["retry-after"]), MAX_SERVER_WAIT)
+            seconds = _retry_after(response.headers["retry-after"], now)
+            return min(max(seconds, 0.0), MAX_SERVER_WAIT)
         if response.headers.get("x-ratelimit-remaining") == "0":
             # Blockscout reports the time until reset in milliseconds.
             return min(float(response.headers["x-ratelimit-reset"]) / 1000, MAX_SERVER_WAIT)
@@ -85,6 +110,9 @@ class PoliteClient:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         deadline: float = REQUEST_DEADLINE,
+        max_bytes: int = MAX_RESPONSE_BYTES,
+        rng: random.Random | None = None,
+        wall_clock: Callable[[], float] = time.time,
     ) -> None:
         self._client = httpx.Client(
             headers={"User-Agent": USER_AGENT}, timeout=60.0, transport=transport
@@ -96,6 +124,10 @@ class PoliteClient:
         self._sleep = sleep
         self._clock = clock
         self._deadline = deadline
+        self._max_bytes = max_bytes
+        # Tests seed this to make the jittered delays repeatable.
+        self._rng = rng or random.Random()
+        self._wall_clock = wall_clock
         self._last_request = 0.0
         self._pause_next = 0.0
 
@@ -104,7 +136,10 @@ class PoliteClient:
         server_wait = 0.0
         for attempt in range(self._max_attempts):
             if attempt:
-                delay = max(self._backoff * 2 ** (attempt - 1), server_wait)
+                # Full jitter: a random wait up to the exponential step, so clients that failed
+                # together do not retry together. A server's own hint is still a floor.
+                jittered = self._rng.uniform(0, self._backoff * 2 ** (attempt - 1))
+                delay = max(jittered, server_wait)
                 log.warning("%s: retrying in %.0fs: %s", self._label, delay, failure)
                 self._sleep(delay)
             # A hint only applies to the response that gave it, not to later failures.
@@ -123,10 +158,11 @@ class PoliteClient:
                 # Raised outside the except block so that no cause or context is attached.
                 raise HttpError(f"{self._label}: invalid URL")
             # Spending the last request in a window: wait it out instead of earning a 429.
-            self._pause_next = _server_wait(response) if response.is_success else 0.0
+            now = self._wall_clock()
+            self._pause_next = _server_wait(response, now) if response.is_success else 0.0
             if response.status_code in RETRYABLE_STATUS:
                 failure = f"HTTP {response.status_code}"
-                server_wait = _server_wait(response)
+                server_wait = _server_wait(response, now)
                 continue
             if response.is_error:
                 # Scrub the whole body first: a cut at 200 bytes could split a key in two.
@@ -161,11 +197,20 @@ class PoliteClient:
         started = self._clock()
         body = bytearray()
         with self._client.stream(method, url, **kwargs) as response:
+            declared = response.headers.get("content-length", "")
+            if declared.isascii() and declared.isdigit() and int(declared) > self._max_bytes:
+                raise self._too_large(url)
             for chunk in response.iter_bytes():
                 body += chunk
+                if len(body) > self._max_bytes:
+                    raise self._too_large(url)
                 if self._clock() - started > self._deadline:
                     raise httpx.ReadTimeout(f"no full response within {self._deadline:.0f}s")
         return response, bytes(body)
+
+    def _too_large(self, url: str) -> HttpError:
+        message = f"{self._label}: response larger than {self._max_bytes} bytes"
+        return HttpError(self.scrub(message, url))
 
     def _throttle(self) -> None:
         wait = max(self._pause_next, self._last_request + self._min_interval - self._clock())
