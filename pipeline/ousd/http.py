@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 import random
 import re
 import time
@@ -36,9 +37,13 @@ VISIBLE_WAIT = 5.0
 def _retry_after(value: str, now: float) -> float:
     """A Retry-After value as seconds: either a number or an HTTP date."""
     try:
-        return float(value)
+        seconds = float(value)
     except ValueError:
         pass
+    else:
+        if math.isnan(seconds):
+            raise ValueError(f"bad Retry-After: {value!r}")
+        return seconds
     try:
         when = parsedate_to_datetime(value)
     except (TypeError, ValueError):
@@ -193,7 +198,7 @@ class PoliteClient:
         body = bytearray()
         with self._client.stream(method, url, **kwargs) as response:
             declared = response.headers.get("content-length", "")
-            if declared.isdigit() and int(declared) > self._max_bytes:
+            if declared.isascii() and declared.isdigit() and int(declared) > self._max_bytes:
                 raise self._too_large(url)
             for chunk in response.iter_bytes():
                 body += chunk

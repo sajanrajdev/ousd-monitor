@@ -286,7 +286,7 @@ def test_retry_after_as_an_http_date_is_honored():
     assert sleeps == [20.0]
 
 
-@pytest.mark.parametrize("value", ["Sun, 06 Nov 1994 08:49:37 GMT", "not a date", "", "-5"])
+@pytest.mark.parametrize("value", ["Sun, 06 Nov 1994 08:49:37 GMT", "not a date", "", "-5", "nan"])
 def test_a_past_or_unreadable_retry_after_adds_no_wait(value):
     sleeps: list[float] = []
     limited = httpx.Response(503, headers={"retry-after": value})
@@ -339,3 +339,10 @@ def test_a_body_at_the_limit_is_read_and_the_default_is_64_mb():
     client = client_for([httpx.Response(200, content=b'{"a": 1}')], max_bytes=8)
     assert client.request_json("GET", "http://x.invalid") == {"a": 1}
     assert PoliteClient()._max_bytes == 64 * 1024 * 1024
+
+
+def test_a_non_ascii_digit_content_length_is_ignored_not_a_crash():
+    ok = httpx.Response(200, json={"a": 1}, headers=[(b"content-length", "\u00b2".encode("utf-8"))])
+    client = client_for([ok], max_bytes=50)
+
+    assert client.request_json("GET", "http://x.invalid") == {"a": 1}
