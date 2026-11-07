@@ -1,0 +1,95 @@
+{
+  "blockTime": 1777035231,
+  "meta": {
+    "computeUnitsConsumed": 1117,
+    "costUnits": 2791,
+    "err": null,
+    "fee": 5000,
+    "innerInstructions": [],
+    "logMessages": [
+      "Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb invoke [1]",
+      "Program log: Instruction: SetAuthority",
+      "Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb consumed 967 of 1117 compute units",
+      "Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb success",
+      "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+      "Program ComputeBudget111111111111111111111111111111 success"
+    ],
+    "postBalances": [
+      55920640,
+      5275680,
+      1,
+      58623941
+    ],
+    "postTokenBalances": [],
+    "preBalances": [
+      55925640,
+      5275680,
+      1,
+      58623941
+    ],
+    "preTokenBalances": [],
+    "rewards": [],
+    "status": {
+      "Ok": null
+    }
+  },
+  "slot": 415349941,
+  "transaction": {
+    "message": {
+      "accountKeys": [
+        {
+          "pubkey": "CsLonu37YaRJkcfGsCNasqLgJw8ZxVStDG2mEpUvkkVs",
+          "signer": true,
+          "source": "transaction",
+          "writable": true
+        },
+        {
+          "pubkey": "ousd2mJsPEckLHcSCDxyKD7NDGARZcfLbDZkKiatYHB",
+          "signer": false,
+          "source": "transaction",
+          "writable": true
+        },
+        {
+          "pubkey": "ComputeBudget111111111111111111111111111111",
+          "signer": false,
+          "source": "transaction",
+          "writable": false
+        },
+        {
+          "pubkey": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+          "signer": false,
+          "source": "transaction",
+          "writable": false
+        }
+      ],
+      "instructions": [
+        {
+          "parsed": {
+            "info": {
+              "authority": "CsLonu37YaRJkcfGsCNasqLgJw8ZxVStDG2mEpUvkkVs",
+              "authorityType": "freezeAccount",
+              "mint": "ousd2mJsPEckLHcSCDxyKD7NDGARZcfLbDZkKiatYHB",
+              "newAuthority": "H2UbwLLJAen1W2z6oRCYqZCFo6BidkU4QFDw2eWxL9W4"
+            },
+            "type": "setAuthority"
+          },
+          "program": "spl-token",
+          "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+          "stackHeight": 1
+        },
+        {
+          "accounts": [],
+          "data": "GTxrRM",
+          "programId": "ComputeBudget111111111111111111111111111111",
+          "stackHeight": 1
+        }
+      ],
+      "recentBlockhash": "3QLAxENbx6oy2zw48Ae8NLvGtCfFPeqtxwq3FvVZKRdZ"
+    },
+    "signatures": [
+      "3Xqq4SHeTZNkrHxgVnTAsBhNiBKpndpqHxBzuR3hQJwSm7bogZPkorq8Nn6XHsADUNumB1Djnjq8QRycoj8StPM1"
+    ]
+  },
+  "transactionIndex": 838,
+  "version": "legacy"
+}

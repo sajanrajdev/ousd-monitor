@@ -1,0 +1,44 @@
+{
+  "schema_version": 2,
+  "preview": true,
+  "data": [
+    {
+      "chain": "ethereum",
+      "as_of_day": "2026-11-03",
+      "total_supply": "12000000000000000",
+      "supply_share_bps": 9375,
+      "placed_share_of_chain_bps": 7500,
+      "minted_30d": "9750000000000000",
+      "burned_30d": "150000000000000",
+      "dex_flow_30d": "900000000000000",
+      "lending_flow_30d": "600000000000000",
+      "clean_30d": "3150000000000000",
+      "clean_everyday_30d": "150000000000000",
+      "clean_everyday_share_bps": 7692,
+      "dex_flow_share_bps": 9375,
+      "leading_for": [
+        "supply",
+        "issuance",
+        "everyday",
+        "dex_flow",
+        "lending_flow"
+      ]
+    },
+    {
+      "chain": "tempo",
+      "as_of_day": "2026-11-03",
+      "total_supply": "800000000000000",
+      "supply_share_bps": 625,
+      "placed_share_of_chain_bps": 5000,
+      "minted_30d": "670000000000000",
+      "burned_30d": "30000000000000",
+      "dex_flow_30d": "60000000000000",
+      "lending_flow_30d": "30000000000000",
+      "clean_30d": "135000000000000",
+      "clean_everyday_30d": "45000000000000",
+      "clean_everyday_share_bps": 2307,
+      "dex_flow_share_bps": 625,
+      "leading_for": []
+    }
+  ]
+}

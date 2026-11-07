@@ -1,0 +1,28 @@
+name: Bug
+description: Something in the pipeline or the site is broken.
+labels: [bug]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [pipeline, dbt, web, docs, ops, deps]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you saw, and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Commands or page URL. Do not paste keys or `.env` contents.
+  - type: input
+    id: version
+    attributes:
+      label: Commit, or page URL and "as of" time
+      description: The commit, or the page URL and the "as of" time shown on the card.

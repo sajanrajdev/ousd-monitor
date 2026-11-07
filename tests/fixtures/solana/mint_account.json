@@ -1,0 +1,87 @@
+{
+  "context": {
+    "apiVersion": "4.4.0",
+    "slot": 465170656
+  },
+  "value": {
+    "data": {
+      "parsed": {
+        "info": {
+          "decimals": 6,
+          "extensions": [
+            {
+              "extension": "mintCloseAuthority",
+              "state": {
+                "closeAuthority": "E7JdFMP5AqdndJKstZV2mHdekLwAQbNWRHMpoozyB3qw"
+              }
+            },
+            {
+              "extension": "permanentDelegate",
+              "state": {
+                "delegate": "Aj2gxCSQ7A7eTnUL2VnyT3KQa79AcZi5x15rPRSnw6RA"
+              }
+            },
+            {
+              "extension": "defaultAccountState",
+              "state": {
+                "accountState": "initialized"
+              }
+            },
+            {
+              "extension": "confidentialTransferMint",
+              "state": {
+                "auditorElgamalPubkey": null,
+                "authority": "E7JdFMP5AqdndJKstZV2mHdekLwAQbNWRHMpoozyB3qw",
+                "autoApproveNewAccounts": false
+              }
+            },
+            {
+              "extension": "transferHook",
+              "state": {
+                "authority": "E7JdFMP5AqdndJKstZV2mHdekLwAQbNWRHMpoozyB3qw",
+                "programId": null
+              }
+            },
+            {
+              "extension": "metadataPointer",
+              "state": {
+                "authority": "E7JdFMP5AqdndJKstZV2mHdekLwAQbNWRHMpoozyB3qw",
+                "metadataAddress": "ousd2mJsPEckLHcSCDxyKD7NDGARZcfLbDZkKiatYHB"
+              }
+            },
+            {
+              "extension": "pausableConfig",
+              "state": {
+                "authority": "E7JdFMP5AqdndJKstZV2mHdekLwAQbNWRHMpoozyB3qw",
+                "paused": false
+              }
+            },
+            {
+              "extension": "tokenMetadata",
+              "state": {
+                "additionalMetadata": [],
+                "mint": "ousd2mJsPEckLHcSCDxyKD7NDGARZcfLbDZkKiatYHB",
+                "name": "OpenUSD",
+                "symbol": "OUSD",
+                "updateAuthority": "E7JdFMP5AqdndJKstZV2mHdekLwAQbNWRHMpoozyB3qw",
+                "uri": "https://token-metadata.bridge.xyz/solana/ousd.json"
+              }
+            }
+          ],
+          "freezeAuthority": "H2UbwLLJAen1W2z6oRCYqZCFo6BidkU4QFDw2eWxL9W4",
+          "isInitialized": true,
+          "mintAuthority": "EBArgZpd8iv7QRgUFhCasaHxck5oujhHNCkonoa1kEKA",
+          "supply": "79686600186640"
+        },
+        "type": "mint"
+      },
+      "program": "spl-token-2022",
+      "space": 630
+    },
+    "executable": false,
+    "lamports": 5275680,
+    "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "rentEpoch": 18446744073709551615,
+    "space": 630
+  }
+}

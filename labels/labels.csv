@@ -1,0 +1,103 @@
+chain,address,entity,category,source_type,source_url,confidence,date_checked
+base,0x0729e2a4716d9f7dd17858d5d504426d228697f7,Relay Router,system,project_docs,https://api.relay.link/chains,high,2026-11-04
+base,0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae,LI.FI Diamond,system,explorer_tag,https://basescan.org/address/0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae,high,2026-11-04
+base,0x13c86608a76ca912dbc400b5559af7da7c0fb56b,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0x17feebe1e8e665db57e59f3cc000c88d7010146a,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0x20fe51a9229eef2cf8ad9e89d91cab9312cf3b7a,Coinbase,exchange,explorer_tag,https://basescan.org/address/0x20fe51a9229eef2cf8ad9e89d91cab9312cf3b7a,medium,2026-11-04
+base,0x30e9f2e8b5fc0b87ed3a181881d6e949305653de,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0x4787ad0324a68152834f150326fe2357af8993cc,,issuer_route,onchain_metadata,https://basescan.org/address/0x4787ad0324a68152834f150326fe2357af8993cc,medium,2026-11-04
+base,0x498581ff718922c3f8e6a244956af099b2652b2b,Uniswap v4 PoolManager,dex,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
+base,0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8,Bridge,issuer,published_research,https://crystalintelligence.com/stablecoin/ousd-stablecoin-first-week-on-chain-analysis/,medium,2026-11-04
+base,0x4cd00e387622c35bddb9b4c962c136462338bc31,Relay Depository,system,project_docs,https://api.relay.link/chains,high,2026-11-04
+base,0x4e83cb3f8abc6273e272ae057d55f522435a8ddc,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0x4f6f91599858bf0d19fabcf2c5d591fe13f7c059,0x Settler,system,onchain_metadata,https://basescan.org/address/0x4f6f91599858bf0d19fabcf2c5d591fe13f7c059,medium,2026-11-04
+base,0x56ed488785fab9f900cf87903e85767f780bc1d5,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0x597758c063efa82c86c3e22d6ac40b8f432fd810,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0x67d03631fe51b741c0c00c4e16eb662ac84381df,OKX DEX Router,system,explorer_tag,https://basescan.org/address/0x67d03631fe51b741c0c00c4e16eb662ac84381df,high,2026-11-04
+base,0x6ff5693b99212da76ad316178a184ab56d299b43,Uniswap Universal Router,system,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
+base,0x732b729eb508aada950210173ff692456dc5d350,Uniswap v3 OUSD/WETH pool,dex,onchain_metadata,https://basescan.org/address/0x732b729eb508aada950210173ff692456dc5d350,high,2026-11-04
+base,0x7e7094f6b6cacfb0c681ea292d92e10da3449c97,Uniswap v2 pool,dex,onchain_metadata,https://basescan.org/address/0x7e7094f6b6cacfb0c681ea292d92e10da3449c97,medium,2026-11-04
+base,0x8458377a025da58e9cb547c979d5002c822a05cb,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0x895c07efdf2dd1509347ac5f16273994b674d011,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0x8ce6187e918f7ce0c78985f506bb69df872a8d91,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0x95de453546c20b32cbab33f8e9935ee2411c1b85,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0xb0d0b9b8ab03cbac16cdf9e59bc5a1a2ade55da2,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,Relay Router,system,explorer_tag,https://basescan.org/address/0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,high,2026-11-04
+base,0xbcdf77d4ec8dfa26105bfcc2d8a30be2be9e612a,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0xd6145b2d3f379919e8cdeda7b97e37c4b2ca9c40,Uniswap Universal Router,system,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
+base,0xdd35c651f5d2c44c4c8a5a58481b62b9e3f86384,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0xdd4f1b365ad104c0ce5c71f87114ca6667c84f0f,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0xf37a982d1f6c9d1cc9d792aaba494264e0f315d7,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+base,0xf70da97812cb96acdf810712aa562db8dfa3dbef,Relay Solver,system,explorer_tag,https://basescan.org/address/0xf70da97812cb96acdf810712aa562db8dfa3dbef,high,2026-11-04
+ethereum,0x000000000004444c5dc75cb358380d2e3de08a90,Uniswap v4 PoolManager,dex,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
+ethereum,0x0198f9d5c8e8ef8869d70d387d3efa997f727464,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0x0729e2a4716d9f7dd17858d5d504426d228697f7,Relay Router,system,project_docs,https://api.relay.link/chains,high,2026-11-04
+ethereum,0x09f117cd21a44021c1bede80362c00571cec3416,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0x0cef320d0c5793ade37964e2661a033771e53cd5,0x Settler,system,onchain_metadata,https://etherscan.io/address/0x0cef320d0c5793ade37964e2661a033771e53cd5,medium,2026-11-04
+ethereum,0x1767c61c9ec15126de4eb02cd9a91474584a1873,,issuer_route,onchain_metadata,https://etherscan.io/address/0x1767c61c9ec15126de4eb02cd9a91474584a1873,medium,2026-11-04
+ethereum,0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0x23270b6d1c009fe44189e8b4ba329011e5e19dd5,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0x23617e59a5925b2a4bf75d73ff6711cd0b29de85,Uniswap Universal Router,system,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
+ethereum,0x4112e6af4c374a9a304d2e0c3106e225e2b12ad1,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0x4508a7021dfb7a1afe5ff60169c1778c303389fb,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8,Bridge,issuer,explorer_tag,https://etherscan.io/address/0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8,high,2026-11-04
+ethereum,0x4c85c52c4b9f6681bd82248db95d2309d3662b18,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0x4cd00e387622c35bddb9b4c962c136462338bc31,Relay Depository,system,project_docs,https://api.relay.link/chains,high,2026-11-04
+ethereum,0x5051600b69436e13e518c5664244e92b1c32c3dc,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0x597758c063efa82c86c3e22d6ac40b8f432fd810,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0x666fedd4cdd4e890a5ad20e7b60975409435a64a,0x Settler,system,onchain_metadata,https://etherscan.io/address/0x666fedd4cdd4e890a5ad20e7b60975409435a64a,medium,2026-11-04
+ethereum,0x6ef6fab5dc9aaa2b326d9c463fe620b95c1fafda,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0x7d85cd7288a331ddc29c6cba1201a9eac02cc2e8,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0x8458377a025da58e9cb547c979d5002c822a05cb,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0x8f10b468b06c6fd214b65f87778827f7d113f996,KyberSwap Aggregation Executor,system,explorer_tag,https://etherscan.io/address/0x8f10b468b06c6fd214b65f87778827f7d113f996,high,2026-11-04
+ethereum,0x9d2a09afc3ebf1d2bebe1b6ac529afe1c3e1ec93,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43,Coinbase,exchange,explorer_tag,https://etherscan.io/address/0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43,high,2026-11-04
+ethereum,0xb0d0b9b8ab03cbac16cdf9e59bc5a1a2ade55da2,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0xb1df4ecec4bd12756f4a8da054ba11605d6b2103,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,Relay Router,system,explorer_tag,https://etherscan.io/address/0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,high,2026-11-04
+ethereum,0xcd531ae9efcce479654c4926dec5f6209531ca7b,Coinbase,exchange,explorer_tag,https://etherscan.io/address/0xcd531ae9efcce479654c4926dec5f6209531ca7b,high,2026-11-04
+ethereum,0xd38dea9ff4e529da19b444bb04ac54800dab80eb,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0xde0d0b74975f3b51c88b3317960dad1cc01d9d42,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0xe98ea7e82e39516ee633428259fcadc3091bf451,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+ethereum,0xf70da97812cb96acdf810712aa562db8dfa3dbef,Relay Solver,system,project_docs,https://api.relay.link/chains,high,2026-11-04
+ethereum,0xfb25c06aa181894bc2343db7ea8a2a59799b9f1b,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,2EKbTrrCR5pWPMLVXNveto1TirQ49dFXZP7XmvhAy4EE,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,2fYym27TCETNaKscteGsdYNPoQzKjYG2jVZdh3LowkdA,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,3ZGf3ERiitfTR9RCChchfo7QWmSfH1WArJ3jjrtMXnKa,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,4DsBSydYcSkTCpPFKkE6kHGvw6nCVUP2EXCh8vQ3WAmq,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,4NyK1AdJBNbgaJ9EsKz3J4rfeHsuYdjkTPg3JaNdLeFw,Coinbase,exchange,explorer_tag,https://solscan.io/account/4NyK1AdJBNbgaJ9EsKz3J4rfeHsuYdjkTPg3JaNdLeFw,high,2026-11-04
+solana,4ZgupimmjpeMgPRFsE5YUUTYMN6w44XzQ9QaJPH2tAwC,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,59XVmXKvfjhcQBcvDFoR2HG4rbAHWwghBskyrm6HofQJ,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,9obNtb5GyUegcs3a1CbBkLuc5hEWynWfJC6gjz5uWQkE,Coinbase,exchange,explorer_tag,https://solscan.io/account/9obNtb5GyUegcs3a1CbBkLuc5hEWynWfJC6gjz5uWQkE,high,2026-11-04
+solana,AZBMsWKBcY8UCjYTfAU4PBVT8nEy6rFnuGLcRVANKuHH,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,BqCfmajD8Z67KrVE8i4XN43vyPS9hppFAt5dPZFFaMfu,Orca OUSD/USDC Whirlpool,dex,project_docs,https://api.orca.so/v2/solana/pools/BqCfmajD8Z67KrVE8i4XN43vyPS9hppFAt5dPZFFaMfu,high,2026-11-04
+solana,D89hHJT5Aqyx1trP6EnGY9jJUB3whgnq3aUvvCqedvzf,Coinbase,exchange,explorer_tag,https://solscan.io/account/D89hHJT5Aqyx1trP6EnGY9jJUB3whgnq3aUvvCqedvzf,high,2026-11-04
+solana,F7p3dFrjRTbtRp8FRF6qHLomXbKRBzpvBLjtQcfcgmNe,Relay Solver,system,project_docs,https://api.relay.link/chains,high,2026-11-04
+solana,FLSFsVM4SRsd6y4EvN8GVgG9bU5cgbUWyL6XnUCrbbT,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,FV8nrrPzQuREwpueQrFdnJdqPDjC3wbguoC5HKaLJzGs,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,FXUgGLLQFqr2SHs87nw1BxEH1exxNtXYQ9C6TMd8QHTs,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,FaEHhTjGMmMremmXLbfvLzzi8YEjJZEiMDPpoUgPoJZa,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,FpwQQhQQoEaVu3WU2qZMfF1hx48YyfwsLoRgXG83E99Q,Coinbase,exchange,explorer_tag,https://solscan.io/account/FpwQQhQQoEaVu3WU2qZMfF1hx48YyfwsLoRgXG83E99Q,high,2026-11-04
+solana,HJG3iz4EBr2Fj53JAVeEaQPS84KbpWTEjZPFgU7UDetb,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,Hmc2dLxZZ4xfHqn2wFCTBu11oCpYiuwsj23JBjJmD4ni,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+solana,HmxX8HtyW7A8vdB96gCQhqZCRiy5CGtgXai7WfvxWpkX,,exchange_linked,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+tempo,0x0729e2a4716d9f7dd17858d5d504426d228697f7,Relay Router,system,project_docs,https://api.relay.link/chains,high,2026-11-04
+tempo,0x0d136e26b4d9e4836fc5cb202baeb49cb6f5df48,Sentora OUSD Main,lending,project_docs,https://curator.morpho.org/vaults/4217/0x0d136e26b4d9e4836fc5cb202baeb49cb6f5df48,high,2026-11-04
+tempo,0x182a927119d56008d921126764bf884221b10f59,Uniswap Universal Router,system,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
+tempo,0x19810813f2e46cf01e7c543f6d8c3ecc8ea2001e,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+tempo,0x334cc71f818324f3932ab9d41285450373b84cdc,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+tempo,0x33620f62c5b9b2086dd6b62f4a297a9f30347029,Uniswap v4 PoolManager,dex,project_docs,https://developers.uniswap.org/docs/protocols/v4/deployments,high,2026-11-04
+tempo,0x4508a7021dfb7a1afe5ff60169c1778c303389fb,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+tempo,0x4c2c0f0bb2631b02ac9299c59690914ee7a200b8,Bridge,issuer,published_research,https://crystalintelligence.com/stablecoin/ousd-stablecoin-first-week-on-chain-analysis/,medium,2026-11-04
+tempo,0x4cd00e387622c35bddb9b4c962c136462338bc31,Relay Depository,system,project_docs,https://api.relay.link/chains,high,2026-11-04
+tempo,0x5176dfcab18ff5519bc1cfa4c6ef2d8008371d5f,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+tempo,0x8458377a025da58e9cb547c979d5002c822a05cb,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+tempo,0xb0d0b9b8ab03cbac16cdf9e59bc5a1a2ade55da2,,issuer_route,derived_rule,labels/README.md#how-unnamed-clusters-are-found,medium,2026-11-04
+tempo,0xb10c000000000000000000000000000000000000,Tempo ReceivePolicyGuard,system,project_docs,https://tempo.xyz/developers/docs/quickstart/predeployed-contracts,high,2026-11-04
+tempo,0xb86b3ccce82f6cb767c45afb9fb032ae5fde3592,Tempo Earn (Morpho vault),lending,project_docs,https://curator.morpho.org/vaults/4217/0xb86b3ccce82f6cb767c45afb9fb032ae5fde3592,medium,2026-11-04
+tempo,0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f,Relay Router,system,project_docs,https://api.relay.link/chains,high,2026-11-04
+tempo,0xc8abd4c494655d7117f854086dddc50e8fa3d7ec,Sentora OUSD Yield (Morpho vault),lending,project_docs,https://curator.morpho.org/vaults/4217/0xc8abd4c494655d7117f854086dddc50e8fa3d7ec,medium,2026-11-04
+tempo,0xdec0000000000000000000000000000000000000,Tempo Stablecoin DEX,dex,project_docs,https://tempo.xyz/developers/docs/quickstart/predeployed-contracts,high,2026-11-04
+tempo,0xf70da97812cb96acdf810712aa562db8dfa3dbef,Relay Solver,system,project_docs,https://api.relay.link/chains,high,2026-11-04
+tempo,0xfeec000000000000000000000000000000000000,Tempo Fee Manager,system,project_docs,https://tempo.xyz/developers/docs/quickstart/predeployed-contracts,high,2026-11-04

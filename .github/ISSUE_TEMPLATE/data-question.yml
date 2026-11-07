@@ -1,0 +1,30 @@
+name: Data question
+description: A number looks wrong or unclear.
+labels: [data]
+body:
+  - type: input
+    id: view
+    attributes:
+      label: Which view or number
+      description: The page and the figure, for example Velocity on the activity view.
+    validations:
+      required: true
+  - type: dropdown
+    id: chain
+    attributes:
+      label: Which chain
+      options: [All chains, Ethereum, Tempo, Base, Solana, Not sure]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Page URL and "as of" time
+      description: The page URL and the "as of" time shown on the card.
+  - type: textarea
+    id: expected
+    attributes:
+      label: Why it looks wrong
+      description: What you expected and why. A public source, such as a transaction or another dashboard, helps most.
+    validations:
+      required: true

@@ -1,0 +1,151 @@
+version: 2
+sources:
+  - name: raw
+    description: >
+      The raw database the pipeline writes, attached read-only. dbt never changes it; all
+      interpretation happens in the models.
+    database: raw
+    schema: main
+    tables:
+      - name: transfers
+        description: >
+          Every OUSD transfer event on every chain, one row per chain, block and log position.
+        # Freshness documents the 36-hour rule across all chains together, on the newest row of any
+        # chain. It is not a per-chain check; the blocking freshness check (6) in the pipeline is
+        # the gate.
+        loaded_at_field: to_timestamp(block_timestamp)
+        freshness:
+          warn_after: {count: 24, period: hour}
+          error_after: {count: 36, period: hour}
+        columns:
+          - name: chain
+            description: '{{ doc("chain") }}'
+          - name: block_number
+            description: The block (or Solana slot) the transfer was in.
+          - name: log_index
+            description: The transfer's position within its block.
+          - name: block_hash
+            description: The hash of the block. Empty for rows from Blockscout and Solana.
+          - name: block_timestamp
+            description: The block's time, in seconds since the Unix epoch.
+          - name: tx_hash
+            description: The transaction the transfer belongs to.
+          - name: from_address
+            description: The sender. The zero address means a mint.
+          - name: to_address
+            description: The receiver. The zero address means a burn.
+          - name: value
+            description: '{{ doc("base_units") }}'
+      - name: sync_state
+        description: How far each chain has been ingested, one row per chain.
+        # The table stores no time, so its age is that of the newest chain supply check from a
+        # finished run, the second half of the pipeline's freshness check.
+        loaded_at_query: >
+          select max(c.recorded_at)
+          from raw.main.reconciliation_checks as c
+          inner join raw.main.reconciliation_runs as r on r.run_id = c.run_id
+          where c.check_name = 'chain_supply' and r.finished_at is not null
+        freshness:
+          warn_after: {count: 24, period: hour}
+          error_after: {count: 36, period: hour}
+        columns:
+          - name: chain
+            description: '{{ doc("chain") }}'
+          - name: synced_through
+            description: The newest block (or Solana slot) ingested for the chain.
+      - name: reconciliations
+        description: >
+          One row per chain supply comparison: supply rebuilt from mint and burn events against
+          the supply the chain itself reports. History is kept.
+        columns:
+          - name: checked_at
+            description: When the comparison was made.
+          - name: chain
+            description: '{{ doc("chain") }}'
+          - name: block_number
+            description: The block the chain's supply was read at.
+          - name: minted
+            description: 'Total minted up to that block. {{ doc("base_units") }}'
+          - name: burned
+            description: 'Total burned up to that block. {{ doc("base_units") }}'
+          - name: onchain_supply
+            description: 'The supply the chain reports at that block. {{ doc("base_units") }}'
+          - name: matched
+            description: Whether minted less burned equals the chain's reported supply exactly.
+          - name: run_id
+            description: >
+              The run that made the comparison. Empty on rows from before runs were recorded or written outside a run.
+      - name: bridge_comparisons
+        description: >
+          One row per comparison of the four chains' summed supply with the issuer's reported
+          total. A run retries the Bridge read up to three times and writes a row for each attempt it
+          compared, so one run can have several rows.
+        columns:
+          - name: checked_at
+            description: When the comparison was made.
+          - name: chains_included
+            description: The chains summed, as a comma-separated list.
+          - name: chains_missing
+            description: The chains left out of the sum, as a comma-separated list. Empty if none.
+          - name: chains_total
+            description: 'The summed supply of the included chains. {{ doc("base_units") }}'
+          - name: bridge_total
+            description: 'The total the issuer reports. {{ doc("base_units") }}'
+          - name: tolerance
+            description: >
+              The difference allowed between the two totals. {{ doc("base_units") }} The blocking
+              cross-chain supply check accepts a comparison only when this is 0, so publishing
+              needs the two totals to agree exactly.
+          - name: passed
+            description: >
+              Whether the two totals agree within the tolerance. The blocking check needs this true
+              with a tolerance of 0, which is exact agreement.
+          - name: run_id
+            description: '{{ doc("run_id") }} One row per compared attempt, so a run can appear more than once.'
+            data_tests: [not_null]
+      - name: reconciliation_runs
+        description: >
+          One row per reconciliation run. A run with no finish time did not complete.
+        columns:
+          - name: run_id
+            description: '{{ doc("run_id") }}'
+            data_tests: [not_null, unique]
+          - name: started_at
+            description: When the run began.
+          - name: finished_at
+            description: When the run ended. Empty means the run is unfinished.
+          - name: scope
+            description: Which chains and checks the run covered, full or partial.
+          - name: status
+            description: How the run ended.
+          - name: exit_code
+            description: The process exit code the run ended with.
+
+  - name: labels
+    description: >
+      The public labels file, `labels/labels.csv` unless the `labels_path` var names another, read
+      by dbt-duckdb as an external CSV. Declared here so the labels show in dbt's lineage.
+    meta:
+      external_location: "read_csv('{{ var(\"labels_path\") }}', header = true, all_varchar = true)"
+    tables:
+      - name: labels
+        description: >
+          One row per labeled address, every column read as text. `labels/README.md` defines the
+          columns and the rules a label must meet.
+        columns:
+          - name: chain
+            description: '{{ doc("chain") }}'
+          - name: address
+            description: The labeled address. Solana addresses are case-sensitive.
+          - name: entity
+            description: The name a public source gives the holder. Empty for an unnamed cluster.
+          - name: category
+            description: What the address is, one of the categories `labels/README.md` lists.
+          - name: source_type
+            description: The kind of public source that supports the label.
+          - name: source_url
+            description: Where the label can be checked.
+          - name: confidence
+            description: 'How firmly the source supports the label: high or medium.'
+          - name: date_checked
+            description: The day the source was last checked, as written in the file.

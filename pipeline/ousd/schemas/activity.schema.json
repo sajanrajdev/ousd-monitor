@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "activity.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "preview",
+    "data"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "preview": {
+      "type": "boolean"
+    },
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "chain",
+          "day",
+          "headline_value",
+          "minted",
+          "burned",
+          "fees",
+          "fee_liquidity",
+          "issuer_flows",
+          "same_entity",
+          "transfer_count",
+          "fee_count",
+          "same_tx_netting",
+          "dex_flow",
+          "lending_flow",
+          "clean_large",
+          "clean_everyday",
+          "clean_tx_count",
+          "total_supply",
+          "circulating_supply",
+          "headline_7d",
+          "clean_7d",
+          "clean_everyday_7d",
+          "velocity_bps",
+          "velocity_everyday_bps",
+          "headline_velocity_bps",
+          "active_wallets_7d",
+          "active_wallets_over_100_7d"
+        ],
+        "properties": {
+          "chain": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          },
+          "day": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "headline_value": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "minted": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "burned": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "fees": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "fee_liquidity": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "issuer_flows": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "same_entity": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "transfer_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "fee_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "same_tx_netting": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "dex_flow": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "lending_flow": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "clean_large": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "clean_everyday": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "clean_tx_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_supply": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?[0-9]+$"
+          },
+          "circulating_supply": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?[0-9]+$"
+          },
+          "headline_7d": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?[0-9]+$"
+          },
+          "clean_7d": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?[0-9]+$"
+          },
+          "clean_everyday_7d": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?[0-9]+$"
+          },
+          "velocity_bps": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "velocity_everyday_bps": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "headline_velocity_bps": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "active_wallets_7d": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "active_wallets_over_100_7d": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}

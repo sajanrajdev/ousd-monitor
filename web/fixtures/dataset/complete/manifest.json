@@ -1,0 +1,176 @@
+{
+  "schema_version": 3,
+  "dataset_version": "20261104T060000Z",
+  "generated_at": "2026-11-04T06:00:00Z",
+  "time_zone": "UTC",
+  "git_commit": "0000000000000000000000000000000000000000",
+  "provenance": {
+    "tree_state": "clean",
+    "uv_lock_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "python_version": "3.12.13",
+    "dbt_core_version": "1.12.6",
+    "dbt_duckdb_version": "1.11.1",
+    "raw_schema_version": 1,
+    "dbt_manifest_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "preview": false,
+  "notice": null,
+  "check_run_id": "sample-check-run",
+  "reconciliation": {
+    "run_id": "00000000000000000000000000000001",
+    "scope": "full",
+    "status": "pass",
+    "finished_at": "2026-11-04T05:30:00Z"
+  },
+  "coverage": {
+    "chains_expected": [
+      "tempo",
+      "ethereum",
+      "base",
+      "solana"
+    ],
+    "chains_included": [
+      "tempo",
+      "ethereum",
+      "base",
+      "solana"
+    ],
+    "chains_missing": [],
+    "complete": true,
+    "data_as_of": {
+      "tempo": "2026-11-03",
+      "ethereum": "2026-11-03",
+      "base": "2026-11-02",
+      "solana": "2026-11-03"
+    },
+    "last_transfer_at": {
+      "tempo": "2026-11-04T01:00:00Z",
+      "ethereum": "2026-11-04T01:00:00Z",
+      "base": "2026-11-03T01:00:00Z",
+      "solana": "2026-11-04T01:00:00Z"
+    },
+    "synced_through": {
+      "tempo": 1000000,
+      "ethereum": 1000000,
+      "base": 1000000,
+      "solana": 1000000
+    },
+    "chains_without_issuer_row": [
+      "solana"
+    ]
+  },
+  "checks": [
+    {
+      "name": "chain_supply",
+      "status": "passed",
+      "blocking": true,
+      "detail": "Sample check detail for chain_supply, never shown to a reader.",
+      "checked_at": "2026-11-04T05:30:00Z"
+    },
+    {
+      "name": "cross_chain_supply",
+      "status": "passed",
+      "blocking": true,
+      "detail": "Sample check detail for cross_chain_supply, never shown to a reader.",
+      "checked_at": "2026-11-04T05:30:00Z"
+    },
+    {
+      "name": "sampled_balances",
+      "status": "passed",
+      "blocking": true,
+      "detail": "Sample check detail for sampled_balances, never shown to a reader.",
+      "checked_at": "2026-11-04T05:30:00Z"
+    },
+    {
+      "name": "dbt_tests",
+      "status": "passed",
+      "blocking": true,
+      "detail": "Sample check detail for dbt_tests, never shown to a reader.",
+      "checked_at": "2026-11-04T05:30:00Z"
+    },
+    {
+      "name": "volume_waterfall",
+      "status": "passed",
+      "blocking": true,
+      "detail": "Sample check detail for volume_waterfall, never shown to a reader.",
+      "checked_at": "2026-11-04T05:30:00Z"
+    },
+    {
+      "name": "reconciliation_gate",
+      "status": "passed",
+      "blocking": true,
+      "detail": "Sample check detail for reconciliation_gate, never shown to a reader.",
+      "checked_at": "2026-11-04T05:30:00Z"
+    },
+    {
+      "name": "freshness",
+      "status": "passed",
+      "blocking": true,
+      "detail": "Sample check detail for freshness, never shown to a reader.",
+      "checked_at": "2026-11-04T05:30:00Z"
+    }
+  ],
+  "warnings": [],
+  "definitions": {
+    "placed_days": 14,
+    "placed_min_base_units": "1000000000000",
+    "large_transfer_base_units": "1000000000000",
+    "active_dust_base_units": "1000000",
+    "active_secondary_base_units": "100000000",
+    "clean_tx_min_base_units": "1000000",
+    "journey_first_day": "2026-10-14",
+    "velocity": {
+      "velocity_bps": {
+        "numerator": "clean_7d / 7",
+        "denominator": "circulating_supply"
+      },
+      "velocity_everyday_bps": {
+        "numerator": "clean_everyday_7d / 7",
+        "denominator": "circulating_supply"
+      },
+      "headline_velocity_bps": {
+        "numerator": "headline_7d / 7",
+        "denominator": "total_supply"
+      }
+    }
+  },
+  "labels_sha256": "697a742a6ffdefc784e48a9a2e355e0fa6299925d532026ec703425011b8a058",
+  "files": {
+    "activity.csv": {
+      "sha256": "a4705e9c50273e414b744ac84ad9812159083538f247840c2c640da76bcfa56f",
+      "rows": 129
+    },
+    "activity.json": {
+      "sha256": "66f11a25bdd5b22c3976da081c72bd96fcb3066b6819406de5b3861a41ed4344",
+      "rows": 129
+    },
+    "chain_roles.csv": {
+      "sha256": "a329eaa8e409df71a4a0c807670dac38046222f17e631e42ffacd3b2894447b0",
+      "rows": 4
+    },
+    "chain_roles.json": {
+      "sha256": "1ef083f6fb7126f6e59094811f87f65b56ebec215292c2416ec386cc4d024e0a",
+      "rows": 4
+    },
+    "journey.csv": {
+      "sha256": "f390799ce3c1dcd18ed626e299b774e9ac49ae464407a469663e58b7be493dfa",
+      "rows": 83
+    },
+    "journey.json": {
+      "sha256": "d60f81af4321bb8785971c68a816b213f8543f7757badad1ab61431d3083a572",
+      "rows": 83
+    },
+    "labels.json": {
+      "sha256": "41e23cfa1b3562a9ee94c2868dcb62eeaa7c339e5598e817bf8d8e86a0fc99e9",
+      "rows": 12
+    },
+    "reconciliation.json": {
+      "sha256": "caae73308c5e0d006be26d0ed66bd04901e75fadd9d6c78f06ce5d6d822ad6fc",
+      "rows": 5
+    },
+    "summary.json": {
+      "sha256": "851df5dffda964dadedc107d49c7c0da32bbd832e2179517f4abe53679804d95",
+      "rows": 4
+    }
+  }
+}

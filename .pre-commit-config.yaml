@@ -1,0 +1,25 @@
+# Optional. `make check` is the source of truth; these hooks catch the same problems earlier.
+# Versions match uv.lock and web/pnpm-lock.yaml.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.3
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+
+  - repo: https://github.com/sqlfluff/sqlfluff
+    rev: 4.5.0
+    hooks:
+      - id: sqlfluff-lint
+        files: ^dbt/(models|tests)/
+        args: [--dialect, duckdb, --templater, jinja]
+
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier
+        language: node
+        additional_dependencies: ["prettier@3.9.10"]
+        entry: prettier --write --ignore-path web/.prettierignore
+        files: ^web/
+        types_or: [ts, tsx, javascript, json, css, markdown, yaml]

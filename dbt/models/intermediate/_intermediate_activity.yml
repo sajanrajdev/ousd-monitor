@@ -1,0 +1,57 @@
+version: 2
+models:
+  - name: int_transfer_classes
+    description: >
+      Every transfer with the class that decides how it counts in volume. Grain: one row per
+      `chain`, `block_number` and `log_index`.
+    columns:
+      - name: chain
+        description: '{{ doc("chain") }}'
+      - name: block_number
+        description: The block (or Solana slot) the transfer was in.
+      - name: log_index
+        description: The transfer's position within its block.
+      - name: day_utc
+        description: '{{ doc("utc_day") }}'
+      - name: tx_hash
+        description: The transaction the transfer belongs to.
+      - name: from_address
+        description: The sender.
+      - name: to_address
+        description: The receiver.
+      - name: value
+        description: '{{ doc("base_units") }}'
+      - name: transfer_class
+        description: >
+          How the transfer counts: a mint, a burn, a Tempo fee, fee liquidity, an issuer flow, a
+          move between wallets of one entity, or remaining volume.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [mint, burn, fee, fee_liquidity, issuer_flow, same_entity, remaining]
+  - name: int_tx_decomposition
+    description: >
+      Per transaction with remaining volume: what is netting, venue flow and clean volume.
+      Grain: one row per `chain` and `tx_hash`.
+    columns:
+      - name: chain
+        description: '{{ doc("chain") }}'
+      - name: tx_hash
+        description: The transaction.
+      - name: day_utc
+        description: '{{ doc("utc_day") }} The transaction''s day.'
+      - name: gross_value
+        description: 'The sum of the transaction''s remaining transfers. {{ doc("base_units") }}'
+      - name: same_tx_netting
+        description: >
+          The part of gross value that cancels within the transaction, as money passed through an
+          address. {{ doc("base_units") }}
+      - name: dex_flow
+        description: 'The net flow to and from DEX pools in the transaction. {{ doc("base_units") }}'
+      - name: lending_flow
+        description: >
+          The net flow to and from lending markets in the transaction. {{ doc("base_units") }}
+      - name: clean_value
+        description: 'What is left of the transaction as clean volume. {{ doc("base_units") }}'
+        data_tests: [not_null]

@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "journey.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "preview",
+    "data"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "preview": {
+      "type": "boolean"
+    },
+    "data": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "chain",
+          "day",
+          "total_supply",
+          "issuer_inventory",
+          "placed_supply",
+          "placed_exchange_linked",
+          "venue_dex",
+          "venue_lending",
+          "venue_exchange",
+          "free_floating",
+          "placed_wallets",
+          "holders",
+          "holders_over_1m",
+          "top10_value",
+          "issuer_labeled"
+        ],
+        "properties": {
+          "chain": {
+            "enum": [
+              "tempo",
+              "ethereum",
+              "base",
+              "solana"
+            ]
+          },
+          "day": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "total_supply": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "issuer_inventory": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "placed_supply": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "placed_exchange_linked": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "venue_dex": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "venue_lending": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "venue_exchange": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "free_floating": {
+            "type": "string",
+            "pattern": "^-?[0-9]+$"
+          },
+          "placed_wallets": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "holders": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "holders_over_1m": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "top10_value": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^-?[0-9]+$"
+          },
+          "issuer_labeled": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

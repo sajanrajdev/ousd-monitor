@@ -1,0 +1,2432 @@
+{
+  "items": [
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x9f6F3991D525015a6F8CaF062C83b62fD3AC4436",
+        "implementations": [
+          {
+            "address_hash": "0x264048239Dd1b5939599fAE8e6000DF40248D524",
+            "name": "StablecoinTemplateV3"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": null,
+        "name": "OpenUSD",
+        "private_tags": [],
+        "proxy_type": "erc7760",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x0000000000000000000000000000000000000000000000000000000043e40cfa",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x46c16995bBd99BC4908d4f9412cC9fbd57cB8274"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "1139019002"
+          }
+        ]
+      },
+      "index": 169,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x00000000000000000000000046c16995bbd99bc4908d4f9412cc9fbd57cb8274",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x000000000004444c5dc75cB358380D2e3dE08A90",
+        "implementations": [],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": {
+          "tags": [
+            {
+              "meta": {
+                "main_entity": "Uniswap",
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "textColor": "#C163D4",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "Provided by OLI",
+                "tooltipUrl": "https://app.uniswap.org/"
+              },
+              "name": "Uniswap V4: Pool Manager",
+              "ordinal": 10,
+              "slug": "uniswap-v4-pool-manager",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Liquidity Pool",
+              "ordinal": 0,
+              "slug": "liquidity-pool",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "DEX",
+              "ordinal": 0,
+              "slug": "dex",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "appActionButtonText": "Uniswap",
+                "appID": "uniswap"
+              },
+              "name": "Uniswap V4",
+              "ordinal": 0,
+              "slug": "uniswap-v4",
+              "tagType": "protocol"
+            }
+          ]
+        },
+        "name": "PoolManager",
+        "private_tags": [],
+        "proxy_type": null,
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x0000000000000000000000000000000000000000000000007327de0aa4506c26ffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8179260000000000000000000000000000000000000000000010c480670ea7606859bc00000000000000000000000000000000000000000000000004bdbae89df0a75afffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbc89000000000000000000000000000000000000000000000000000000000000001db",
+      "decoded": {
+        "method_call": "Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)",
+        "method_id": "40e9cecb",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "id",
+            "type": "bytes32",
+            "value": "0x2cf63cd136b961d6007c079646d1a956a98e5c51839949af8f918e47b01bf6b1"
+          },
+          {
+            "indexed": true,
+            "name": "sender",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "amount0",
+            "type": "int128",
+            "value": "8297844975741201446"
+          },
+          {
+            "indexed": false,
+            "name": "amount1",
+            "type": "int128",
+            "value": "-8292058"
+          },
+          {
+            "indexed": false,
+            "name": "sqrtPriceX96",
+            "type": "uint160",
+            "value": "79182677944432891287996"
+          },
+          {
+            "indexed": false,
+            "name": "liquidity",
+            "type": "uint128",
+            "value": "341634654994999130"
+          },
+          {
+            "indexed": false,
+            "name": "tick",
+            "type": "int24",
+            "value": "-276336"
+          },
+          {
+            "indexed": false,
+            "name": "fee",
+            "type": "uint24",
+            "value": "475"
+          }
+        ]
+      },
+      "index": 170,
+      "smart_contract": null,
+      "topics": [
+        "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f",
+        "0x2cf63cd136b961d6007c079646d1a956a98e5c51839949af8f918e47b01bf6b1",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x2162FDb116bc95d85b898BdAE77e053eF0C36eAA",
+        "implementations": [
+          {
+            "address_hash": "0x2BB625DAa0A9dD2C69939cBD6C2dBae2ac6667AC",
+            "name": "ERC20Asset"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": null,
+        "name": "Uds My",
+        "private_tags": [],
+        "proxy_type": "eip1167",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x0000000000000000000000000000000000000000000000007327de0aa4506c26",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 amount)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "amount",
+            "type": "uint256",
+            "value": "8297844975741201446"
+          }
+        ]
+      },
+      "index": 171,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x9f6F3991D525015a6F8CaF062C83b62fD3AC4436",
+        "implementations": [
+          {
+            "address_hash": "0x264048239Dd1b5939599fAE8e6000DF40248D524",
+            "name": "StablecoinTemplateV3"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": null,
+        "name": "OpenUSD",
+        "private_tags": [],
+        "proxy_type": "erc7760",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x00000000000000000000000000000000000000000000000000000000007e86da",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "8292058"
+          }
+        ]
+      },
+      "index": 172,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        "0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x000000000004444c5dc75cB358380D2e3dE08A90",
+        "implementations": [],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": {
+          "tags": [
+            {
+              "meta": {
+                "main_entity": "Uniswap",
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "textColor": "#C163D4",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "Provided by OLI",
+                "tooltipUrl": "https://app.uniswap.org/"
+              },
+              "name": "Uniswap V4: Pool Manager",
+              "ordinal": 10,
+              "slug": "uniswap-v4-pool-manager",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Liquidity Pool",
+              "ordinal": 0,
+              "slug": "liquidity-pool",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "DEX",
+              "ordinal": 0,
+              "slug": "dex",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "appActionButtonText": "Uniswap",
+                "appID": "uniswap"
+              },
+              "name": "Uniswap V4",
+              "ordinal": 0,
+              "slug": "uniswap-v4",
+              "tagType": "protocol"
+            }
+          ]
+        },
+        "name": "PoolManager",
+        "private_tags": [],
+        "proxy_type": null,
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffff60b8d0f0000000000000000000000000000000000000000000000000000000009f92487000000000000000000000000000000000000000100d721868911d0edccf55bb9000000000000000000000000000000000000000000000000000000205d9854a400000000000000000000000000000000000000000000000000000000000000410000000000000000000000000000000000000000000000000000000000001708",
+      "decoded": {
+        "method_call": "Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)",
+        "method_id": "40e9cecb",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "id",
+            "type": "bytes32",
+            "value": "0x157025790005bd26a856f59aea8c5789c13b117a1c3baa54dd0b08dbac07d7fe"
+          },
+          {
+            "indexed": true,
+            "name": "sender",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "amount0",
+            "type": "int128",
+            "value": "-167015153"
+          },
+          {
+            "indexed": false,
+            "name": "amount1",
+            "type": "int128",
+            "value": "167322759"
+          },
+          {
+            "indexed": false,
+            "name": "sqrtPriceX96",
+            "type": "uint160",
+            "value": "79488239885316028619042413497"
+          },
+          {
+            "indexed": false,
+            "name": "liquidity",
+            "type": "uint128",
+            "value": "139009217700"
+          },
+          {
+            "indexed": false,
+            "name": "tick",
+            "type": "int24",
+            "value": "65"
+          },
+          {
+            "indexed": false,
+            "name": "fee",
+            "type": "uint24",
+            "value": "5896"
+          }
+        ]
+      },
+      "index": 173,
+      "smart_contract": null,
+      "topics": [
+        "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f",
+        "0x157025790005bd26a856f59aea8c5789c13b117a1c3baa54dd0b08dbac07d7fe",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "implementations": [
+          {
+            "address_hash": "0x43506849D7C04F9138D1A2050bbF3A0c054402dd",
+            "name": "FiatTokenV2_2"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": {
+          "tags": [
+            {
+              "meta": {
+                "projectName": "Circle",
+                "tagIcon": "https://assets.coingecko.com/coins/images/6319/small/usdc.png?1696506694",
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tagUrl": "https://scout-app.kleros.io/single-tags/0x924f91c6a015abb7e7a5f8c7c0989761b4df998abdbd6541365eb3c82132a390",
+                "textColor": "#C163D4",
+                "tokenAttributes": "{\"logo_url\":\"https://cdn.kleros.link/ipfs/Qmc3TH5cPhyh7418kSD83SSBzng1oqbLxjzxfjwA2VAoj8/BccwoeFESYBsv6XiJVRAp5b3pRpvMgdhfZCxV5vSppWbAukhqrBRVRj3jAxHnbfmvg181rcVw9ny4LBLbFdm2S2RRH\",\"token_symbol\":\"USDC\",\"token_name\":\"USD Coin\",\"decimals\":6}",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "USDC is a US dollar-backed stablecoin issued by Circle. USDC is designed to provide a faster, safer, and more efficient way to send, spend, and exchange money around the world.",
+                "tooltipUrl": "https://www.circle.com/en/usdc"
+              },
+              "name": "USDC Token",
+              "ordinal": 10,
+              "slug": "usdc-token-1",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Token Contract",
+              "ordinal": 0,
+              "slug": "token-contract",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "Stablecoin",
+              "ordinal": 0,
+              "slug": "stablecoin",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "USDC",
+              "ordinal": 0,
+              "slug": "usdc",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "textColor": "#C163D4",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "Provided by OLI"
+              },
+              "name": "USD Coin",
+              "ordinal": 0,
+              "slug": "usd-coin",
+              "tagType": "name"
+            },
+            {
+              "meta": {
+                "appID": "circle",
+                "appMarketplaceURL": "https://app.circle.com/get-started",
+                "bgColor": "#2775ca",
+                "tagIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/circle-icon-white.png",
+                "textColor": "#FFFFFF",
+                "tooltipUrl": "https://www.circle.com/"
+              },
+              "name": "Circle",
+              "ordinal": 0,
+              "slug": "circle",
+              "tagType": "protocol"
+            },
+            {
+              "meta": {
+                "data": "ok"
+              },
+              "name": "Credible token",
+              "ordinal": 0,
+              "slug": "credible-token",
+              "tagType": "token_reputation"
+            }
+          ]
+        },
+        "name": "USDC",
+        "private_tags": [],
+        "proxy_type": "eip1967_oz",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x0000000000000000000000000000000000000000000000000000000009f92487",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "167322759"
+          }
+        ]
+      },
+      "index": 174,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x9f6F3991D525015a6F8CaF062C83b62fD3AC4436",
+        "implementations": [
+          {
+            "address_hash": "0x264048239Dd1b5939599fAE8e6000DF40248D524",
+            "name": "StablecoinTemplateV3"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": null,
+        "name": "OpenUSD",
+        "private_tags": [],
+        "proxy_type": "erc7760",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x0000000000000000000000000000000000000000000000000000000009f472f1",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "167015153"
+          }
+        ]
+      },
+      "index": 175,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        "0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x000000000004444c5dc75cB358380D2e3dE08A90",
+        "implementations": [],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": {
+          "tags": [
+            {
+              "meta": {
+                "main_entity": "Uniswap",
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "textColor": "#C163D4",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "Provided by OLI",
+                "tooltipUrl": "https://app.uniswap.org/"
+              },
+              "name": "Uniswap V4: Pool Manager",
+              "ordinal": 10,
+              "slug": "uniswap-v4-pool-manager",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Liquidity Pool",
+              "ordinal": 0,
+              "slug": "liquidity-pool",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "DEX",
+              "ordinal": 0,
+              "slug": "dex",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "appActionButtonText": "Uniswap",
+                "appID": "uniswap"
+              },
+              "name": "Uniswap V4",
+              "ordinal": 0,
+              "slug": "uniswap-v4",
+              "tagType": "protocol"
+            }
+          ]
+        },
+        "name": "PoolManager",
+        "private_tags": [],
+        "proxy_type": null,
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffeed6363c000000000000000000000000000000000000000000000000000000001137c447000000000000000000000000000000000000000100b300199a8f6c57826067030000000000000000000000000000000000000000000000000000001b90eb78b00000000000000000000000000000000000000000000000000000000000000036000000000000000000000000000000000000000000000000000000000000125a",
+      "decoded": {
+        "method_call": "Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)",
+        "method_id": "40e9cecb",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "id",
+            "type": "bytes32",
+            "value": "0x100d1a48068592d1d86aaf71c5a43926da6a86c15374bf7917d46ed5e3989280"
+          },
+          {
+            "indexed": true,
+            "name": "sender",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "amount0",
+            "type": "int128",
+            "value": "-287951300"
+          },
+          {
+            "indexed": false,
+            "name": "amount1",
+            "type": "int128",
+            "value": "288867399"
+          },
+          {
+            "indexed": false,
+            "name": "sqrtPriceX96",
+            "type": "uint160",
+            "value": "79444560708281197585170982659"
+          },
+          {
+            "indexed": false,
+            "name": "liquidity",
+            "type": "uint128",
+            "value": "118395467952"
+          },
+          {
+            "indexed": false,
+            "name": "tick",
+            "type": "int24",
+            "value": "54"
+          },
+          {
+            "indexed": false,
+            "name": "fee",
+            "type": "uint24",
+            "value": "4698"
+          }
+        ]
+      },
+      "index": 176,
+      "smart_contract": null,
+      "topics": [
+        "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f",
+        "0x100d1a48068592d1d86aaf71c5a43926da6a86c15374bf7917d46ed5e3989280",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "implementations": [
+          {
+            "address_hash": "0x43506849D7C04F9138D1A2050bbF3A0c054402dd",
+            "name": "FiatTokenV2_2"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": {
+          "tags": [
+            {
+              "meta": {
+                "projectName": "Circle",
+                "tagIcon": "https://assets.coingecko.com/coins/images/6319/small/usdc.png?1696506694",
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tagUrl": "https://scout-app.kleros.io/single-tags/0x924f91c6a015abb7e7a5f8c7c0989761b4df998abdbd6541365eb3c82132a390",
+                "textColor": "#C163D4",
+                "tokenAttributes": "{\"logo_url\":\"https://cdn.kleros.link/ipfs/Qmc3TH5cPhyh7418kSD83SSBzng1oqbLxjzxfjwA2VAoj8/BccwoeFESYBsv6XiJVRAp5b3pRpvMgdhfZCxV5vSppWbAukhqrBRVRj3jAxHnbfmvg181rcVw9ny4LBLbFdm2S2RRH\",\"token_symbol\":\"USDC\",\"token_name\":\"USD Coin\",\"decimals\":6}",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "USDC is a US dollar-backed stablecoin issued by Circle. USDC is designed to provide a faster, safer, and more efficient way to send, spend, and exchange money around the world.",
+                "tooltipUrl": "https://www.circle.com/en/usdc"
+              },
+              "name": "USDC Token",
+              "ordinal": 10,
+              "slug": "usdc-token-1",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Token Contract",
+              "ordinal": 0,
+              "slug": "token-contract",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "Stablecoin",
+              "ordinal": 0,
+              "slug": "stablecoin",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "USDC",
+              "ordinal": 0,
+              "slug": "usdc",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "textColor": "#C163D4",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "Provided by OLI"
+              },
+              "name": "USD Coin",
+              "ordinal": 0,
+              "slug": "usd-coin",
+              "tagType": "name"
+            },
+            {
+              "meta": {
+                "appID": "circle",
+                "appMarketplaceURL": "https://app.circle.com/get-started",
+                "bgColor": "#2775ca",
+                "tagIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/circle-icon-white.png",
+                "textColor": "#FFFFFF",
+                "tooltipUrl": "https://www.circle.com/"
+              },
+              "name": "Circle",
+              "ordinal": 0,
+              "slug": "circle",
+              "tagType": "protocol"
+            },
+            {
+              "meta": {
+                "data": "ok"
+              },
+              "name": "Credible token",
+              "ordinal": 0,
+              "slug": "credible-token",
+              "tagType": "token_reputation"
+            }
+          ]
+        },
+        "name": "USDC",
+        "private_tags": [],
+        "proxy_type": "eip1967_oz",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x000000000000000000000000000000000000000000000000000000001137c447",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "288867399"
+          }
+        ]
+      },
+      "index": 177,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x9f6F3991D525015a6F8CaF062C83b62fD3AC4436",
+        "implementations": [
+          {
+            "address_hash": "0x264048239Dd1b5939599fAE8e6000DF40248D524",
+            "name": "StablecoinTemplateV3"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": null,
+        "name": "OpenUSD",
+        "private_tags": [],
+        "proxy_type": "erc7760",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x000000000000000000000000000000000000000000000000000000001129c9c4",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "287951300"
+          }
+        ]
+      },
+      "index": 178,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        "0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x000000000004444c5dc75cB358380D2e3dE08A90",
+        "implementations": [],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": {
+          "tags": [
+            {
+              "meta": {
+                "main_entity": "Uniswap",
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "textColor": "#C163D4",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "Provided by OLI",
+                "tooltipUrl": "https://app.uniswap.org/"
+              },
+              "name": "Uniswap V4: Pool Manager",
+              "ordinal": 10,
+              "slug": "uniswap-v4-pool-manager",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Liquidity Pool",
+              "ordinal": 0,
+              "slug": "liquidity-pool",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "DEX",
+              "ordinal": 0,
+              "slug": "dex",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "appActionButtonText": "Uniswap",
+                "appID": "uniswap"
+              },
+              "name": "Uniswap V4",
+              "ordinal": 0,
+              "slug": "uniswap-v4",
+              "tagType": "protocol"
+            }
+          ]
+        },
+        "name": "PoolManager",
+        "private_tags": [],
+        "proxy_type": null,
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffe52d42ac000000000000000000000000000000000000000000000000000000001add1c630000000000000000000000000000000000000001008434eec5aa25db3ca70c7f0000000000000000000000000000000000000000000000000000006a659d761300000000000000000000000000000000000000000000000000000000000000280000000000000000000000000000000000000000000000000000000000000dab",
+      "decoded": {
+        "method_call": "Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)",
+        "method_id": "40e9cecb",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "id",
+            "type": "bytes32",
+            "value": "0xc06e879dd8bdfeb84b6f65bd88a8ef9b59abac926e14ca0577b92dd5d60ee7b6"
+          },
+          {
+            "indexed": true,
+            "name": "sender",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "amount0",
+            "type": "int128",
+            "value": "-450018644"
+          },
+          {
+            "indexed": false,
+            "name": "amount1",
+            "type": "int128",
+            "value": "450698339"
+          },
+          {
+            "indexed": false,
+            "name": "sqrtPriceX96",
+            "type": "uint160",
+            "value": "79387990690078905804087823487"
+          },
+          {
+            "indexed": false,
+            "name": "liquidity",
+            "type": "uint128",
+            "value": "456971351571"
+          },
+          {
+            "indexed": false,
+            "name": "tick",
+            "type": "int24",
+            "value": "40"
+          },
+          {
+            "indexed": false,
+            "name": "fee",
+            "type": "uint24",
+            "value": "3499"
+          }
+        ]
+      },
+      "index": 179,
+      "smart_contract": null,
+      "topics": [
+        "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f",
+        "0xc06e879dd8bdfeb84b6f65bd88a8ef9b59abac926e14ca0577b92dd5d60ee7b6",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "implementations": [
+          {
+            "address_hash": "0x43506849D7C04F9138D1A2050bbF3A0c054402dd",
+            "name": "FiatTokenV2_2"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": {
+          "tags": [
+            {
+              "meta": {
+                "projectName": "Circle",
+                "tagIcon": "https://assets.coingecko.com/coins/images/6319/small/usdc.png?1696506694",
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tagUrl": "https://scout-app.kleros.io/single-tags/0x924f91c6a015abb7e7a5f8c7c0989761b4df998abdbd6541365eb3c82132a390",
+                "textColor": "#C163D4",
+                "tokenAttributes": "{\"logo_url\":\"https://cdn.kleros.link/ipfs/Qmc3TH5cPhyh7418kSD83SSBzng1oqbLxjzxfjwA2VAoj8/BccwoeFESYBsv6XiJVRAp5b3pRpvMgdhfZCxV5vSppWbAukhqrBRVRj3jAxHnbfmvg181rcVw9ny4LBLbFdm2S2RRH\",\"token_symbol\":\"USDC\",\"token_name\":\"USD Coin\",\"decimals\":6}",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "USDC is a US dollar-backed stablecoin issued by Circle. USDC is designed to provide a faster, safer, and more efficient way to send, spend, and exchange money around the world.",
+                "tooltipUrl": "https://www.circle.com/en/usdc"
+              },
+              "name": "USDC Token",
+              "ordinal": 10,
+              "slug": "usdc-token-1",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Token Contract",
+              "ordinal": 0,
+              "slug": "token-contract",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "Stablecoin",
+              "ordinal": 0,
+              "slug": "stablecoin",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "USDC",
+              "ordinal": 0,
+              "slug": "usdc",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "textColor": "#C163D4",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "Provided by OLI"
+              },
+              "name": "USD Coin",
+              "ordinal": 0,
+              "slug": "usd-coin",
+              "tagType": "name"
+            },
+            {
+              "meta": {
+                "appID": "circle",
+                "appMarketplaceURL": "https://app.circle.com/get-started",
+                "bgColor": "#2775ca",
+                "tagIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/circle-icon-white.png",
+                "textColor": "#FFFFFF",
+                "tooltipUrl": "https://www.circle.com/"
+              },
+              "name": "Circle",
+              "ordinal": 0,
+              "slug": "circle",
+              "tagType": "protocol"
+            },
+            {
+              "meta": {
+                "data": "ok"
+              },
+              "name": "Credible token",
+              "ordinal": 0,
+              "slug": "credible-token",
+              "tagType": "token_reputation"
+            }
+          ]
+        },
+        "name": "USDC",
+        "private_tags": [],
+        "proxy_type": "eip1967_oz",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x000000000000000000000000000000000000000000000000000000001add1c63",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "450698339"
+          }
+        ]
+      },
+      "index": 180,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x9f6F3991D525015a6F8CaF062C83b62fD3AC4436",
+        "implementations": [
+          {
+            "address_hash": "0x264048239Dd1b5939599fAE8e6000DF40248D524",
+            "name": "StablecoinTemplateV3"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": null,
+        "name": "OpenUSD",
+        "private_tags": [],
+        "proxy_type": "erc7760",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x000000000000000000000000000000000000000000000000000000001ad2bd54",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "450018644"
+          }
+        ]
+      },
+      "index": 181,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        "0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x000000000004444c5dc75cB358380D2e3dE08A90",
+        "implementations": [],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": {
+          "tags": [
+            {
+              "meta": {
+                "main_entity": "Uniswap",
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "textColor": "#C163D4",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "Provided by OLI",
+                "tooltipUrl": "https://app.uniswap.org/"
+              },
+              "name": "Uniswap V4: Pool Manager",
+              "ordinal": 10,
+              "slug": "uniswap-v4-pool-manager",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Liquidity Pool",
+              "ordinal": 0,
+              "slug": "liquidity-pool",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "DEX",
+              "ordinal": 0,
+              "slug": "dex",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "appActionButtonText": "Uniswap",
+                "appID": "uniswap"
+              },
+              "name": "Uniswap V4",
+              "ordinal": 0,
+              "slug": "uniswap-v4",
+              "tagType": "protocol"
+            }
+          ]
+        },
+        "name": "PoolManager",
+        "private_tags": [],
+        "proxy_type": null,
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffff8128aab0000000000000000000000000000000000000000000000000000000007ef628100000000000000000000000000000000000000010025a19d053b2bb91aaa7f4500000000000000000000000000000000000000000000000000000048b8695a94000000000000000000000000000000000000000000000000000000000000000b0000000000000000000000000000000000000000000000000000000000000271",
+      "decoded": {
+        "method_call": "Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)",
+        "method_id": "40e9cecb",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "id",
+            "type": "bytes32",
+            "value": "0x96433229b36023876dbe12361774f3cb5c04ff8e6d97f9b3bae526129efb6e4a"
+          },
+          {
+            "indexed": true,
+            "name": "sender",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "amount0",
+            "type": "int128",
+            "value": "-133002581"
+          },
+          {
+            "indexed": false,
+            "name": "amount1",
+            "type": "int128",
+            "value": "133128833"
+          },
+          {
+            "indexed": false,
+            "name": "sqrtPriceX96",
+            "type": "uint160",
+            "value": "79273655967109583526118981445"
+          },
+          {
+            "indexed": false,
+            "name": "liquidity",
+            "type": "uint128",
+            "value": "312331557524"
+          },
+          {
+            "indexed": false,
+            "name": "tick",
+            "type": "int24",
+            "value": "11"
+          },
+          {
+            "indexed": false,
+            "name": "fee",
+            "type": "uint24",
+            "value": "625"
+          }
+        ]
+      },
+      "index": 182,
+      "smart_contract": null,
+      "topics": [
+        "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f",
+        "0x96433229b36023876dbe12361774f3cb5c04ff8e6d97f9b3bae526129efb6e4a",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "implementations": [
+          {
+            "address_hash": "0x43506849D7C04F9138D1A2050bbF3A0c054402dd",
+            "name": "FiatTokenV2_2"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": {
+          "tags": [
+            {
+              "meta": {
+                "projectName": "Circle",
+                "tagIcon": "https://assets.coingecko.com/coins/images/6319/small/usdc.png?1696506694",
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tagUrl": "https://scout-app.kleros.io/single-tags/0x924f91c6a015abb7e7a5f8c7c0989761b4df998abdbd6541365eb3c82132a390",
+                "textColor": "#C163D4",
+                "tokenAttributes": "{\"logo_url\":\"https://cdn.kleros.link/ipfs/Qmc3TH5cPhyh7418kSD83SSBzng1oqbLxjzxfjwA2VAoj8/BccwoeFESYBsv6XiJVRAp5b3pRpvMgdhfZCxV5vSppWbAukhqrBRVRj3jAxHnbfmvg181rcVw9ny4LBLbFdm2S2RRH\",\"token_symbol\":\"USDC\",\"token_name\":\"USD Coin\",\"decimals\":6}",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "USDC is a US dollar-backed stablecoin issued by Circle. USDC is designed to provide a faster, safer, and more efficient way to send, spend, and exchange money around the world.",
+                "tooltipUrl": "https://www.circle.com/en/usdc"
+              },
+              "name": "USDC Token",
+              "ordinal": 10,
+              "slug": "usdc-token-1",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Token Contract",
+              "ordinal": 0,
+              "slug": "token-contract",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "Stablecoin",
+              "ordinal": 0,
+              "slug": "stablecoin",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "USDC",
+              "ordinal": 0,
+              "slug": "usdc",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "textColor": "#C163D4",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "Provided by OLI"
+              },
+              "name": "USD Coin",
+              "ordinal": 0,
+              "slug": "usd-coin",
+              "tagType": "name"
+            },
+            {
+              "meta": {
+                "appID": "circle",
+                "appMarketplaceURL": "https://app.circle.com/get-started",
+                "bgColor": "#2775ca",
+                "tagIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/circle-icon-white.png",
+                "textColor": "#FFFFFF",
+                "tooltipUrl": "https://www.circle.com/"
+              },
+              "name": "Circle",
+              "ordinal": 0,
+              "slug": "circle",
+              "tagType": "protocol"
+            },
+            {
+              "meta": {
+                "data": "ok"
+              },
+              "name": "Credible token",
+              "ordinal": 0,
+              "slug": "credible-token",
+              "tagType": "token_reputation"
+            }
+          ]
+        },
+        "name": "USDC",
+        "private_tags": [],
+        "proxy_type": "eip1967_oz",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x0000000000000000000000000000000000000000000000000000000007ef6281",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "133128833"
+          }
+        ]
+      },
+      "index": 183,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x9f6F3991D525015a6F8CaF062C83b62fD3AC4436",
+        "implementations": [
+          {
+            "address_hash": "0x264048239Dd1b5939599fAE8e6000DF40248D524",
+            "name": "StablecoinTemplateV3"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": null,
+        "name": "OpenUSD",
+        "private_tags": [],
+        "proxy_type": "erc7760",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x0000000000000000000000000000000000000000000000000000000007ed7555",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "133002581"
+          }
+        ]
+      },
+      "index": 184,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        "0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x000000000004444c5dc75cB358380D2e3dE08A90",
+        "implementations": [],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": {
+          "tags": [
+            {
+              "meta": {
+                "main_entity": "Uniswap",
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "textColor": "#C163D4",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "Provided by OLI",
+                "tooltipUrl": "https://app.uniswap.org/"
+              },
+              "name": "Uniswap V4: Pool Manager",
+              "ordinal": 10,
+              "slug": "uniswap-v4-pool-manager",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Liquidity Pool",
+              "ordinal": 0,
+              "slug": "liquidity-pool",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "DEX",
+              "ordinal": 0,
+              "slug": "dex",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "appActionButtonText": "Uniswap",
+                "appID": "uniswap"
+              },
+              "name": "Uniswap V4",
+              "ordinal": 0,
+              "slug": "uniswap-v4",
+              "tagType": "protocol"
+            }
+          ]
+        },
+        "name": "PoolManager",
+        "private_tags": [],
+        "proxy_type": null,
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffd93e0db00000000000000000000000000000000000000000000000000000000026d2fd4000000000000000000000000000000000000000106d694d9f1ea168f940871cc000000000000000000000000000000000000000000000000000000072a5dff65000000000000000000000000000000000000000000000000000000000000020f000000000000000000000000000000000000000000000000000000000000c706",
+      "decoded": {
+        "method_call": "Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)",
+        "method_id": "40e9cecb",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "id",
+            "type": "bytes32",
+            "value": "0x788e6de74e0fe4734585189025d73c7037921518784245eefe9002361fafa835"
+          },
+          {
+            "indexed": true,
+            "name": "sender",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "amount0",
+            "type": "int128",
+            "value": "-40640293"
+          },
+          {
+            "indexed": false,
+            "name": "amount1",
+            "type": "int128",
+            "value": "40710100"
+          },
+          {
+            "indexed": false,
+            "name": "sqrtPriceX96",
+            "type": "uint160",
+            "value": "81344485629204637465354727884"
+          },
+          {
+            "indexed": false,
+            "name": "liquidity",
+            "type": "uint128",
+            "value": "30775574373"
+          },
+          {
+            "indexed": false,
+            "name": "tick",
+            "type": "int24",
+            "value": "527"
+          },
+          {
+            "indexed": false,
+            "name": "fee",
+            "type": "uint24",
+            "value": "50950"
+          }
+        ]
+      },
+      "index": 185,
+      "smart_contract": null,
+      "topics": [
+        "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f",
+        "0x788e6de74e0fe4734585189025d73c7037921518784245eefe9002361fafa835",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "implementations": [
+          {
+            "address_hash": "0x43506849D7C04F9138D1A2050bbF3A0c054402dd",
+            "name": "FiatTokenV2_2"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": {
+          "tags": [
+            {
+              "meta": {
+                "projectName": "Circle",
+                "tagIcon": "https://assets.coingecko.com/coins/images/6319/small/usdc.png?1696506694",
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tagUrl": "https://scout-app.kleros.io/single-tags/0x924f91c6a015abb7e7a5f8c7c0989761b4df998abdbd6541365eb3c82132a390",
+                "textColor": "#C163D4",
+                "tokenAttributes": "{\"logo_url\":\"https://cdn.kleros.link/ipfs/Qmc3TH5cPhyh7418kSD83SSBzng1oqbLxjzxfjwA2VAoj8/BccwoeFESYBsv6XiJVRAp5b3pRpvMgdhfZCxV5vSppWbAukhqrBRVRj3jAxHnbfmvg181rcVw9ny4LBLbFdm2S2RRH\",\"token_symbol\":\"USDC\",\"token_name\":\"USD Coin\",\"decimals\":6}",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "USDC is a US dollar-backed stablecoin issued by Circle. USDC is designed to provide a faster, safer, and more efficient way to send, spend, and exchange money around the world.",
+                "tooltipUrl": "https://www.circle.com/en/usdc"
+              },
+              "name": "USDC Token",
+              "ordinal": 10,
+              "slug": "usdc-token-1",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Token Contract",
+              "ordinal": 0,
+              "slug": "token-contract",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "Stablecoin",
+              "ordinal": 0,
+              "slug": "stablecoin",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "USDC",
+              "ordinal": 0,
+              "slug": "usdc",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "textColor": "#C163D4",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "Provided by OLI"
+              },
+              "name": "USD Coin",
+              "ordinal": 0,
+              "slug": "usd-coin",
+              "tagType": "name"
+            },
+            {
+              "meta": {
+                "appID": "circle",
+                "appMarketplaceURL": "https://app.circle.com/get-started",
+                "bgColor": "#2775ca",
+                "tagIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/circle-icon-white.png",
+                "textColor": "#FFFFFF",
+                "tooltipUrl": "https://www.circle.com/"
+              },
+              "name": "Circle",
+              "ordinal": 0,
+              "slug": "circle",
+              "tagType": "protocol"
+            },
+            {
+              "meta": {
+                "data": "ok"
+              },
+              "name": "Credible token",
+              "ordinal": 0,
+              "slug": "credible-token",
+              "tagType": "token_reputation"
+            }
+          ]
+        },
+        "name": "USDC",
+        "private_tags": [],
+        "proxy_type": "eip1967_oz",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x00000000000000000000000000000000000000000000000000000000026d2fd4",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "40710100"
+          }
+        ]
+      },
+      "index": 186,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x9f6F3991D525015a6F8CaF062C83b62fD3AC4436",
+        "implementations": [
+          {
+            "address_hash": "0x264048239Dd1b5939599fAE8e6000DF40248D524",
+            "name": "StablecoinTemplateV3"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": null,
+        "name": "OpenUSD",
+        "private_tags": [],
+        "proxy_type": "erc7760",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x00000000000000000000000000000000000000000000000000000000026c1f25",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "40640293"
+          }
+        ]
+      },
+      "index": 187,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        "0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x000000000004444c5dc75cB358380D2e3dE08A90",
+        "implementations": [],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": {
+          "tags": [
+            {
+              "meta": {
+                "main_entity": "Uniswap",
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "textColor": "#C163D4",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "Provided by OLI",
+                "tooltipUrl": "https://app.uniswap.org/"
+              },
+              "name": "Uniswap V4: Pool Manager",
+              "ordinal": 10,
+              "slug": "uniswap-v4-pool-manager",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Liquidity Pool",
+              "ordinal": 0,
+              "slug": "liquidity-pool",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "DEX",
+              "ordinal": 0,
+              "slug": "dex",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "appActionButtonText": "Uniswap",
+                "appID": "uniswap"
+              },
+              "name": "Uniswap V4",
+              "ordinal": 0,
+              "slug": "uniswap-v4",
+              "tagType": "protocol"
+            }
+          ]
+        },
+        "name": "PoolManager",
+        "private_tags": [],
+        "proxy_type": null,
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffce5086300000000000000000000000000000000000000000000000000000000031d57ff00000000000000000000000000000000000000010444ebf95ef1a83fb0ecb78e00000000000000000000000000000000000000000000000000000008c0748f35000000000000000000000000000000000000000000000000000000000000014a00000000000000000000000000000000000000000000000000000000000078fa",
+      "decoded": {
+        "method_call": "Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)",
+        "method_id": "40e9cecb",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "id",
+            "type": "bytes32",
+            "value": "0xe33bf9009a22b7b3a5773a8d8054d29ec454e637c7ccf8e1c526327f82eafe37"
+          },
+          {
+            "indexed": true,
+            "name": "sender",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "amount0",
+            "type": "int128",
+            "value": "-52098973"
+          },
+          {
+            "indexed": false,
+            "name": "amount1",
+            "type": "int128",
+            "value": "52254719"
+          },
+          {
+            "indexed": false,
+            "name": "sqrtPriceX96",
+            "type": "uint160",
+            "value": "80549423865487695673083869070"
+          },
+          {
+            "indexed": false,
+            "name": "liquidity",
+            "type": "uint128",
+            "value": "37588602677"
+          },
+          {
+            "indexed": false,
+            "name": "tick",
+            "type": "int24",
+            "value": "330"
+          },
+          {
+            "indexed": false,
+            "name": "fee",
+            "type": "uint24",
+            "value": "30970"
+          }
+        ]
+      },
+      "index": 188,
+      "smart_contract": null,
+      "topics": [
+        "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f",
+        "0xe33bf9009a22b7b3a5773a8d8054d29ec454e637c7ccf8e1c526327f82eafe37",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+        "implementations": [],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": {
+          "tags": [
+            {
+              "meta": {
+                "projectName": "Tether",
+                "tagUrl": "https://app.klerosscout.eth.limo/#/?registry=Single_Tags&itemdetails=0xca4f86e999bee421567b4e8a094a7dff96fa821e9023a63b87f12b64d2356094@0x66260c69d03837016d88c9877e61e08ef74c59f2",
+                "tokenAttributes": "{\"logo_url\":\"https://cdn.kleros.link/ipfs/QmZF9JKGaGfT7LsARQaFdUUATDha4Ecx9PziFu2M8ifFmR/Bce2S3tXG2WL6pLnJAyHJyQ9B1MenRPiFnSVsNBgGXyWiNKTgcnTFcFjCcB9ujE5tJG7CjurLSL6XHoPQfu3Re4tqJ\",\"token_symbol\":\"USDT\",\"token_name\":\"Tether\",\"decimals\":6}",
+                "tooltipDescription": "The contract of Tether (USDT) stablecoin.",
+                "tooltipUrl": "https://tether.to",
+                "verifiedDomains": [
+                  "app.mav.xyz",
+                  "www.sushi.com",
+                  "apeswap.finance",
+                  "app.firebird.finance",
+                  "app.uniswap.org",
+                  "swap.defillama.com",
+                  "swapr.eth.limo",
+                  "stackly.eth.limo",
+                  "traderjoexyz.com"
+                ]
+              },
+              "name": "USDT Stablecoin",
+              "ordinal": 10,
+              "slug": "usdt-stablecoin-1",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Token Contract",
+              "ordinal": 0,
+              "slug": "token-contract",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "Stablecoin",
+              "ordinal": 0,
+              "slug": "stablecoin",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "tooltipDescription": "Address blocked by a custodial stablecoin provider"
+              },
+              "name": "BLOCKED",
+              "ordinal": 0,
+              "slug": "blocked",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "textColor": "#C163D4",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "Provided by OLI"
+              },
+              "name": "USDT",
+              "ordinal": 0,
+              "slug": "usdt",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Tether",
+              "ordinal": 0,
+              "slug": "tether",
+              "tagType": "protocol"
+            },
+            {
+              "meta": {
+                "data": "ok"
+              },
+              "name": "Credible token",
+              "ordinal": 0,
+              "slug": "credible-token",
+              "tagType": "token_reputation"
+            }
+          ]
+        },
+        "name": "TetherToken",
+        "private_tags": [],
+        "proxy_type": null,
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x00000000000000000000000000000000000000000000000000000000031d57ff",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "52254719"
+          }
+        ]
+      },
+      "index": 189,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x9f6F3991D525015a6F8CaF062C83b62fD3AC4436",
+        "implementations": [
+          {
+            "address_hash": "0x264048239Dd1b5939599fAE8e6000DF40248D524",
+            "name": "StablecoinTemplateV3"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": null,
+        "name": "OpenUSD",
+        "private_tags": [],
+        "proxy_type": "erc7760",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x00000000000000000000000000000000000000000000000000000000031af79d",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "52098973"
+          }
+        ]
+      },
+      "index": 190,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        "0x000000000000000000000000000000000004444c5dc75cb358380d2e3de08a90",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "implementations": [
+          {
+            "address_hash": "0x43506849D7C04F9138D1A2050bbF3A0c054402dd",
+            "name": "FiatTokenV2_2"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": {
+          "tags": [
+            {
+              "meta": {
+                "projectName": "Circle",
+                "tagIcon": "https://assets.coingecko.com/coins/images/6319/small/usdc.png?1696506694",
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tagUrl": "https://scout-app.kleros.io/single-tags/0x924f91c6a015abb7e7a5f8c7c0989761b4df998abdbd6541365eb3c82132a390",
+                "textColor": "#C163D4",
+                "tokenAttributes": "{\"logo_url\":\"https://cdn.kleros.link/ipfs/Qmc3TH5cPhyh7418kSD83SSBzng1oqbLxjzxfjwA2VAoj8/BccwoeFESYBsv6XiJVRAp5b3pRpvMgdhfZCxV5vSppWbAukhqrBRVRj3jAxHnbfmvg181rcVw9ny4LBLbFdm2S2RRH\",\"token_symbol\":\"USDC\",\"token_name\":\"USD Coin\",\"decimals\":6}",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "USDC is a US dollar-backed stablecoin issued by Circle. USDC is designed to provide a faster, safer, and more efficient way to send, spend, and exchange money around the world.",
+                "tooltipUrl": "https://www.circle.com/en/usdc"
+              },
+              "name": "USDC Token",
+              "ordinal": 10,
+              "slug": "usdc-token-1",
+              "tagType": "name"
+            },
+            {
+              "meta": {},
+              "name": "Token Contract",
+              "ordinal": 0,
+              "slug": "token-contract",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "Stablecoin",
+              "ordinal": 0,
+              "slug": "stablecoin",
+              "tagType": "generic"
+            },
+            {
+              "meta": {},
+              "name": "USDC",
+              "ordinal": 0,
+              "slug": "usdc",
+              "tagType": "generic"
+            },
+            {
+              "meta": {
+                "tagIcon ": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "textColor": "#C163D4",
+                "tooltipAttribution": "https://www.openlabelsinitiative.org?utm_source=blockscout",
+                "tooltipAttributionIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/OLI_tag_logo.svg",
+                "tooltipDescription": "Provided by OLI"
+              },
+              "name": "USD Coin",
+              "ordinal": 0,
+              "slug": "usd-coin",
+              "tagType": "name"
+            },
+            {
+              "meta": {
+                "appID": "circle",
+                "appMarketplaceURL": "https://app.circle.com/get-started",
+                "bgColor": "#2775ca",
+                "tagIcon": "https://blockscout-icons.s3.us-east-1.amazonaws.com/circle-icon-white.png",
+                "textColor": "#FFFFFF",
+                "tooltipUrl": "https://www.circle.com/"
+              },
+              "name": "Circle",
+              "ordinal": 0,
+              "slug": "circle",
+              "tagType": "protocol"
+            },
+            {
+              "meta": {
+                "data": "ok"
+              },
+              "name": "Credible token",
+              "ordinal": 0,
+              "slug": "credible-token",
+              "tagType": "token_reputation"
+            }
+          ]
+        },
+        "name": "USDC",
+        "private_tags": [],
+        "proxy_type": "eip1967_oz",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x00000000000000000000000000000000000000000000000000000000007e9ce4",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 value)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x56aE3561F6C62AcE22aAb1dfA78009ed8BA69222"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": false,
+            "name": "value",
+            "type": "uint256",
+            "value": "8297700"
+          }
+        ]
+      },
+      "index": 191,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x00000000000000000000000056ae3561f6c62ace22aab1dfa78009ed8ba69222",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    },
+    {
+      "address": {
+        "ens_domain_name": null,
+        "hash": "0x2162FDb116bc95d85b898BdAE77e053eF0C36eAA",
+        "implementations": [
+          {
+            "address_hash": "0x2BB625DAa0A9dD2C69939cBD6C2dBae2ac6667AC",
+            "name": "ERC20Asset"
+          }
+        ],
+        "is_contract": true,
+        "is_scam": false,
+        "is_verified": true,
+        "metadata": null,
+        "name": "Uds My",
+        "private_tags": [],
+        "proxy_type": "eip1167",
+        "public_tags": [],
+        "reputation": "ok",
+        "watchlist_names": []
+      },
+      "block_hash": "0x6ca807edeff73eaf3b2d1f1fb9a8baee2bdf9a901e587f3853de09e976914745",
+      "block_number": 26330904,
+      "block_timestamp": "2026-11-03T01:12:59.000000Z",
+      "data": "0x0000000000000000000000000000000000000000000000007327de0aa4506c26",
+      "decoded": {
+        "method_call": "Transfer(address indexed from, address indexed to, uint256 amount)",
+        "method_id": "ddf252ad",
+        "parameters": [
+          {
+            "indexed": true,
+            "name": "from",
+            "type": "address",
+            "value": "0x0cEf320d0c5793ade37964E2661a033771e53cd5"
+          },
+          {
+            "indexed": true,
+            "name": "to",
+            "type": "address",
+            "value": "0x56aE3561F6C62AcE22aAb1dfA78009ed8BA69222"
+          },
+          {
+            "indexed": false,
+            "name": "amount",
+            "type": "uint256",
+            "value": "8297844975741201446"
+          }
+        ]
+      },
+      "index": 192,
+      "smart_contract": null,
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x0000000000000000000000000cef320d0c5793ade37964e2661a033771e53cd5",
+        "0x00000000000000000000000056ae3561f6c62ace22aab1dfa78009ed8ba69222",
+        null
+      ],
+      "transaction_hash": "0xc50dd0ca4a1aa86b9a8b64bbc6da524bf928c344c411a13d3e6e7e12d6653cca"
+    }
+  ],
+  "next_page_params": null
+}

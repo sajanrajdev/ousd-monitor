@@ -1,0 +1,40 @@
+version: 2
+
+exposures:
+  - name: published_dataset
+    label: Published dataset
+    type: analysis
+    maturity: high
+    owner:
+      name: Open USD Monitor
+    url: https://example.invalid/dataset  # Placeholder until the dataset has a public home.
+    description: >
+      The versioned files that `ousd publish` writes after the blocking checks pass. Each file is
+      built from the marts below, and nothing is published when a check fails.
+    depends_on:
+      - ref('mart_activity_kpis')
+      - ref('mart_activity_waterfall')
+      - ref('mart_build_params')
+      - ref('mart_chain_roles')
+      - ref('mart_exchange_holdings')
+      - ref('mart_reconciliation')
+      - ref('mart_supply_journey')
+
+  - name: site
+    label: Open USD Monitor site
+    type: application
+    maturity: low
+    owner:
+      name: Open USD Monitor
+    url: https://example.invalid/site  # Placeholder until the site has its public address.
+    description: >
+      The static site. It reads only the published dataset at build time, so it depends on
+      the marts through that dataset.
+    depends_on:
+      - ref('mart_activity_kpis')
+      - ref('mart_activity_waterfall')
+      - ref('mart_build_params')
+      - ref('mart_chain_roles')
+      - ref('mart_exchange_holdings')
+      - ref('mart_reconciliation')
+      - ref('mart_supply_journey')

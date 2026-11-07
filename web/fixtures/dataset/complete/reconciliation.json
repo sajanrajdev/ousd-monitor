@@ -1,0 +1,72 @@
+{
+  "schema_version": 2,
+  "preview": false,
+  "data": [
+    {
+      "kind": "bridge",
+      "subject": "all_chains",
+      "block_number": null,
+      "event_value": "13100000000000000",
+      "reference_value": "13100000000000000",
+      "difference": "0",
+      "passed": true,
+      "checked_at": "2026-11-04T05:30:00Z",
+      "run_id": "00000000000000000000000000000001",
+      "in_latest_run": true
+    },
+    {
+      "kind": "chain",
+      "subject": "base",
+      "block_number": 1000000,
+      "event_value": "200000000000000",
+      "reference_value": "200000000000000",
+      "difference": "0",
+      "passed": true,
+      "checked_at": "2026-11-04T05:30:00Z",
+      "run_id": "00000000000000000000000000000001",
+      "in_latest_run": true
+    },
+    {
+      "kind": "chain",
+      "subject": "ethereum",
+      "block_number": 1000000,
+      "event_value": "12000000000000000",
+      "reference_value": "12000000000000000",
+      "difference": "0",
+      "passed": true,
+      "checked_at": "2026-11-04T05:30:00Z",
+      "run_id": "00000000000000000000000000000001",
+      "in_latest_run": true
+    },
+    {
+      "kind": "chain",
+      "subject": "solana",
+      "block_number": 1000000,
+      "event_value": "100000000000000",
+      "reference_value": "100000000000000",
+      "difference": "0",
+      "passed": true,
+      "checked_at": "2026-11-04T05:30:00Z",
+      "run_id": "00000000000000000000000000000001",
+      "in_latest_run": true
+    },
+    {
+      "kind": "chain",
+      "subject": "tempo",
+      "block_number": 1000000,
+      "event_value": "800000000000000",
+      "reference_value": "800000000000000",
+      "difference": "0",
+      "passed": true,
+      "checked_at": "2026-11-04T05:30:00Z",
+      "run_id": "00000000000000000000000000000001",
+      "in_latest_run": true
+    }
+  ],
+  "latest_run": {
+    "run_id": "00000000000000000000000000000001",
+    "scope": "full",
+    "status": "pass",
+    "finished_at": "2026-11-04T05:30:00Z"
+  }
+}

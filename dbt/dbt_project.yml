@@ -1,0 +1,22 @@
+name: ousd_monitor
+version: "1.0"
+profile: ousd_monitor
+# The locked dbt-core line (uv.lock). Raise it with the lock, not before.
+require-dbt-version: [">=1.12.0", "<1.13.0"]
+model-paths: ["models"]
+test-paths: ["tests"]
+models:
+  ousd_monitor:
+    staging: {+materialized: view}
+    intermediate: {+materialized: table}
+    marts: {+materialized: table}
+vars:
+  labels_path: labels/labels.csv
+  zero_address: "0x0000000000000000000000000000000000000000"
+  tempo_fee_manager: "0xfeec000000000000000000000000000000000000"
+  placed_days: 14
+  placed_min_base_units: 1000000000000
+  large_transfer_base_units: 1000000000000
+  active_dust_base_units: 1000000
+  active_secondary_base_units: 100000000
+  clean_tx_min_base_units: 1000000
