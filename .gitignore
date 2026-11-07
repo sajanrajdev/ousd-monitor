@@ -17,3 +17,8 @@ dist/
 .pytest_cache/
 .ruff_cache/
 dbt/.user.yml
+
+# Local assistant files
+.claude/
+CLAUDE.md
+CLAUDE.local.md

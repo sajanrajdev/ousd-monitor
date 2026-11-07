@@ -1,8 +1,16 @@
 [project]
 name = "ousd-monitor"
 version = "0.1.0"
-description = "Ingests and reconciles Open USD (OUSD) transfers from raw chain data."
+description = "An independent public dashboard that checks whether Open USD (OUSD) supply is turning into money that moves: ingestion, reconciliation, dbt metrics and a static site."
 readme = "README.md"
+license = "MIT"
+authors = [{ name = "sajanrajdev" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial",
+]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "dagster>=1.8",
@@ -13,6 +21,10 @@ dependencies = [
     "jsonschema>=4",
     "pyyaml>=6",
 ]
+
+[project.urls]
+Repository = "https://github.com/sajanrajdev/ousd-monitor"
+Issues = "https://github.com/sajanrajdev/ousd-monitor/issues"
 
 [project.scripts]
 ousd = "ousd.cli:main"

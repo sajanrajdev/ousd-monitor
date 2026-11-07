@@ -12,6 +12,8 @@ The question it answers is one: is OUSD supply turning into money that moves, or
 
 We count 1 OUSD as $1 and don't track price.
 
+The published JSON and CSV are licensed CC-BY-4.0. The code is MIT; see `LICENSE`.
+
 Other sources already cover live supply, reserve coverage and pool health, and we don't compete with them. Use them for those:
 
 - [ousd.fyi](https://ousd.fyi/): reserves against supply, and per-chain supply.
