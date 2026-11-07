@@ -488,6 +488,26 @@ def test_a_failed_check_write_leaves_no_samples(store):
         store.record_check(run, "nonsense", "testnet", 1, "pass")
 
 
+def test_a_reconciliation_is_filed_under_the_open_run_only(store):
+    store.record_reconciliation("testnet", 1, 5, 0, 5, True)
+    run = store.start_run("full")
+    store.record_reconciliation("testnet", 2, 5, 0, 5, True)
+    store.finish_run(run, "pass", 0)
+    store.record_reconciliation("testnet", 3, 5, 0, 5, True)
+
+    filed = store.db.execute("SELECT block_number, run_id FROM reconciliations ORDER BY ALL")
+    assert filed.fetchall() == [(1, None), (2, run), (3, None)]
+
+
+def test_a_failed_finish_leaves_the_run_open_for_its_reconciliations(store):
+    run = store.start_run("full")
+    with pytest.raises(KeyError):
+        store.finish_run("another", "pass", 0)
+    store.record_reconciliation("testnet", 2, 5, 0, 5, True)
+
+    assert store.db.execute("SELECT run_id FROM reconciliations").fetchall() == [(run,)]
+
+
 def test_a_run_cannot_be_finished_twice(store):
     run = store.start_run("full")
     store.finish_run(run, "pass", 0)

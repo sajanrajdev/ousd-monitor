@@ -25,7 +25,8 @@ def build(tmp_path, chain_results=(), runs=(), bridges=()):
     try:
         for chain, minted, burned, onchain, matched, minute in chain_results:
             raw.execute(
-                "INSERT INTO reconciliations VALUES (?, ?, 100, "
+                "INSERT INTO reconciliations (checked_at, chain, block_number, minted, burned, "
+                "onchain_supply, matched) VALUES (?, ?, 100, "
                 "CAST(? AS HUGEINT), CAST(? AS HUGEINT), CAST(? AS HUGEINT), ?)",
                 [at(minute), chain, str(minted), str(burned), str(onchain), matched],
             )

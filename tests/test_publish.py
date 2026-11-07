@@ -20,6 +20,7 @@ from ousd import checks, cli
 from ousd import publish as publisher
 from ousd.chains import REQUIRED_CHAINS
 from ousd.publish import PublishRefused
+from ousd.store import Store
 from publish_world import (
     EVERYDAY,
     HUGE,
@@ -431,7 +432,10 @@ def test_every_published_reconciliation_row_must_be_the_gate_run(world, tamper, 
         world.publish()
 
 
-def test_a_run_that_crashed_with_the_same_figures_does_not_take_over_the_numbers(world):
+@pytest.mark.parametrize("filed", [True, False], ids=["run_id", "before_run_id"])
+def test_a_run_that_crashed_with_the_same_figures_does_not_take_over_the_numbers(world, filed):
+    if not filed:
+        world.raw_sql("UPDATE reconciliations SET run_id = NULL")
     with world.store() as store:
         crashed = store.start_run("full")
         for row in store.db.execute(
@@ -456,6 +460,68 @@ def test_a_run_that_crashed_with_the_same_figures_does_not_take_over_the_numbers
     world.run_checks()
     rows = read_json(world.publish(), "reconciliation.json")["data"]
     assert {row["run_id"] for row in rows} == {finished}
+
+
+def test_a_chain_row_is_attributed_by_its_run_id_before_any_figure_match(world):
+    # A supply check of the gate run matches tempo's figures, but its row was filed elsewhere.
+    world.raw_sql("UPDATE reconciliations SET run_id = 'elsewhere' WHERE chain = 'tempo'")
+    world.run_checks()
+    with pytest.raises(PublishRefused, match=r"not from run .* for: tempo$"):
+        world.publish()
+
+
+def test_chain_rows_from_before_run_id_fall_back_to_their_supply_check(world):
+    with world.store() as store:
+        run_id = store.latest_reconciliation().run_id
+    world.raw_sql("UPDATE reconciliations SET run_id = NULL")
+    world.run_checks()
+    rows = read_json(world.publish(), "reconciliation.json")["data"]
+    assert {row["run_id"] for row in rows} == {run_id}
+    assert all(row["in_latest_run"] is True for row in rows)
+
+
+@pytest.mark.parametrize("other", ["elsewhere", None], ids=["two_runs", "run_and_none"])
+def test_a_chain_row_matching_two_differently_filed_rows_has_no_run(world, other):
+    world.raw_sql(
+        "INSERT INTO reconciliations SELECT checked_at, chain, block_number, minted, burned, "
+        "onchain_supply, matched, ? FROM reconciliations WHERE chain = 'base'",
+        [other],
+    )
+    world.run_checks()
+    with pytest.raises(PublishRefused, match=r"not from run .* for: base$"):
+        world.publish()
+
+
+def test_a_chain_row_with_no_raw_row_has_no_run(world):
+    world.raw_sql("DELETE FROM reconciliations WHERE chain = 'ethereum'")
+    world.run_checks()
+    with pytest.raises(PublishRefused, match=r"not from run .* for: ethereum$"):
+        world.publish()
+
+
+def test_publish_opens_the_raw_store_read_only(world, monkeypatch):
+    opened = []
+
+    def spy(path, **kwargs):
+        opened.append(kwargs)
+        return Store(path, **kwargs)
+
+    world.run_checks()
+    monkeypatch.setattr(publisher, "Store", spy)
+    world.publish()
+    assert opened == [{"read_only": True}]
+
+
+def test_publish_refuses_pending_migrations_without_applying_them(published):
+    world, folder = published
+    world.raw_sql("DELETE FROM schema_migrations WHERE version = 1")
+    with pytest.raises(publisher.PublishUnavailable, match="ousd migrate"):
+        world.publish(now=LATER)
+    # A schema to bring up to date says nothing about the data.
+    assert read_json(folder, "manifest.json")["stale"] is False
+    with duckdb.connect(str(world.raw), read_only=True) as raw:
+        versions = raw.execute("SELECT version FROM schema_migrations").fetchall()
+    assert (1,) not in versions
 
 
 @pytest.mark.parametrize("fingerprints", [("a", None), ("a", "b")], ids=["missing", "two"])
@@ -1775,12 +1841,12 @@ def commands(world, monkeypatch):
     monkeypatch.setenv("OUSD_DB_PATH", str(world.raw))
     monkeypatch.setenv("OUSD_MARTS_DB_PATH", str(world.marts_file))
     monkeypatch.setenv("OUSD_PUBLISHED_DIR", str(world.out))
-    real_check, real_publish = cli.run_checks, cli.publish
+    real_check, real_publish = cli.evaluate_checks, cli.publish
 
-    def run_checks(store, marts, run_id, allow_partial):
-        return real_check(store, marts, run_id, allow_partial, NOW, world.sources)
+    def evaluate_checks(store, marts, allow_partial):
+        return real_check(store, marts, allow_partial, NOW, world.sources)
 
-    monkeypatch.setattr(cli, "run_checks", run_checks)
+    monkeypatch.setattr(cli, "evaluate_checks", evaluate_checks)
     monkeypatch.setattr(cli, "publish", bind(real_publish, now=NOW, sources=world.sources))
     return world
 
@@ -1836,18 +1902,60 @@ def test_nothing_in_the_environment_can_turn_a_release_into_a_preview(commands, 
 
 
 def test_a_partial_check_does_not_end_in_passed(partial, monkeypatch, capsys):
-    real = cli.run_checks
+    real = cli.evaluate_checks
     monkeypatch.setenv("OUSD_DB_PATH", str(partial.raw))
     monkeypatch.setenv("OUSD_MARTS_DB_PATH", str(partial.marts_file))
 
-    def run_checks(store, marts, run_id, allow_partial):
-        return real(store, marts, run_id, allow_partial, NOW, partial.sources)
+    def evaluate_checks(store, marts, allow_partial):
+        return real(store, marts, allow_partial, NOW, partial.sources)
 
-    monkeypatch.setattr(cli, "run_checks", run_checks)
+    monkeypatch.setattr(cli, "evaluate_checks", evaluate_checks)
     assert cli.main(["check", "--run-id", RUN, "--allow-partial"]) == 0
     printed = capsys.readouterr().out
     assert "RESULT: LOCAL PREVIEW ONLY, NOT RECONCILED" in printed
     assert "RESULT: PASSED" not in printed
+
+
+def test_check_evaluates_read_only_then_records_with_one_writer_open(commands, monkeypatch):
+    opened, real_evaluate = [], cli.evaluate_checks
+
+    def spy(path, **kwargs):
+        opened.append(kwargs)
+        return Store(path, **kwargs)
+
+    def evaluate(store, marts, allow_partial):
+        with pytest.raises(duckdb.InvalidInputException, match="read-only"):
+            store.db.execute("DELETE FROM check_results")
+        return real_evaluate(store, marts, allow_partial)
+
+    monkeypatch.setattr(cli, "Store", spy)
+    monkeypatch.setattr(cli, "evaluate_checks", evaluate)
+    assert cli.main(["check", "--run-id", RUN]) == 0
+    assert opened == [{"read_only": True}, {}]
+    with commands.store() as store:
+        assert {check.status for check in store.check_results(RUN)} == {"passed"}
+
+
+def test_pending_migrations_exit_two_from_both_commands_and_record_nothing(commands, capsys):
+    commands.raw_sql("DELETE FROM schema_migrations WHERE version = 1")
+    assert cli.main(["check", "--run-id", RUN]) == 2
+    assert cli.main(["publish", "--run-id", RUN]) == 2
+    assert capsys.readouterr().err.count("ousd migrate") == 2
+    with duckdb.connect(str(commands.raw), read_only=True) as raw:
+        assert raw.execute("SELECT count(*) FROM check_results").fetchone() == (0,)
+
+
+def test_check_in_use_when_it_comes_to_record_exits_two(commands, monkeypatch, capsys):
+    real = cli.Store
+
+    def held_for_writers(path, **kwargs):
+        if not kwargs.get("read_only"):
+            raise duckdb.IOException("Could not set lock on file")
+        return real(path, **kwargs)
+
+    monkeypatch.setattr(cli, "Store", held_for_writers)
+    assert cli.main(["check", "--run-id", RUN]) == 2
+    assert "in use" in capsys.readouterr().err
 
 
 def test_a_database_in_use_exits_two_from_both_commands(commands, monkeypatch, capsys):

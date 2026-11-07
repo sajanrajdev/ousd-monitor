@@ -41,6 +41,7 @@ from ousd.checks import (
     utc_moment,
     utc_text,
 )
+from ousd.migrations import SchemaOutOfDate
 from ousd.solana import OUSD_MINT
 from ousd.store import LatestReconciliation, Store, StoredCheck
 from ousd.verdict import ChainFigures, VerdictInputs, build_verdict, known_limits
@@ -255,8 +256,31 @@ def _chain_role_rows(tables: Mapping[str, Sequence[Mapping[str, Any]]]) -> list[
 
 
 def _run_of_chain_row(store: Store, row: Mapping[str, Any]) -> str | None:
-    """`reconciliations` records no run, so a chain row's run is the finished one that recorded its
-    figures in a supply check."""
+    """The run its `reconciliations` row was filed under. Only one that predates run_id falls back
+    to the finished run that recorded its figures in a supply check. None when unclear."""
+    recorded: set[str | None] = {
+        run_id
+        for (run_id,) in store.db.execute(
+            """
+            SELECT run_id FROM reconciliations
+            WHERE chain = ? AND block_number = ? AND checked_at = ?
+              AND onchain_supply = CAST(? AS HUGEINT) AND minted - burned = CAST(? AS HUGEINT)
+            """,
+            [
+                row["subject"],
+                row["block_number"],
+                row["checked_at"],
+                str(row["reference_value"]),
+                str(row["event_value"]),
+            ],
+        ).fetchall()
+    }
+    if len(recorded) != 1:
+        # No such row, or rows filed under different runs: no run can be named.
+        return None
+    (run_id,) = recorded
+    if run_id is not None:
+        return run_id
     found = store.db.execute(
         """
         SELECT c.run_id
@@ -1106,15 +1130,18 @@ def _read_and_build(
     allow_partial: bool,
     sources: Sources,
 ) -> tuple[str, dict[str, bytes]]:
-    # Store would create a missing file, and an empty database is not a refusal to explain.
+    # A missing file would read as in use, and that is not the refusal to explain.
     if not raw_path.is_file():
         raise PublishRefused("the raw database does not exist")
     if not marts_path.is_file():
         raise PublishRefused("the marts database does not exist, so run dbt first")
     try:
-        store = Store(raw_path)
+        store = Store(raw_path, read_only=True)
     except duckdb.IOException as exc:
         raise PublishUnavailable("the raw database is in use by another process") from exc
+    except SchemaOutOfDate as exc:
+        # Says nothing about the data, so the last good dataset isn't called stale.
+        raise PublishUnavailable(str(exc)) from exc
     try:
         marts = duckdb.connect(str(marts_path), read_only=True)
     except duckdb.IOException as exc:

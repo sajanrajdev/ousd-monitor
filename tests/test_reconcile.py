@@ -1257,6 +1257,25 @@ def test_a_finished_run_records_its_status_exit_code_and_a_default_check(store):
     assert result.run_id == store.latest_reconciliation().run_id
 
 
+def test_every_reconciliation_in_a_run_is_filed_under_that_run(store):
+    first, _ = run_it(store, four_probes(store, tempo=[Drift(1)]))
+    second, _ = run_it(store, four_probes(store))
+
+    by_run = store.db.execute(
+        "SELECT run_id, count(*) FROM reconciliations GROUP BY run_id ORDER BY count(*) DESC"
+    ).fetchall()
+    # The first run's tempo mismatch was read twice.
+    chains = len(REQUIRED_CHAINS)
+    assert by_run == [(first.run_id, chains + 1), (second.run_id, chains)]
+
+
+def test_a_reconciliation_outside_a_run_has_no_run(store):
+    chain, rpc = synced_chain(store)
+    reconcile_chain(chain, rpc, store)
+
+    assert store.db.execute("SELECT run_id FROM reconciliations").fetchall() == [(None,)]
+
+
 def test_a_mismatch_row_keeps_the_chain_figure_and_the_event_figure_apart(store):
     run_it(store, four_probes(store, tempo=[Drift(1), Drift(2)]))
 

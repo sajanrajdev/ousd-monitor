@@ -11,113 +11,9 @@ from typing import Any, Literal
 
 import duckdb
 
+from ousd import migrations
 from ousd.chains import REQUIRED_CHAINS
 from ousd.decode import ZERO_ADDRESS, Transfer
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS transfers (
-    chain VARCHAR NOT NULL,
-    block_number BIGINT NOT NULL,
-    log_index INTEGER NOT NULL,
-    block_hash VARCHAR,
-    block_timestamp BIGINT NOT NULL,
-    tx_hash VARCHAR NOT NULL,
-    from_address VARCHAR NOT NULL,
-    to_address VARCHAR NOT NULL,
-    value HUGEINT NOT NULL,
-    PRIMARY KEY (chain, block_number, log_index)
-);
-CREATE TABLE IF NOT EXISTS blocks (
-    chain VARCHAR NOT NULL,
-    block_number BIGINT NOT NULL,
-    block_hash VARCHAR NOT NULL,
-    PRIMARY KEY (chain, block_number)
-);
-CREATE TABLE IF NOT EXISTS sync_state (
-    chain VARCHAR PRIMARY KEY,
-    synced_through BIGINT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS reconciliations (
-    checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    chain VARCHAR NOT NULL,
-    block_number BIGINT NOT NULL,
-    minted HUGEINT NOT NULL,
-    burned HUGEINT NOT NULL,
-    onchain_supply HUGEINT NOT NULL,
-    matched BOOLEAN NOT NULL
-);
-CREATE TABLE IF NOT EXISTS bridge_comparisons (
-    checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    chains_included VARCHAR NOT NULL,
-    chains_missing VARCHAR NOT NULL,
-    chains_total HUGEINT NOT NULL,
-    bridge_total HUGEINT NOT NULL,
-    tolerance HUGEINT NOT NULL,
-    passed BOOLEAN NOT NULL
-);
-CREATE TABLE IF NOT EXISTS reconciliation_runs (
-    run_id VARCHAR PRIMARY KEY,
-    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    finished_at TIMESTAMPTZ,  -- Null means unfinished, and is the only marker of that.
-    scope VARCHAR NOT NULL,
-    status VARCHAR,
-    exit_code INTEGER
-);
-CREATE TABLE IF NOT EXISTS reconciliation_checks (
-    run_id VARCHAR NOT NULL,
-    check_name VARCHAR NOT NULL,
-    subject VARCHAR NOT NULL,
-    attempt INTEGER NOT NULL,
-    status VARCHAR NOT NULL,
-    reason VARCHAR,
-    pin_height BIGINT,
-    pin_hash VARCHAR,
-    transfer_count BIGINT,
-    reference_value HUGEINT,
-    observed_value HUGEINT,
-    detail VARCHAR NOT NULL,
-    recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (run_id, check_name, subject, attempt)
-);
-CREATE TABLE IF NOT EXISTS balance_samples (
-    run_id VARCHAR NOT NULL,
-    chain VARCHAR NOT NULL,
-    attempt INTEGER NOT NULL,
-    address VARCHAR NOT NULL,
-    stratum VARCHAR NOT NULL,
-    seed VARCHAR NOT NULL,
-    height BIGINT NOT NULL,
-    model_balance HUGEINT NOT NULL,
-    observed_balance HUGEINT NOT NULL,
-    PRIMARY KEY (run_id, chain, attempt, address)
-);
-CREATE TABLE IF NOT EXISTS transfer_group_audits (
-    chain VARCHAR NOT NULL,
-    tx_hash VARCHAR NOT NULL,
-    block_number BIGINT NOT NULL,
-    status VARCHAR NOT NULL,
-    proof_source VARCHAR NOT NULL,
-    stored_positions INTEGER[] NOT NULL,
-    proven_positions INTEGER[] NOT NULL,
-    run_id VARCHAR,
-    audited_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (chain, tx_hash)
-);
-CREATE TABLE IF NOT EXISTS check_results (
-    run_id VARCHAR NOT NULL,
-    check_name VARCHAR NOT NULL,
-    status VARCHAR NOT NULL,  -- passed, failed, skipped
-    blocking BOOLEAN NOT NULL,
-    detail VARCHAR NOT NULL,
-    checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    data_fingerprint VARCHAR,  -- What the checks saw, so publish can refuse data that has moved.
-    PRIMARY KEY (run_id, check_name)
-);
-"""
-
-# Applied after SCHEMA, so a bridge_comparisons table made with its seven columns is upgraded.
-# Safe to run on every open: it adds nothing when the column is already there.
-MIGRATIONS = ("ALTER TABLE bridge_comparisons ADD COLUMN IF NOT EXISTS run_id VARCHAR",)
 
 Status = Literal["pass", "fail", "unchecked"]
 CHECK_NAMES = ("chain_supply", "sampled_balances", "balance_census", "same_looking", "bridge")
@@ -215,13 +111,24 @@ def _text(value: int | None) -> str | None:
 
 
 class Store:
-    def __init__(self, path: str | Path = ":memory:") -> None:
-        if path != ":memory:":
+    def __init__(self, path: str | Path = ":memory:", *, read_only: bool = False) -> None:
+        """A writer applies any pending migrations. A reader runs no DDL and takes no writer lock,
+        so it refuses a database with migrations pending, and a missing file."""
+        if read_only and path == ":memory:":
+            raise ValueError("an in-memory database can't be opened read-only")
+        if path != ":memory:" and not read_only:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.db = duckdb.connect(str(path))
-        self.db.execute(SCHEMA)
-        for migration in MIGRATIONS:
-            self.db.execute(migration)
+        self.db = duckdb.connect(str(path), read_only=read_only)
+        # The open run, which every reconciliation recorded on this connection belongs to.
+        self._run_id: str | None = None
+        try:
+            if read_only:
+                migrations.refuse_pending(self.db)
+            else:
+                migrations.migrate(self.db)
+        except BaseException:
+            self.db.close()
+            raise
 
     def close(self) -> None:
         self.db.close()
@@ -403,13 +310,15 @@ class Store:
     def record_reconciliation(
         self, chain: str, block_number: int, minted: int, burned: int, onchain: int, matched: bool
     ) -> None:
+        """Filed under the open run, so publish can tell which run proved a figure. Outside a run,
+        such as a test's direct call, run_id is NULL."""
         self.db.execute(
             """
             INSERT INTO reconciliations
-                (chain, block_number, minted, burned, onchain_supply, matched)
-            VALUES (?, ?, CAST(? AS HUGEINT), CAST(? AS HUGEINT), CAST(? AS HUGEINT), ?)
+                (chain, block_number, minted, burned, onchain_supply, matched, run_id)
+            VALUES (?, ?, CAST(? AS HUGEINT), CAST(? AS HUGEINT), CAST(? AS HUGEINT), ?, ?)
             """,
-            [chain, block_number, str(minted), str(burned), str(onchain), matched],
+            [chain, block_number, str(minted), str(burned), str(onchain), matched, self._run_id],
         )
 
     def balances_at(
@@ -594,6 +503,7 @@ class Store:
         self.db.execute(
             "INSERT INTO reconciliation_runs (run_id, scope) VALUES (?, ?)", [run_id, scope]
         )
+        self._run_id = run_id
         return run_id
 
     def finish_run(self, run_id: str, status: Status, exit_code: int) -> None:
@@ -608,6 +518,8 @@ class Store:
         ).fetchall()
         if not updated:
             raise KeyError(f"no unfinished run {run_id}")
+        if self._run_id == run_id:
+            self._run_id = None
 
     def record_check(
         self,

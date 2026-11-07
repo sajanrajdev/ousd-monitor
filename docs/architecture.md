@@ -87,6 +87,15 @@ Provider differences stay inside `sources`. Everything after that works on norma
 - **Time is UTC.** Day 0 is 2026-09-30, but ingest from the first mint.
 - **Marts live in their own file.** dbt attaches `data/ousd.duckdb` read-only and writes `data/marts.duckdb`, so modeling can't change raw data.
 
+## Schema changes
+
+- **Every change to the raw store's schema is a new migration** at the end of `MIGRATIONS` in `pipeline/ousd/migrations.py`, numbered one above the last. A migration that has shipped is never edited, because a database that applied it would never see the edit.
+- `schema_migrations` records each applied version, its name and when. Version 0 is the baseline, the schema as it stood before versioning: a database without the table is brought to it in place, adding only what it lacks.
+- A writer applies whatever is pending in one transaction when it opens the store. With nothing pending it writes nothing. A schema newer than the code is refused.
+- Readers (`Store(path, read_only=True)`) run no DDL and take no writer lock. With migrations pending they refuse, and say to run `ousd migrate` or any writer first.
+- Keep migrations additive where tables are large. `ALTER TABLE ... ADD COLUMN` is cheap in DuckDB; never rewrite `transfers`, which holds millions of rows.
+- Rows from before a column existed keep NULL, and the code that reads the column says how it treats them. `reconciliations.run_id` (migration 1) is NULL on older rows, so publish matches their figures to a finished run's supply check, as it did before the column existed.
+
 ## Blocking checks
 
 Publishing stops if any of these fail:
@@ -172,6 +181,6 @@ The pipeline commands:
 | `make run` | `ousd_daily` in one process: ingest, reconcile, dbt, checks, publish |
 | `make dagster-dev` | The Dagster UI, where the schedule and failure sensor can be switched on |
 
-Run one writer at a time: each of these writes to `data/ousd.duckdb`, and the second to start exits 2 with "database in use".
+Run one writer at a time: each of these writes to `data/ousd.duckdb`, and the second to start exits 2 with "database in use". `ousd publish` only reads it. `ousd check` reads it, then holds the writer lock only for the one write that records its results. `ousd migrate` applies pending schema migrations without a key.
 
 If Node or npm is missing or out of range, the site's steps fail with a message saying what to install. They never skip, and they never load `.env`.
