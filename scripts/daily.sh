@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The daily run, as the hosted service starts it: the pipeline, then the release, then a Vercel
-# preview of the verified release folder. Any failure exits non-zero, and nothing after a failed
-# step runs, so a failed check deploys nothing and the live site keeps the last good data.
+# preview of the verified release folder, then that preview promoted to production. Any failure
+# exits non-zero, and nothing after a failed step runs, so a failed check deploys nothing and the
+# live site keeps the last good data.
 #
 #   scripts/daily.sh
 #
@@ -9,10 +10,12 @@
 #   make run          everything but the Vercel variables; its dbt build gets an allowlist
 #   make web-release  an allowlist, so no RPC variable reaches the site build
 #   vercel deploy     the same allowlist plus the three Vercel variables
+#   vercel promote    the same as vercel deploy
 #
 # OUSD_DEPLOY=0, or no VERCEL_TOKEN off Railway, builds and verifies the release without deploying.
 # On Railway a missing token fails the run. The deploy is a preview: a deployment that lands in
-# production fails the run. It never prints a variable's value.
+# production fails the run, so production only ever comes from promoting a preview that is ready.
+# OUSD_PROMOTE=0 stops at the preview. It never prints a variable's value.
 #
 # A failure the pipeline didn't alert on raises an alert (`ousd alert`), an unexpected exit
 # included, and only a run that got all the way through pings the heartbeat (`ousd heartbeat`).
@@ -116,6 +119,10 @@ case "${OUSD_DEPLOY:-1}" in
   0 | 1) ;;
   *) alert_and_fail config "OUSD_DEPLOY must be 0 or 1." ;;
 esac
+case "${OUSD_PROMOTE:-1}" in
+  0 | 1) ;;
+  *) alert_and_fail config "OUSD_PROMOTE must be 0 or 1." ;;
+esac
 # The site reads data/published/latest, so the pipeline must publish there.
 for name in OUSD_PUBLISHED_DIR OUSD_DATASET_DIR; do
   [ -z "${!name+x}" ] || alert_and_fail config "$name is set. The daily run publishes and releases the default path only."
@@ -192,4 +199,16 @@ url="$(printf '%s' "$result" | node "$ROOT/scripts/deploy-result.mjs")" ||
 [ "$status" -eq 0 ] || alert_and_fail deploy "vercel deploy exited $status."
 
 say "Preview deployed: $url"
+
+if [ "${OUSD_PROMOTE:-1}" = "0" ]; then
+  say "Promotion skipped: OUSD_PROMOTE=0. Production keeps its current deployment."
+  finish
+fi
+
+say "Promote: vercel promote, as every check and the release gate passed."
+with_only "${SAFE_VARS[*]} ${VERCEL_VARS[*]} VERCEL_TELEMETRY_DISABLED NO_UPDATE_NOTIFIER" \
+  vercel promote "$url" --yes --non-interactive --timeout 5m ||
+  alert_and_fail deploy "vercel promote failed, so production keeps the last good release."
+
+say "Promoted to production: $url"
 finish
