@@ -70,7 +70,15 @@ MAX_POSITION = 1 << POSITION_BITS
 
 # Plain `transfer` is left out on purpose: its parsed info names no mint, so a balance it moves
 # stops at the invariant. The plain `mintTo` and `burn` info does name the mint.
-_MOVEMENTS = {"mintToChecked", "burnChecked", "transferChecked", "mintTo", "burn"}
+# `transferCheckedWithFee` credits the destination net of its fee, so a non-zero fee stops there.
+_MOVEMENTS = {
+    "mintToChecked",
+    "burnChecked",
+    "transferChecked",
+    "transferCheckedWithFee",
+    "mintTo",
+    "burn",
+}
 _PLAIN_AMOUNT = {"mintTo", "burn"}
 _OWNER_INITIALIZERS = {"initializeAccount", "initializeAccount2", "initializeAccount3"}
 # The only confidential instructions that name the mint and move nothing.

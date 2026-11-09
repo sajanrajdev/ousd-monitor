@@ -57,6 +57,27 @@ def test_failed_transaction_has_no_rows_though_it_records_an_ousd_instruction():
     assert decode_transaction(load("failed_inner_move"), MINT) == []
 
 
+def test_transfer_checked_with_fee_and_no_fee_is_a_transfer():
+    rows = decode_transaction(load("transfer_checked_with_fee"), MINT)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.block_number == 467245185
+    assert row.from_address.startswith("G2UsfmHb")
+    assert row.to_address.startswith("32aBR2Ee")
+    assert row.value == 12000000
+
+
+def test_transfer_checked_with_a_fee_stops_at_the_invariant():
+    tx = load("transfer_checked_with_fee")
+    for balance in tx["meta"]["postTokenBalances"]:
+        if balance["uiTokenAmount"]["amount"] == "12000000":
+            balance["uiTokenAmount"]["amount"] = "11999999"
+
+    with pytest.raises(SolanaDataError, match="changed by 11999999, decoded 12000000"):
+        decode_transaction(tx, MINT)
+
+
 def test_version_1_gives_three_rows_in_execution_order():
     rows = decode_transaction(load("version_1"), MINT)
 
