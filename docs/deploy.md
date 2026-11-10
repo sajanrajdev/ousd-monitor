@@ -2,7 +2,7 @@
 
 This is the runbook for the current host, Railway. Running the pipeline, alerts and backups are in [operations](operations.md).
 
-How the hosted run is set up: one Railway cron service that runs the pipeline once a day and deploys a Vercel **preview** of the verified site. Production is promoted by hand, never by this run.
+How the hosted run is set up: one Railway cron service that runs the pipeline once a day, deploys a Vercel **preview** of the verified site, and promotes that preview to production once every step before it has passed.
 
 ## What runs
 
@@ -11,6 +11,7 @@ How the hosted run is set up: one Railway cron service that runs the pipeline on
 1. `make run`, the whole pipeline. Its environment has the Vercel variables removed, and its dbt build gets an allowlist: no RPC, alert, heartbeat, backup or Vercel variable reaches dbt.
 2. On success, `make web-release`, with an allowlisted environment: no RPC variable reaches the site build. It refuses anything that isn't release grade, and any warning that isn't acknowledged.
 3. On success, the verified `web/.release/latest` is copied into `.vercel/output/static`, and `web/scripts/vercel-config.ts` writes its `config.json` with the security headers for that folder (below). Then `vercel deploy --prebuilt --non-interactive` uploads it as a preview. The CLI gets the same allowlist plus the three Vercel variables. It never gets `--prod`, and the token is never on a command line. The CLI prints a JSON result; `scripts/deploy-result.mjs` reads it, logs the preview URL, logs Vercel's reason on a failure, and **fails the run if the deployment landed in production** (which a new project's first deploy does).
+4. On success, `vercel promote` makes that preview production, with the same allowlist. A failed promotion raises an alert, sends no heartbeat, and leaves production on the last good release.
 
 Any failure exits non-zero and stops there: a failed run releases and deploys nothing, and the live site keeps the last good data. A run that passes but publishes no new dataset also stops before the release. The run refuses to start if `OUSD_PUBLISHED_DIR` or `OUSD_DATASET_DIR` is set, as the site only reads the default path.
 
@@ -72,6 +73,7 @@ Names only. Values go into the service's variables in Railway and nowhere else. 
 | `VERCEL_ORG_ID` | Yes, to deploy | The Vercel team or account ID |
 | `VERCEL_PROJECT_ID` | Yes, to deploy | The Vercel project ID |
 | `OUSD_DEPLOY` | Optional | `0` builds the release without deploying. Only `0` or `1` |
+| `OUSD_PROMOTE` | Optional | `0` deploys the preview without promoting it to production. Only `0` or `1` |
 | `OUSD_ALERT_WEBHOOK_URL` | Optional, secret | Where each failure is posted as JSON. Unset sends nothing |
 | `OUSD_HEARTBEAT_URL` | Optional, secret | Pinged after a fully successful run, for a dead-man check. Unset sends nothing |
 | `OUSD_MAX_RUNTIME_SECONDS` | Optional | The whole pipeline run's limit. Default 10800 |
@@ -87,7 +89,7 @@ Leave `OUSD_DB_PATH`, `OUSD_MARTS_DB_PATH`, `OUSD_PUBLISHED_DIR` and `OUSD_DATAS
 
 Create the project, then turn on Vercel Authentication for **All Deployments** before the first deploy: a new project's first deployment is always production, even without `--prod`. The CLI reads `VERCEL_TOKEN`, `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` from the environment, so no linked folder is needed. It doesn't create a missing project in non-interactive mode.
 
-To promote a reviewed preview once its numbers and wording have been checked: `vercel promote <preview-url>`.
+The run promotes each preview that passes. With `OUSD_PROMOTE=0` it stops at the preview, and a reviewed preview can be promoted by hand: `vercel promote <preview-url>`.
 
 ## First seeding
 

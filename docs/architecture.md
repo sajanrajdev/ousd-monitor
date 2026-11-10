@@ -21,7 +21,7 @@ Prefer a small system that's clearly correct over a big one that looks impressiv
 | Modeling | dbt with dbt-duckdb | Standard for analytics. Tests and lineage come with it |
 | Orchestration | Dagster assets, with asset checks | Asset model suits data work. Checks can block publishing |
 | Site | Static Next.js with TypeScript, Tailwind and Recharts, on Vercel | No database calls from visitors |
-| Hosting | One Railway cron service runs the daily job and deploys a prebuilt Vercel preview; production is promoted by hand | One writer, one volume, nothing listening. See [deploying the daily run](deploy.md) |
+| Hosting | One Railway cron service runs the daily job, deploys a prebuilt Vercel preview and promotes it once every step has passed | One writer, one volume, nothing listening. See [deploying the daily run](deploy.md) |
 | Site packages | pnpm, always through `npx` at the version in `web/package.json`'s `packageManager` | Needs only Node and npm, which CI already has. [Operations](operations.md#the-site) says why not a bare `pnpm` |
 | Quality | ruff, mypy, pytest, sqlfluff, ESLint, Prettier, Vitest | Enforced by `make check` |
 

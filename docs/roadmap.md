@@ -8,7 +8,7 @@ What is built, what comes next and what is known to be missing. Requirements are
 - **Models and checks.** dbt models (supply journey, exchange holdings, activity waterfall and KPIs, chain roles and reconciliation) with tests, contracts and docs. Seven blocking checks stop publishing when any fails, and the last published dataset is marked stale.
 - **Orchestration and operations.** One daily Dagster job, failure alerts and a success heartbeat, run limits, schema migrations, and manual backup and restore. See [operations](operations.md).
 - **The site.** A static dashboard with the verdict, trust strip, supply journey (view A), real activity (view B), chain roles (view E) and a methodology page. It builds from a published dataset and passes the browser checks at phone and desktop widths.
-- **Hosting.** The daily run is live on Railway: a cron job at 06:00 UTC runs the pipeline, builds a verified release and deploys a Vercel preview. Production is promoted by hand. See [deploying the daily run](deploy.md).
+- **Hosting.** The daily run is live on Railway: a cron job at 06:00 UTC runs the pipeline, builds a verified release, deploys a Vercel preview and promotes it to production when every step has passed. See [deploying the daily run](deploy.md).
 
 ## Next
 
