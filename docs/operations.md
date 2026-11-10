@@ -136,7 +136,7 @@ make web-shots     # local screenshots of the samples
 
 ## The hosted daily run
 
-One Railway cron service runs the pipeline at 06:00 UTC and deploys a Vercel preview of the verified site. Production is promoted by hand. The service settings, variables, first seeding and a local test are in [deploying the daily run](deploy.md).
+One Railway cron service runs the pipeline at 06:00 UTC deploys a Vercel preview of the verified site, and promotes it to production when every step has passed. The service settings, variables, first seeding and a local test are in [deploying the daily run](deploy.md).
 
 ## Hosting hardening
 

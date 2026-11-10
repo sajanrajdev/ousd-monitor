@@ -18,7 +18,10 @@ select
         when t.from_address = '{{ var("zero_address") }}' then 'mint'
         when t.to_address = '{{ var("zero_address") }}' then 'burn'
         when
-            t.chain = 'tempo' and t.to_address = '{{ var("tempo_fee_manager") }}' and t.rn_desc = 1
+            t.chain = 'tempo'
+            and t.to_address = '{{ var("tempo_fee_manager") }}'
+            and t.rn_desc = 1
+            and t.value <= {{ var("tempo_max_fee_base_units") }}
             then 'fee'
         when
             t.chain = 'tempo' and '{{ var("tempo_fee_manager") }}' in (t.from_address, t.to_address)
