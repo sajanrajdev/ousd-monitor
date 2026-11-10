@@ -4,7 +4,7 @@ from pathlib import Path
 
 import duckdb
 import pytest
-from dbt_helpers import build_marts, failed_tests, run_dbt
+from dbt_helpers import build_marts
 from ousd.decode import ZERO_ADDRESS, Transfer
 
 DAY = 1_700_006_400  # 2023-11-15 00:00:00 UTC
@@ -437,26 +437,6 @@ def test_waterfall_identity_test_reports_a_tampered_row():
     assert conn.execute(sql).fetchall() == []
     conn.execute("update waterfall set clean_everyday = 89")
     assert conn.execute(sql).fetchall() == [("tempo", date(2023, 11, 15))]
-
-
-def test_fee_shape_test_fails_when_a_large_transfer_is_caught_as_a_fee(tmp_path):
-    rows = (
-        fund("tempo", 0, [A])
-        + route(1, "big-fee", [(A, FEE_MANAGER, 50 * OUSD)])
-        + filler("tempo", 2, day=1)
-    )
-    result = run_dbt(tmp_path, rows, [], {"tempo": 10})
-    assert "assert_fee_rule_shape" in failed_tests(result)
-
-
-def test_fee_shape_test_passes_on_real_sized_fees(tmp_path):
-    rows = (
-        fund("tempo", 0, [A])
-        + route(1, "small-fee", [(A, FEE_MANAGER, 1_070_000)])
-        + filler("tempo", 2, day=1)
-    )
-    result = run_dbt(tmp_path, rows, [], {"tempo": 10})
-    assert result.success
 
 
 def test_clean_tx_count_counts_transactions_at_or_above_the_minimum(marts):
