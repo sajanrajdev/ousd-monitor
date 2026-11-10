@@ -28,6 +28,8 @@ unit_tests:
           - {chain: tempo, tx_hash: t_issuer_fee, log_index: 0, from_address: "0x1551", to_address: "0xfeec000000000000000000000000000000000000", value: 1}
           - {chain: tempo, tx_hash: t_manager_issuer, log_index: 0, from_address: "0xfeec000000000000000000000000000000000000", to_address: "0x1551", value: 5}
           - {chain: tempo, tx_hash: t_manager_issuer, log_index: 1, from_address: "0xa", to_address: "0xb", value: 10}
+          - {chain: tempo, tx_hash: t_fee_at_cap, log_index: 0, from_address: "0xa", to_address: "0xfeec000000000000000000000000000000000000", value: 10000000}
+          - {chain: tempo, tx_hash: t_deposit, log_index: 0, from_address: "0xa", to_address: "0xfeec000000000000000000000000000000000000", value: 10000001}
           - {chain: ethereum, tx_hash: e_mint_issuer, log_index: 0, from_address: "0x0000000000000000000000000000000000000000", to_address: "0x1551", value: 10}
           - {chain: ethereum, tx_hash: e_route, log_index: 0, from_address: "0x2001", to_address: "0x2002", value: 10}
       - input: ref('stg_labels')
@@ -54,6 +56,8 @@ unit_tests:
         - {chain: tempo, tx_hash: t_issuer_fee, log_index: 0, transfer_class: fee}
         - {chain: tempo, tx_hash: t_manager_issuer, log_index: 0, transfer_class: fee_liquidity}
         - {chain: tempo, tx_hash: t_manager_issuer, log_index: 1, transfer_class: remaining}
+        - {chain: tempo, tx_hash: t_fee_at_cap, log_index: 0, transfer_class: fee}
+        - {chain: tempo, tx_hash: t_deposit, log_index: 0, transfer_class: fee_liquidity}
         - {chain: ethereum, tx_hash: e_mint_issuer, log_index: 0, transfer_class: mint}
         - {chain: ethereum, tx_hash: e_route, log_index: 0, transfer_class: issuer_flow}
 

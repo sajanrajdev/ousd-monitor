@@ -103,7 +103,7 @@ Net flow to and from DEX and lending contracts, shown separately and including s
 
 ### Tempo fee
 
-A transfer to Tempo's fee manager that is the last OUSD transfer in its transaction. Other transfers to or from the fee manager are fee liquidity. Fees make up many transfers and almost no value, so leaving them in would overstate activity.
+A transfer to Tempo's fee manager that is the last OUSD transfer in its transaction and no more than 10 OUSD. The largest real fee seen is 1.07 OUSD, so a larger transfer is a liquidity deposit. Other transfers to or from the fee manager are fee liquidity too. Fees make up many transfers and almost no value, so leaving them in would overstate activity.
 
 ### Velocity
 
