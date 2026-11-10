@@ -58,10 +58,6 @@ FAKE_VERCEL = """#!/bin/sh
 FAKES="$(pwd)/fakes"
 env | cut -d= -f1 | sort > "$FAKES/vercel.env"
 printf '%s\\n' "vercel $*" >> "$FAKES/calls"
-if [ "$1" = promote ]; then
-  [ -f "$FAKES/promote-fails" ] && exit 1
-  exit 0
-fi
 for arg in "$@"; do
   case "$arg" in --cwd) next=1 ;; *) [ -n "$next" ] && cwd="$arg"; next= ;; esac
 done
@@ -74,6 +70,16 @@ target=preview
 [ -f "$FAKES/deploy-production" ] && target=production
 printf '{"status":"ok","deployment":{"url":"https://ousd-monitor-abc123.vercel.app",'
 printf '"target":"%s","readyState":"READY"},"message":"ready"}\n' "$target"
+"""
+
+
+# Stands in for scripts/promote.mjs, which calls the Vercel API.
+FAKE_PROMOTE = """import { appendFileSync, existsSync, writeFileSync } from "node:fs";
+const fakes = `${process.cwd()}/fakes`;
+writeFileSync(`${fakes}/promote.env`, Object.keys(process.env).sort().join("\\n") + "\\n");
+appendFileSync(`${fakes}/calls`, `promote ${process.argv.slice(2).join(" ")}\\n`);
+if (existsSync(`${fakes}/promote-fails`)) process.exit(1);
+console.log("https://ousd-monitor-prod789.vercel.app");
 """
 
 
@@ -104,6 +110,7 @@ def root(tmp_path: Path, shell: str) -> Path:
     (tmp_path / "scripts").mkdir()
     for name in ("daily.sh", "deploy-result.mjs"):
         shutil.copy(REPO / "scripts" / name, tmp_path / "scripts" / name)
+    (tmp_path / "scripts" / "promote.mjs").write_text(FAKE_PROMOTE)
     (tmp_path / "web" / "scripts").mkdir(parents=True)
     for name in ("vercel-config.mjs", "vercel-config.ts"):
         shutil.copy(REPO / "web" / "scripts" / name, tmp_path / "web" / "scripts" / name)
@@ -253,22 +260,22 @@ def test_a_deploy_that_lands_in_production_fails_loudly(root):
 def test_a_passing_run_promotes_the_preview_it_deployed(root):
     result = daily(root)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert calls(root)[-1] == (
-        "vercel promote https://ousd-monitor-abc123.vercel.app --yes --non-interactive --timeout 5m"
-    )
-    assert "Promoted to production: https://ousd-monitor-abc123.vercel.app" in result.stdout
+    assert calls(root)[-1] == "promote https://ousd-monitor-abc123.vercel.app"
+    assert "Promoted to production: https://ousd-monitor-prod789.vercel.app" in result.stdout
+    assert set(VERCEL) <= names(root, "promote")
+    assert not names(root, "promote") & {*RPC, "UNLISTED"}
 
 
 def test_a_failed_check_never_promotes(root):
     (root / "fakes" / "release-fails").touch()
     assert daily(root).returncode != 0
-    assert not [call for call in calls(root) if call.startswith("vercel promote")]
+    assert not [call for call in calls(root) if call.startswith("promote")]
 
 
 def test_a_deploy_that_lands_in_production_is_not_promoted(root):
     (root / "fakes" / "deploy-production").touch()
     assert daily(root).returncode != 0
-    assert not [call for call in calls(root) if call.startswith("vercel promote")]
+    assert not [call for call in calls(root) if call.startswith("promote")]
 
 
 def test_a_failed_promotion_alerts_and_does_not_ping_the_heartbeat(root):
@@ -277,7 +284,7 @@ def test_a_failed_promotion_alerts_and_does_not_ping_the_heartbeat(root):
     assert result.returncode != 0
     assert "Promoted to production" not in result.stdout
     assert uv_calls(root) == [
-        alert_call("deploy", "vercel promote failed, so production keeps the last good release.")
+        alert_call("deploy", "The promotion failed, so production keeps the last good release.")
     ]
 
 
@@ -285,7 +292,7 @@ def test_the_promote_switch_stops_at_the_preview(root):
     result = daily(root, OUSD_PROMOTE="0")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Promotion skipped: OUSD_PROMOTE=0" in result.stdout
-    assert not [call for call in calls(root) if call.startswith("vercel promote")]
+    assert not [call for call in calls(root) if call.startswith("promote")]
 
 
 def test_an_unclear_promote_switch_refuses_before_running(root):
