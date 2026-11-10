@@ -10,7 +10,7 @@
 #   make run          everything but the Vercel variables; its dbt build gets an allowlist
 #   make web-release  an allowlist, so no RPC variable reaches the site build
 #   vercel deploy     the same allowlist plus the three Vercel variables
-#   vercel promote    the same as vercel deploy
+#   scripts/promote.mjs  the same as vercel deploy
 #
 # OUSD_DEPLOY=0, or no VERCEL_TOKEN off Railway, builds and verifies the release without deploying.
 # On Railway a missing token fails the run. The deploy is a preview: a deployment that lands in
@@ -205,10 +205,10 @@ if [ "${OUSD_PROMOTE:-1}" = "0" ]; then
   finish
 fi
 
-say "Promote: vercel promote, as every check and the release gate passed."
-with_only "${SAFE_VARS[*]} ${VERCEL_VARS[*]} VERCEL_TELEMETRY_DISABLED NO_UPDATE_NOTIFIER" \
-  vercel promote "$url" --yes --non-interactive --timeout 5m ||
-  alert_and_fail deploy "vercel promote failed, so production keeps the last good release."
+say "Promote: the preview to production through the Vercel API, as every check and the release gate passed."
+# Not vercel promote: it needs a user, and the run's token belongs to the team.
+production="$(with_only "${SAFE_VARS[*]} ${VERCEL_VARS[*]}" node "$ROOT/scripts/promote.mjs" "$url")" ||
+  alert_and_fail deploy "The promotion failed, so production keeps the last good release."
 
-say "Promoted to production: $url"
+say "Promoted to production: $production"
 finish
